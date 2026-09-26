@@ -71,3 +71,15 @@ add or update the matching entry in `provenance/sources.json`) instead of
 deleting the row; keep the row so the history of the decision is visible.
 Add new rows here rather than in code comments when a future milestone
 surfaces a new unresolved question.
+
+## M3 implementation assumptions (this build)
+
+| ID | Question | Status | Required behavior | Owner milestone |
+|---|---|---|---|---|
+| A31 | Which mechanism each S2 letter names | decided | Letters follow SOL_PI_DELTA §2's table order: S2a ObservationPack, S2b Evidence-Preserving Reducer, S2c Online Context Compact, S2d Action Fusion (`onoda.adapters.pi.contract.VARIANTS`). | M3 |
+| A32 | How are Pi runs exercised without model credentials? | decided | A scripted provider registered through Pi's public `registerProvider`/`streamSimple` API serves pre-written turns to the real pinned Pi process. Runs in this mode are `pi-scripted`, labelled synthetic, and never described as model or chemistry results. | M3 |
+| A33 | Content of the advisory ladder and the allowed documentation | unresolved (instances of A2/A3) | Ladder variants (S1 onward) refuse to run without an operator-supplied ladder file, recorded by sha256. Tests use a synthetic ladder fixture that is labelled synthetic and makes no scientific claim. | M3 |
+| A34 | What may differ between a recorded Pi request and its replay? | decided | Only `timestamp` fields and absolute paths registered as aliases (workspace, runtime, bundle, spool). Anything else changing the normalized context is a `replay.mismatch` and the run fails closed. | M3 |
+| A35 | Live Pi runs (a real provider) | assumed: none authorized (A11) | Every live setting (provider, model, credential variable name, `max_requests`, `max_cost_usd`) must be set explicitly; there are no defaults and nothing is inferred from a present API key. `max_cost_usd` is checked against Pi's own cost estimate, which is an estimate. | M3 |
+| A36 | Fork and resume of Pi runs | decided for M3 | Not supported yet: Pi-run checkpoints declare `semantic_restart: unsupported`. They carry the observation-pack handle map, compaction events, and mechanism config so a later milestone can add restart without re-recording. | M3 |
+| A37 | When do Pi tool outputs enter the store? | decided | The Pi process writes an fsynced spool (objects before the lines that cite them) before any byte reaches the model; the store is written only by `ingest` after the process exits, keeping one writer per run (A22). A spool without `spool.end` ingests as an incomplete run. | M3 |

@@ -14,9 +14,6 @@ were produced elsewhere (cclib's public regression data) and are recorded as
 acquired, not executed here. No ORCA has been run by this harness, and no
 chemistry experiment has been reproduced.
 
-The handoff names the CLI `labrun`; in this repository the package and CLI are
-`onoda`.
-
 ## Quick start
 
 ```sh
