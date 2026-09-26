@@ -1,0 +1,42 @@
+case_id: orca6-dvb-tddft
+title: Divinylbenzene TD-DFT/TDA B3LYP/STO-3G, 5 singlets + 5 triplets
+program: ORCA
+program_version: 6.0.0
+method: TD-DFT/TDA B3LYP/STO-3G
+split: development
+input:
+  path: basicORCA6.0/dvb_td.inp
+  sha256: sha256:349f6681f7ae5868f370bacad360bce074e4f54149030b81fa2169fbdde01772
+outputs:
+  log:
+    path: basicORCA6.0/dvb_td.out
+    sha256: sha256:83f7efb587c941ea6a5ce2b9edc63eb1df5feeaf8ec4f527c70331a1fd95154a
+provenance:
+  origin: cclib regression test data (authentic ORCA output produced by the cclib
+    developers)
+  repository: https://github.com/cclib/cclib
+  commit: f90be37ffa1ab4cfec97495bdd01d670ca329f17
+  upstream_path: data/ORCA/basicORCA6.0/dvb_td.out
+  license: BSD-3-Clause
+  license_file: LICENSE
+  retrieved: '2026-09-26'
+  executed_here: false
+  notes: ''
+request:
+  roots_by_multiplicity:
+    1: 5
+    3: 5
+  expects_final_energy: true
+  source_lines:
+  - nroots 5
+  - triplets true
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Request fields transcribed from the input by the harness author; no human
+    has reviewed this case yet.
+labels:
+- authentic
+- acquired
+- not-executed-here
