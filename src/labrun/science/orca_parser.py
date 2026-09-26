@@ -107,10 +107,15 @@ class _Parsed:
 class _Reader:
     def __init__(self, data: bytes) -> None:
         self.source = sha256_digest(data)
-        text = data.decode("utf-8")
+        self.problems: list[Problem] = []
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # Undecodable bytes become U+FFFD, which no value pattern accepts.
+            text = data.decode("utf-8", errors="replace")
+            self.problem("source", "error", f"output is not valid UTF-8 ({exc.reason})")
         self.lines = [line.rstrip() for line in text.splitlines()]
         self.cut_line = len(self.lines) if text and not text.endswith("\n") else None
-        self.problems: list[Problem] = []
 
     def ev(self, n: int) -> Evidence:
         return Evidence(artifact=self.source, line=n, text=self.lines[n - 1])

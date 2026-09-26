@@ -201,6 +201,91 @@ def cmd_evaluate(a) -> Any:
     }
 
 
+def _case(case_id: str, cases_root: str | None):
+    from labrun.science.contract import CASES_ROOT, case_manifests, load_case
+
+    manifests = case_manifests(Path(cases_root) if cases_root else CASES_ROOT)
+    if case_id not in manifests:
+        raise LabrunError(f"unknown case {case_id!r}; see `labrun case list`")
+    return load_case(manifests[case_id])
+
+
+def cmd_case_list(a) -> Any:
+    from labrun.science.contract import CASES_ROOT, case_manifests, load_case
+
+    out = []
+    for path in case_manifests(Path(a.cases_root) if a.cases_root else CASES_ROOT).values():
+        m = load_case(path).manifest
+        out.append(
+            {
+                "case_id": m.case_id,
+                "program": f"{m.program} {m.program_version}",
+                "method": m.method,
+                "review": m.review.status,
+                "executed_here": m.provenance.executed_here,
+                "source": f"{m.provenance.repository}@{m.provenance.commit[:12]}",
+            }
+        )
+    return out
+
+
+def cmd_case_ingest(a) -> Any:
+    from labrun.science.runner import record_case_run
+
+    case = _case(a.case_id, a.cases_root)
+    scheduler = None
+    if a.execute:
+        from labrun.science.orca_local import OrcaLocalScheduler, OrcaSettings
+
+        scheduler = OrcaLocalScheduler(
+            OrcaSettings(
+                enabled=a.enable_live_execution,
+                binary=a.orca_binary,
+                work_root=a.work_root,
+                max_wall_seconds=a.max_wall_seconds,
+            )
+        )
+    cr = record_case_run(_store(a.store), case, a.run_id, scheduler=scheduler)
+    obs = _store(a.store).get_json(cr.observation)
+    return {
+        "run_id": cr.run_id,
+        "case_id": cr.case_id,
+        "mode": cr.mode,
+        "observation": cr.observation,
+        "termination": obs["termination"],
+        "scf": obs["scf"],
+        "excited_states_status": obs["excited_states_status"],
+        "states": len(obs["excited_states"]),
+        "problems": obs["problems"],
+    }
+
+
+def cmd_case_evaluate(a) -> Any:
+    from labrun.science.runner import evaluate_case_run
+
+    store = _store(a.store)
+    case_id = store.run_record(a.run_id).config.get("case_id")
+    if case_id is None:
+        raise LabrunError(f"run {a.run_id} is not a case run")
+    ev = evaluate_case_run(
+        store,
+        _store(a.evaluator_store, evaluator=True),
+        a.run_id,
+        _case(case_id, a.cases_root),
+        policy=a.policy,
+        reference=_case(a.reference_case, a.cases_root) if a.reference_case else None,
+    )
+    return {
+        "evaluation_id": ev.evaluation_id,
+        "evaluator": ev.evaluator,
+        "evaluator_version": ev.evaluator_version,
+        "reference_version": ev.reference_version,
+        "assignments": ev.assignments,
+        "unresolved": ev.unresolved,
+        "metrics": ev.metrics,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="labrun", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -279,6 +364,31 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--evaluator-store", required=True)
     ev.add_argument("--grader", default="fixture-grader@1")
     ev.set_defaults(func=cmd_evaluate)
+
+    cs = sub.add_parser("case", help="fixed-input ORCA smoke cases (M2)")
+    cs = cs.add_subparsers(dest="case_command", required=True)
+    cl = cs.add_parser("list", help="list pinned cases and their review status")
+    cl.add_argument("--cases-root")
+    cl.set_defaults(func=cmd_case_list)
+    ci = cs.add_parser("ingest", help="record a case run: acquire pinned outputs, or --execute")
+    ci.add_argument("case_id")
+    ci.add_argument("--run-id", required=True)
+    ci.add_argument("--store", required=True)
+    ci.add_argument("--cases-root")
+    ci.add_argument("--execute", action="store_true", help="run the input on a local ORCA")
+    ci.add_argument("--enable-live-execution", action="store_true")
+    ci.add_argument("--orca-binary")
+    ci.add_argument("--work-root")
+    ci.add_argument("--max-wall-seconds", type=int)
+    ci.set_defaults(func=cmd_case_ingest)
+    ce = cs.add_parser("evaluate", help="grade a case run in a separate evaluator store")
+    ce.add_argument("run_id")
+    ce.add_argument("--store", required=True)
+    ce.add_argument("--evaluator-store", required=True)
+    ce.add_argument("--policy", default="orca-reexecution@1")
+    ce.add_argument("--reference-case")
+    ce.add_argument("--cases-root")
+    ce.set_defaults(func=cmd_case_evaluate)
     return p
 
 

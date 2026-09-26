@@ -23,7 +23,7 @@ the resolved revision).
 | A4 | Operational meaning of "an attempt" (the paper's eight-attempt limit) | unresolved | Track jobs, configurations, retries, and actual resource use as separate portable-record fields rather than inferring the paper's accounting. | M1 |
 | A5 | Semantics of the "new expert convergence check" mentioned by the user | unresolved | Leave a named, unresolved adjudication extension point (BUILD_SPEC §4, Jev extension); do not invent its criteria. A textual decision provider is not a visual expert. | M4 |
 | A6 | Scientific state-matching / reproduction tolerances | unresolved | No nearest-energy-only matching and no arbitrary universal threshold; tolerances require explicit, evidenced decisions (BUILD_SPEC §5). | M2 |
-| A7 | Solver (ORCA) availability and redistribution rights | unresolved (operator/environment dependent) | Support user-provided installation only; verify permission before distributing any solver artifact. | M2 |
+| A7 | Solver (ORCA) availability and redistribution rights | unresolved for execution (no ORCA in this environment); outputs: see A25 | Support user-provided installation only; verify permission before distributing any solver artifact. `labrun.science.orca_local` runs only an operator-supplied binary and is disabled by default. | M2 |
 | A8 | Exact Prime / Jev / GEPA / Verifiers revisions | partially resolved | See `provenance/sources.json`: Prime (S3), GEPA (S8), and Verifiers (S9) are pinned to a commit; Jev (S6, S7) remains `unresolved` — hosted docs site, no version identifier, no repository. | M0 |
 | A9 | Provider-resolved model version (e.g. which underlying checkpoint served a request) | unresolved (may not be exposed by the provider) | Record whatever identifiers are observable in the response and state the resulting reproducibility limit; never infer an unexposed version. | M1 |
 | A10 | Native Prime/Pi session portability | assumed: not portable | Implement portable semantic checkpoints independent of any running kernel; label native persistence/session features separately as harness-local conveniences. | M1 |
@@ -51,6 +51,18 @@ the resolved revision).
 | A22 | Can more than one process append to a run's journal? | decided | One authoritative writer per run. The store's commit order (object → record → event) and hash-chained journal assume a single writer; concurrent writers are out of scope until an explicit locking design is added. | M1 |
 | A23 | Can a fork be taken from any point in a running trajectory? | decided | No. Forks require a quiescent, declared checkpoint boundary (`initialized`, `job-collected`, `diagnostics-committed`, `decision-committed-before-submission`, `finalized` — see `labrun.records.BOUNDARIES`); a fork mid-step is not supported. | M1 |
 | A24 | Does resuming a run replay the original process/kernel state? | decided | No native resume. Only semantic restart from a serialized checkpoint is supported; a persistent REPL, subagent, or daemon is never the canonical record (AGENTS.md rule 6). | M1 |
+
+
+## M2 implementation assumptions (this build)
+
+| ID | Question | Status | Required behavior | Owner milestone |
+|---|---|---|---|---|
+| A25 | Where do authentic ORCA outputs come from without an ORCA licence here? | assumed | Vendored from cclib's public regression data (`cases/orca/cclib/`, BSD-3-Clause, commit pinned in each `*.case.yaml`, bytes pinned by sha256). Redistribution permission is taken from cclib's public BSD-3 distribution; the ORCA EULA's position on redistributing outputs has not been checked. These runs are recorded as acquired (`executed_here: false`), never as executions. Replace or confirm before any public release. | M2 |
+| A26 | Who reviews the fixed-input cases? | unresolved | Every case is `pending-human-review`; each evaluation carries `case.review` so an unreviewed case cannot pass as reviewed. The declared request (roots per multiplicity) was transcribed from the inputs by the harness author. | M2 |
+| A27 | Units of `FINAL SINGLE POINT ENERGY` | assumed | ORCA prints no unit token on that line; the parser records `Eh` by ORCA's documented convention. State lines carry printed unit tokens (`au`, `eV`, `cm**-1`), which are validated, never converted. | M2 |
+| A28 | Multiplicity of EOM-CCSD / ADC(2) roots | decided | Not printed on `IROOT` lines, so it stays unknown (`None`) and state identification is `unresolved` for those cases. It is not inferred from `DoTriplet false` in the input. | M2 |
+| A29 | Which cclib validates the parser? | assumed | `cclib==1.9rc1`, dev-only, used by `tests/test_orca_parser.py` as an independent cross-check. The latest stable release (1.8.1) cannot read the ORCA 6 files. Not a runtime dependency. | M2 |
+| A30 | Reexecution tolerance between ORCA versions | unresolved (instance of A6) | `orca-reexecution@1` has no tolerance, so the ORCA 6.0 vs 5.0 comparison reports exact differences (e.g. 0.000006 au on the first singlet) and stays `unresolved`. A tolerance needs an assumptions-register row that justifies it. | M2 |
 
 ## Maintaining this register
 
