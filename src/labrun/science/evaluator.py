@@ -77,6 +77,8 @@ class ComparisonPolicy(BaseModel):
 
     @model_validator(mode="after")
     def _justified_tolerance(self) -> ComparisonPolicy:
+        if not self.quantities:
+            raise ValueError("a policy must compare at least one quantity")
         if self.tolerance is None:
             if self.tolerance_units is not None:
                 raise ValueError("tolerance_units given without a tolerance")
@@ -157,13 +159,17 @@ def publish_case_reference(
 Checked = tuple[str, dict[str, str]]  # (assignment, metrics)
 
 
-def _execution_status(obs: OrcaObservation) -> Checked:
+def _execution_status(obs: OrcaObservation, receipt_status: str | None) -> Checked:
+    if receipt_status is not None and receipt_status != "succeeded":
+        return "fail", {"execution_status.reason": f"execution receipt status {receipt_status}"}
     if obs.termination == "error" or obs.scf == "not_converged":
         return "fail", {"execution_status.reason": f"termination={obs.termination} scf={obs.scf}"}
     if obs.termination == "absent" or obs.scf == "absent":
         return "unresolved", {
             "execution_status.reason": f"termination={obs.termination} scf={obs.scf}"
         }
+    if obs.synthetic:
+        return "unresolved", {"execution_status.reason": "synthetic observation: not a solver run"}
     return "pass", {}
 
 
@@ -333,8 +339,14 @@ def evaluate_observation(
     case: CaseManifest,
     policy: str,
     reference: str | None,
+    receipt_status: str | None = None,
+    case_digest: str | None = None,
 ) -> Evaluation:
     """Evaluate one observation and record a new, distinct `Evaluation`.
+
+    `receipt_status` is the status of the invocation that produced the
+    observed output (a failed execution never passes `execution_status`);
+    `case_digest` is the manifest digest pinned to the run, recorded as-is.
 
     Reads the observation from `agent_store` (read only) and the reference
     from `evaluator_store`; writes only to `evaluator_store`. Re-evaluating
@@ -351,7 +363,7 @@ def evaluate_observation(
     obs = OrcaObservation.model_validate(agent_store.get_json(observation_digest))
 
     checks = {
-        "execution_status": _execution_status(obs),
+        "execution_status": _execution_status(obs, receipt_status),
         "parse_integrity": _parse_integrity(obs),
         "state_identification": _state_identification(obs, case),
     }
@@ -364,6 +376,10 @@ def evaluate_observation(
         "policy.kind": pol.kind,
         "policy.tolerance": pol.tolerance if pol.tolerance is not None else "unresolved",
     }
+    if receipt_status is not None:
+        metrics["execution.receipt_status"] = receipt_status
+    if case_digest is not None:
+        metrics["case.manifest"] = case_digest
     if pol.tolerance_source:
         metrics["policy.tolerance_source"] = pol.tolerance_source
     if pol.tolerance_units:

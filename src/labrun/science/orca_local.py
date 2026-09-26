@@ -28,7 +28,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -172,39 +174,48 @@ class OrcaLocalScheduler:
         err_path = job_dir / "job.err"
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
 
-        import time
-
         start = time.monotonic()
+        outcome: dict[str, Any]
         try:
             with open(out_path, "wb") as out_f, open(err_path, "wb") as err_f:
-                proc = subprocess.run(
+                # Own process group, so a timeout also stops ORCA's child
+                # programs (orca_scf, mpirun, ...) instead of only the driver.
+                proc = subprocess.Popen(
                     command,
                     cwd=job_dir,
                     stdout=out_f,
                     stderr=err_f,
-                    timeout=self._settings.max_wall_seconds,
                     env=env,
                     shell=False,
+                    start_new_session=True,
                 )
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            state = self._load()
-            state["jobs"][job_id]["duration_ms"] = elapsed_ms
-            state["jobs"][job_id]["returncode"] = proc.returncode
-            if proc.returncode == 0:
-                state["jobs"][job_id]["status"] = "completed"
-            else:
-                state["jobs"][job_id]["status"] = "failed"
-                state["jobs"][job_id]["reason"] = "nonzero_exit"
+                try:
+                    returncode = proc.wait(timeout=self._settings.max_wall_seconds)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
+                    outcome = {"status": "failed", "reason": "timeout", "executed": True}
+                else:
+                    outcome = {
+                        "status": "completed" if returncode == 0 else "failed",
+                        "reason": None if returncode == 0 else "nonzero_exit",
+                        "returncode": returncode,
+                        "executed": True,
+                    }
+        except OSError as exc:
+            # The binary could not be launched; nothing ran, and the key must
+            # not stay `submitted` forever.
+            outcome = {"status": "failed", "reason": f"launch_error: {exc}", "executed": False}
+
+        state = self._load()
+        job = state["jobs"][job_id]
+        job["duration_ms"] = int((time.monotonic() - start) * 1000)
+        job["status"] = outcome["status"]
+        job["reason"] = outcome["reason"]
+        job["returncode"] = outcome.get("returncode")
+        if outcome["executed"]:
             state["executions"] += 1
-            self._save(state)
-        except subprocess.TimeoutExpired:
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            state = self._load()
-            state["jobs"][job_id]["status"] = "failed"
-            state["jobs"][job_id]["reason"] = "timeout"
-            state["jobs"][job_id]["duration_ms"] = elapsed_ms
-            state["executions"] += 1
-            self._save(state)
+        self._save(state)
 
         return job_id
 

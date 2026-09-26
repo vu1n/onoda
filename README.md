@@ -149,8 +149,13 @@ and have not been run.
   redistribution rests on cclib's BSD-3 licence (A25).
 - EOM-CCSD and ADC(2) outputs print no multiplicity on their root lines, so
   state identification is `unresolved` for those cases (A28).
-- `inspect --capabilities` and `fork` treat case runs like fixture runs; a
-  case run has no decision step, so forking one has nothing to change yet.
+- Case runs support inspect, export/import, and offline replay. Fixture-only
+  commands (`resume`, `fork`, `reanalyze`, `compare`, `evaluate`) refuse them,
+  and `inspect --capabilities` reports those as unsupported by the record. An
+  interrupted case run is continued by rerunning `labrun case ingest` with the
+  same run id.
+- A live run's timeout kills the ORCA process group, but ORCA itself has only
+  been simulated by a stand-in executable here.
 
 ## Next: M3
 

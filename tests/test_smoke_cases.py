@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from labrun.clock import LogicalClock
-from labrun.errors import CapabilityError, IntegrityError
+from labrun.errors import CapabilityError, IntegrityError, LabrunError
 from labrun.science.contract import case_manifests, load_case
 from labrun.science.orca_local import OrcaLocalScheduler, OrcaSettings
 from labrun.science.orca_parser import parse_orca_output
@@ -55,7 +55,7 @@ def test_every_pinned_case_records_parses_and_evaluates(tmp_path, case_id):
     assert acquire.usage.cost_usd is None  # unknown, never zero
     assert agent.descriptor(cr.log).license == "BSD-3-Clause"
 
-    ev = evaluate_case_run(agent, evaluator, "run", c, policy="orca-reexecution@1")
+    ev = evaluate_case_run(agent, evaluator, "run", policy="orca-reexecution@1")
     assert ev.assignments["execution_status"] == "pass"
     assert ev.assignments["parse_integrity"] == "pass"
     assert ev.metrics["case.review"] == "pending-human-review"
@@ -68,7 +68,6 @@ def test_cross_version_discrepancy_is_reported_and_left_unresolved(tmp_path):
         agent,
         evaluator,
         "td6",
-        case("orca6-dvb-tddft"),
         policy="orca-reexecution@1",
         reference=case("orca5-dvb-tddft"),
     )
@@ -90,7 +89,6 @@ def test_reference_stays_out_of_the_agent_store(tmp_path):
         agent,
         evaluator,
         "td6",
-        case("orca6-dvb-tddft"),
         policy="orca-reexecution@1",
         reference=case("orca5-dvb-tddft"),
     )
@@ -106,7 +104,7 @@ def test_eom_states_without_printed_multiplicity_stay_unresolved(tmp_path):
     record_case_run(agent, c, "eom")
     _, obs = final_observation(agent, "eom")
     assert [s.multiplicity for s in obs.excited_states] == [None, None]
-    ev = evaluate_case_run(agent, evaluator, "eom", c, policy="orca-reexecution@1")
+    ev = evaluate_case_run(agent, evaluator, "eom", policy="orca-reexecution@1")
     assert ev.assignments["state_identification"] == "unresolved"
 
 
@@ -172,7 +170,7 @@ def test_stand_in_execution_is_recorded_as_synthetic_and_never_passes(tmp_path):
     assert obs.final_energy is None
     assert {p.field for p in obs.problems} >= {"termination", "final_energy"}
 
-    ev = evaluate_case_run(agent, evaluator, "live", c, policy="orca-reexecution@1")
+    ev = evaluate_case_run(agent, evaluator, "live", policy="orca-reexecution@1")
     assert "pass" not in (ev.assignments["execution_status"], ev.assignments["parse_integrity"])
     assert ev.metrics["observation.synthetic"] == "true"
 
@@ -181,3 +179,143 @@ def test_undecodable_output_is_an_explicit_problem():
     data = case("orca6-water-mp2").output_bytes["log"] + b"\xff\xfe broken\n"
     obs = parse_orca_output(data, synthetic=True)
     assert any(p.field == "source" and p.state == "error" for p in obs.problems)
+
+
+def test_fixture_resume_refuses_a_case_run(tmp_path):
+    from labrun.controller import Controller
+    from labrun.fixture import PROGRAMS
+    from labrun.jobs import MockScheduler
+
+    agent, _ = stores(tmp_path)
+    record_case_run(agent, case("orca6-water-mp2"), "run")
+    controller = Controller(agent, MockScheduler(tmp_path / "scheduler", PROGRAMS))
+    with pytest.raises(CapabilityError, match="semantic restart"):
+        controller.resume("run")
+
+
+class Crash(Exception):
+    pass
+
+
+def _crashing(root: Path, at: int) -> Store:
+    calls = {"n": 0}
+
+    def hook(point: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == at:
+            raise Crash(point)
+
+    return Store(root, clock=LogicalClock(), crash_hook=hook)
+
+
+def _hook_points(tmp_path: Path) -> int:
+    points: list[str] = []
+    store = Store(tmp_path / "count", clock=LogicalClock(), crash_hook=points.append)
+    record_case_run(store, case("orca6-water-mp2"), "run")
+    return len(points)
+
+
+def test_interrupted_case_run_continues_to_the_same_result(tmp_path):
+    clean = Store(tmp_path / "clean", clock=LogicalClock())
+    expected = record_case_run(clean, case("orca6-water-mp2"), "run").observation
+    for at in range(1, _hook_points(tmp_path) + 1):
+        root = tmp_path / f"crash-{at}"
+        with pytest.raises(Crash):
+            record_case_run(_crashing(root, at), case("orca6-water-mp2"), "run")
+        store = Store(root, clock=LogicalClock())
+        store.recover()
+        finalized = any(
+            e.payload.get("boundary") == "finalized" for e in store.events("run")
+        )  # the crash hit after the last event was appended
+        if not finalized:
+            record_case_run(store, case("orca6-water-mp2"), "run")
+        assert final_observation(store, "run")[0] == expected, at
+        boundaries = [e.payload["boundary"] for e in store.events("run") if e.type == "checkpoint"]
+        assert boundaries == [
+            "initialized",
+            "job-collected",
+            "diagnostics-committed",
+            "finalized",
+        ], at
+        with pytest.raises(LabrunError, match="finalized"):
+            record_case_run(store, case("orca6-water-mp2"), "run")
+
+
+def test_crash_after_live_submission_reconciles_instead_of_rerunning(tmp_path):
+    binary = _stand_in(tmp_path, 'print("STAND-IN EXECUTABLE - NOT ORCA")')
+    settings = OrcaSettings(
+        enabled=True,
+        binary=binary,
+        work_root=str(tmp_path / "jobs"),
+        max_wall_seconds=30,
+        stand_in=True,
+    )
+    root = tmp_path / "agent"
+
+    def hook(point: str, seen=[]) -> None:  # noqa: B006 - per-test counter
+        if point == "event.before-append":
+            seen.append(point)
+            if len(seen) == 4:  # run.created, initialized, job.intent, job.submitted
+                raise Crash(point)
+
+    with pytest.raises(Crash):
+        record_case_run(
+            Store(root, clock=LogicalClock(), crash_hook=hook),
+            case("orca6-water-mp2"),
+            "live",
+            scheduler=OrcaLocalScheduler(settings),
+        )
+    scheduler = OrcaLocalScheduler(settings)
+    assert scheduler.executions == 1
+    store = Store(root, clock=LogicalClock())
+    record_case_run(store, case("orca6-water-mp2"), "live", scheduler=scheduler)
+    assert scheduler.executions == 1
+    submitted = [e for e in store.events("live") if e.type == "job.submitted"]
+    assert [e.payload["reconciled"] for e in submitted] == [True]
+
+
+def test_shared_work_root_never_adopts_another_stores_job(tmp_path):
+    binary = _stand_in(tmp_path, 'print("STAND-IN EXECUTABLE - NOT ORCA")')
+    scheduler = OrcaLocalScheduler(
+        OrcaSettings(
+            enabled=True,
+            binary=binary,
+            work_root=str(tmp_path / "jobs"),
+            max_wall_seconds=30,
+            stand_in=True,
+        )
+    )
+    a = Store(tmp_path / "a", clock=LogicalClock())
+    b = Store(tmp_path / "b", clock=LogicalClock())
+    record_case_run(a, case("orca6-water-mp2"), "live", scheduler=scheduler)
+    record_case_run(b, case("orca6-dvb-tddft"), "live", scheduler=scheduler)
+    assert scheduler.executions == 2
+    assert a.receipt("live.i001").metadata["job_id"] != b.receipt("live.i001").metadata["job_id"]
+
+
+def test_evaluation_uses_the_manifest_pinned_at_ingest(tmp_path):
+    agent, evaluator = stores(tmp_path)
+    record_case_run(agent, case("orca6-dvb-tddft"), "td6")
+    task = agent.get_record("task", agent.run_record("td6").task)
+    ev = evaluate_case_run(agent, evaluator, "td6", policy="orca-reexecution@1")
+    assert ev.metrics["case.manifest"] == task.inputs["case"]
+    assert agent.get_json(task.inputs["case"])["case_id"] == "orca6-dvb-tddft"
+
+
+def test_fixture_commands_refuse_case_runs_and_inspect_says_why(tmp_path):
+    from labrun.cli import main
+    from labrun.portability import inspect_capabilities
+
+    agent, _ = stores(tmp_path)
+    record_case_run(agent, case("orca6-water-mp2"), "run")
+    store = str(agent.root)
+    for argv in (
+        ["compare", "run", "--store", store],
+        ["evaluate", "run", "--store", store, "--evaluator-store", str(tmp_path / "e")],
+        ["reanalyze", "run", "--store", store],
+        ["resume", "run", "--store", store],
+    ):
+        assert main(argv) == 2, argv
+    caps = inspect_capabilities(agent, "run")
+    for cap in ("resume", "fork", "reanalyze"):
+        assert caps[cap]["status"] == "unsupported-by-record", cap

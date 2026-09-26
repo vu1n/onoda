@@ -1,7 +1,8 @@
 """Record a fixed-input ORCA case as a run, parse it, and evaluate it.
 
 A case run has the same journal shape as a fixture run, so inspect, export,
-and the M1 evaluator plumbing apply unchanged:
+import, and offline replay apply unchanged; its checkpoints declare that
+fixture resume, fork, and reanalysis do not apply. Phases:
 
     run.created -> initialized
     -> acquire (authentic outputs produced elsewhere) | execute (local ORCA)
@@ -17,6 +18,10 @@ Evaluation reads the observation from the agent store and writes only to the
 evaluator store. A cross-case reference (e.g. the same input under another
 ORCA version) is parsed by the evaluator from the pinned case bytes and
 published with evaluator visibility, so it never enters the agent store.
+
+Every step is idempotent against the journal: rerunning `record_case_run`
+with the same run id continues an interrupted run, and a live job is
+reconciled with the scheduler by its idempotency key before any resubmission.
 """
 
 from __future__ import annotations
@@ -24,7 +29,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from labrun.errors import CapabilityError, LabrunError
+from labrun.canonical import canonical_bytes, sha256_digest
+from labrun.errors import CapabilityError, LabrunError, SubmissionUncertain
 from labrun.records import (
     Checkpoint,
     Evaluation,
@@ -34,7 +40,7 @@ from labrun.records import (
     TaskManifest,
     Usage,
 )
-from labrun.science.contract import LoadedCase, OrcaObservation
+from labrun.science.contract import CaseManifest, LoadedCase, OrcaObservation
 from labrun.science.evaluator import evaluate_observation, publish_case_reference
 from labrun.science.orca_local import OrcaLocalScheduler
 from labrun.science.orca_parser import PARSER_ID, parse_orca_output
@@ -42,11 +48,14 @@ from labrun.store import Store, check_safe_id, record_ref
 
 CASE_CAPABILITIES = {
     "inspect": "supported",
-    "semantic_restart": "unsupported",
+    "reanalyze": "unsupported: labrun reanalyze knows fixture parsers only",
+    "fork": "unsupported: a case run has no decision step to fork at",
+    "semantic_restart": "unsupported: rerun `labrun case ingest` with the same run id",
     "native_resume": "unsupported",
     "reexecute": "requires-operator-enabled-orca",
 }
 UNKNOWN_COST = Usage(units={}, measured=False, simulated=False, cost_usd=None)
+ACQUIRE, EXECUTE, PARSE = "acquire:orca-output", "execute:orca", f"parse:{PARSER_ID}"
 
 
 @dataclass(frozen=True)
@@ -60,18 +69,34 @@ class CaseRun:
 
 
 class _Journal:
-    """Commit-before-visible helpers for one case run."""
+    """Commit-before-visible helpers for one case run, idempotent per step.
+
+    Every step first looks for its own committed event, so rerunning
+    `record_case_run` after a crash continues the journal instead of
+    repeating work or writing a second copy of a checkpoint.
+    """
 
     def __init__(self, store: Store, run: Run):
         self.store = store
         self.run = run
-        self.n = 0
+
+    def events(self, type: str, **match: Any):
+        return [
+            e
+            for e in self.store.events(self.run.run_id)
+            if e.type == type and all(e.payload.get(k) == v for k, v in match.items())
+        ]
 
     def event(self, type: str, **kwargs: Any):
         return self.store.append_event(self.run.run_id, actor="case-runner", type=type, **kwargs)
 
+    def committed(self, step_key: str) -> InvocationReceipt | None:
+        found = self.events("invocation.committed", step_key=step_key)
+        return self.store.receipt(found[-1].payload["invocation_id"]) if found else None
+
     def invocation(
         self,
+        step_key: str,
         spec: StepSpec,
         kind: str,
         inputs: dict[str, str],
@@ -84,34 +109,44 @@ class _Journal:
         usage: Usage = UNKNOWN_COST,
     ) -> InvocationReceipt:
         spec_id = self.store.put_record(spec)
-        self.n += 1
-        now = self.store.clock.now()
-        receipt = InvocationReceipt.new(
-            invocation_id=f"{self.run.run_id}.i{self.n:03d}",
-            run_id=self.run.run_id,
-            spec_digest=spec_id,
-            invocation_kind=kind,
-            inputs=inputs,
-            outputs=outputs,
-            parents=parents or [],
-            status=status,
-            metadata=metadata or {},
-            usage=usage,
-            started_at=now,
-            finished_at=now,
-            labels=labels or [],
-        )
-        self.store.put_record(receipt)
+        n = len(self.events("invocation.committed")) + 1
+        inv_id = f"{self.run.run_id}.i{n:03d}"
+        if self.store.has_record("invocation", inv_id):
+            # Committed just before a crash, not yet journaled: journal it as is.
+            receipt = self.store.receipt(inv_id)
+            if receipt.spec_digest != spec_id:
+                raise LabrunError(f"orphan receipt {inv_id} belongs to another step")
+        else:
+            now = self.store.clock.now()
+            receipt = InvocationReceipt.new(
+                invocation_id=inv_id,
+                run_id=self.run.run_id,
+                spec_digest=spec_id,
+                invocation_kind=kind,
+                inputs=inputs,
+                outputs=outputs,
+                parents=parents or [],
+                status=status,
+                metadata=metadata or {},
+                usage=usage,
+                started_at=now,
+                finished_at=now,
+                labels=labels or [],
+            )
+            self.store.put_record(receipt)
         self.event(
             "invocation.committed",
-            payload={"invocation_id": receipt.invocation_id, "step_key": spec.operation},
-            payload_refs={"receipt": record_ref("invocation", receipt.invocation_id)},
+            payload={"invocation_id": inv_id, "step_key": step_key},
+            payload_refs={"receipt": record_ref("invocation", inv_id)},
         )
         return receipt
 
     def checkpoint(
         self, boundary: str, phase: str, visible: dict[str, str], frontier: list[str]
     ) -> str:
+        done = self.events("checkpoint", boundary=boundary)
+        if done:
+            return done[-1].payload_refs["checkpoint"].split("/", 1)[1]
         events = self.store.events(self.run.run_id)
         cp = Checkpoint.new(
             run_id=self.run.run_id,
@@ -134,11 +169,28 @@ class _Journal:
         return digest
 
 
+def _manifest_json(case: LoadedCase) -> dict[str, Any]:
+    return case.manifest.model_dump(mode="json")
+
+
 def _start(store: Store, case: LoadedCase, run_id: str, mode: str) -> tuple[_Journal, str]:
+    """Create the run, or reopen an unfinished one recorded from the same case."""
     check_safe_id(run_id, "run id")
-    if store.has_record("run", run_id):
-        raise LabrunError(f"run {run_id} already exists")
     m = case.manifest
+    if store.has_record("run", run_id):
+        run = store.run_record(run_id)
+        task = store.get_record("task", run.task)
+        if run.config.get("case_id") != m.case_id or run.config.get("mode") != mode:
+            raise LabrunError(f"run {run_id} already exists for a different case or mode")
+        if task.inputs.get("case") != sha256_digest(canonical_bytes(_manifest_json(case))):
+            raise LabrunError(f"run {run_id} was recorded from a different case manifest")
+        j = _Journal(store, run)
+        if j.events("checkpoint", boundary="finalized"):
+            raise LabrunError(f"run {run_id} already exists and is finalized")
+        if not j.events("run.created"):
+            _announce(j, task)  # records committed, event lost in the crash
+        return j, task.inputs["input"]
+
     inp = store.put_bytes(
         case.input_bytes,
         media_type="text/plain",
@@ -146,9 +198,12 @@ def _start(store: Store, case: LoadedCase, run_id: str, mode: str) -> tuple[_Jou
         license=m.provenance.license,
         labels=["task-input", "orca-input"],
     )
+    # The manifest is pinned to the run so evaluation grades against the
+    # request the run was recorded with, not whatever the case file says later.
+    manifest = store.put_json(_manifest_json(case), labels=["case-manifest"])
     task = TaskManifest.new(
-        task_id=f"case-{m.case_id}",
-        inputs={"input": inp.digest},
+        task_id=f"case-{m.case_id}-{manifest.digest[7:19]}",
+        inputs={"input": inp.digest, "case": manifest.digest},
         permitted_context=["task-input"],
         split=m.split,
         target={"kind": "orca-case", "case_id": m.case_id, "review": m.review.status},
@@ -172,20 +227,27 @@ def _start(store: Store, case: LoadedCase, run_id: str, mode: str) -> tuple[_Jou
     )
     store.put_record(run)
     j = _Journal(store, run)
-    j.event(
-        "run.created",
-        payload_refs={"run": record_ref("run", run_id), "task": record_ref("task", task.task_id)},
-    )
-    j.checkpoint("initialized", "collect", {"input": inp.digest}, [])
+    _announce(j, task)
     return j, inp.digest
 
 
-def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt, bytes]:
+def _announce(j: _Journal, task: TaskManifest) -> None:
+    j.event(
+        "run.created",
+        payload_refs={
+            "run": record_ref("run", j.run.run_id),
+            "task": record_ref("task", task.task_id),
+        },
+    )
+
+
+def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt, bool]:
+    if done := j.committed(ACQUIRE):
+        return done, False
     m = case.manifest
     prov = m.provenance.model_dump(mode="json")
-    log_bytes = case.output_bytes["log"]
     log = j.store.put_bytes(
-        log_bytes,
+        case.output_bytes["log"],
         media_type="text/plain",
         encoding="utf-8",
         source={"case_id": m.case_id, **prov},
@@ -193,13 +255,14 @@ def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt
         labels=["job-output", *m.labels],
     )
     spec = StepSpec.new(
-        operation="acquire:orca-output",
+        operation=ACQUIRE,
         inputs={"input": inp},
         config={"case_id": m.case_id, "program": m.program, "program_version": m.program_version},
         code_ref="labrun.science.runner:_acquire",
         determinism="external",
     )
     receipt = j.invocation(
+        ACQUIRE,
         spec,
         "read",
         {"input": inp},
@@ -207,45 +270,67 @@ def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt
         metadata={"provenance": prov, "executed_here": False},
         labels=list(m.labels),
     )
-    return receipt, log_bytes
+    return receipt, False
 
 
 def _execute(
     j: _Journal, case: LoadedCase, inp: str, scheduler: OrcaLocalScheduler
-) -> tuple[InvocationReceipt, bytes]:
-    m = case.manifest
-    key = f"{j.run.run_id}:execute"
+) -> tuple[InvocationReceipt, bool]:
+    """Submit once per run, reconciling with the scheduler after a crash."""
+    if done := j.committed(EXECUTE):
+        return done, bool(done.metadata.get("stand_in"))
+    # The run record's digest ties the key to this store's run, so another
+    # store reusing the run id on a shared work root never adopts this job.
+    key = f"{j.run.run_id}:{j.run.record_digest()[7:19]}:execute"
     spec = StepSpec.new(
-        operation="execute:orca",
+        operation=EXECUTE,
         inputs={"input": inp},
-        config={"case_id": m.case_id},
+        config={"case_id": case.manifest.case_id},
         code_ref="labrun.science.orca_local:OrcaLocalScheduler",
         determinism="external",
     )
-    intent = j.event("job.intent", payload={"step_key": spec.operation, "key": key})
-    job_id = scheduler.submit(key, "orca", {"input": case.input_bytes}, {})
-    j.event("job.submitted", payload={"key": key, "job_id": job_id}, causes=[intent.event_id])
+    submitted = j.events("job.submitted", key=key)
+    if submitted:
+        job_id = submitted[-1].payload["job_id"]
+    else:
+        intents = j.events("job.intent", key=key)
+        job_id = None
+        if intents:
+            try:
+                job_id = scheduler.lookup(key)
+            except SubmissionUncertain:
+                j.event("job.submission-uncertain", payload={"key": key})
+                raise
+            intent = intents[-1]
+        else:
+            intent = j.event("job.intent", payload={"step_key": EXECUTE, "key": key})
+        reconciled = job_id is not None
+        if job_id is None:
+            job_id = scheduler.submit(key, "orca", {"input": case.input_bytes}, {})
+        j.event(
+            "job.submitted",
+            payload={"key": key, "job_id": job_id, "reconciled": reconciled},
+            causes=[intent.event_id],
+        )
     meta = scheduler.job_metadata(job_id)
     status = "succeeded" if scheduler.status(job_id) == "completed" else "failed"
-    outputs = {}
-    log_bytes = b""
-    for name, data in sorted(scheduler.collect(job_id).items()):
-        outputs[name] = j.store.put_bytes(
-            data, media_type="text/plain", labels=["job-output", *meta.get("labels", [])]
+    outputs = {
+        name: j.store.put_bytes(
+            data, media_type="text/plain", labels=["job-output", *meta["labels"]]
         ).digest
-        if name == "log":
-            log_bytes = data
+        for name, data in sorted(scheduler.collect(job_id).items())
+    }
     receipt = j.invocation(
+        EXECUTE,
         spec,
         "execution",
         {"input": inp},
         outputs,
         status=status,
         metadata={"job_id": job_id, "idempotency_key": key, **meta},
-        labels=list(meta.get("labels", [])),
-        usage=UNKNOWN_COST,
+        labels=list(meta["labels"]),
     )
-    return receipt, log_bytes
+    return receipt, bool(meta["stand_in"])
 
 
 def record_case_run(
@@ -259,52 +344,60 @@ def record_case_run(
 
     Without a scheduler the pinned authentic outputs are acquired; with one,
     the pinned input is executed locally (the scheduler enforces opt-in).
+    Calling it again with the same run id continues an unfinished run.
     """
     mode = "case-live" if scheduler is not None else "case-acquired"
     j, inp = _start(store, case, run_id, mode)
+    j.checkpoint("initialized", "collect", {"input": inp}, [])
     if scheduler is None:
-        produced, log_bytes = _acquire(j, case, inp)
+        produced, synthetic = _acquire(j, case, inp)
     else:
-        produced, log_bytes = _execute(j, case, inp, scheduler)
+        produced, synthetic = _execute(j, case, inp, scheduler)
     log = produced.outputs.get("log")
     if log is None:
         raise CapabilityError(f"run {run_id}: execution produced no log to parse")
-    synthetic = "stand-in" in produced.labels
     j.checkpoint("job-collected", "parse", {"input": inp, "log": log}, [produced.invocation_id])
 
-    observation = parse_orca_output(log_bytes, synthetic=synthetic)
-    obs = store.put_json(
-        observation.to_json(),
-        labels=["observation", PARSER_ID, *(["synthetic"] if synthetic else [])],
-    )
-    parse = j.invocation(
-        StepSpec.new(
-            operation=f"parse:{PARSER_ID}",
-            inputs={"log": log},
-            code_ref="labrun.science.orca_parser:parse_orca_output",
-            determinism="pure",
-        ),
-        "derivation",
-        {"log": log},
-        {"observation": obs.digest},
-        parents=[produced.invocation_id],
-        usage=Usage(units={}, measured=False, simulated=False, cost_usd="0.00"),
-    )
-    visible = {"input": inp, "log": log, "observation": obs.digest}
+    parse = j.committed(PARSE)
+    if parse is None:
+        observation = parse_orca_output(store.get_bytes(log), synthetic=synthetic)
+        obs = store.put_json(
+            observation.to_json(),
+            labels=["observation", PARSER_ID, *(["synthetic"] if synthetic else [])],
+        )
+        parse = j.invocation(
+            PARSE,
+            StepSpec.new(
+                operation=PARSE,
+                inputs={"log": log},
+                code_ref="labrun.science.orca_parser:parse_orca_output",
+                determinism="pure",
+            ),
+            "derivation",
+            {"log": log},
+            {"observation": obs.digest},
+            parents=[produced.invocation_id],
+            usage=Usage(units={}, measured=False, simulated=False, cost_usd="0.00"),
+        )
+    observation_digest = parse.outputs["observation"]
+    visible = {"input": inp, "log": log, "observation": observation_digest}
     frontier = [produced.invocation_id, parse.invocation_id]
     j.checkpoint("diagnostics-committed", "finalize", visible, frontier)
-    cp = j.checkpoint("finalized", "done", {**visible, "final": obs.digest}, frontier)
-    return CaseRun(run_id, case.manifest.case_id, mode, log, obs.digest, cp)
+    cp = j.checkpoint("finalized", "done", {**visible, "final": observation_digest}, frontier)
+    return CaseRun(run_id, case.manifest.case_id, mode, log, observation_digest, cp)
+
+
+def _finalized(store: Store, run_id: str) -> Checkpoint:
+    for event in reversed(store.events(run_id)):
+        if event.type == "checkpoint" and event.payload.get("boundary") == "finalized":
+            return store.checkpoint(event.payload_refs["checkpoint"].split("/", 1)[1])
+    raise CapabilityError(f"run {run_id} has no finalized checkpoint")
 
 
 def final_observation(store: Store, run_id: str) -> tuple[str, OrcaObservation]:
     """The observation digest from the run's finalized checkpoint."""
-    for event in reversed(store.events(run_id)):
-        if event.type == "checkpoint" and event.payload.get("boundary") == "finalized":
-            cp = store.checkpoint(event.payload_refs["checkpoint"].split("/", 1)[1])
-            digest = cp.visible["final"]
-            return digest, OrcaObservation.model_validate(store.get_json(digest))
-    raise CapabilityError(f"run {run_id} has no finalized checkpoint")
+    digest = _finalized(store, run_id).visible["final"]
+    return digest, OrcaObservation.model_validate(store.get_json(digest))
 
 
 def publish_reference_case(evaluator_store: Store, reference: LoadedCase) -> str:
@@ -324,19 +417,24 @@ def evaluate_case_run(
     agent_store: Store,
     evaluator_store: Store,
     run_id: str,
-    case: LoadedCase,
     *,
     policy: str,
     reference: LoadedCase | None = None,
 ) -> Evaluation:
-    digest, _ = final_observation(agent_store, run_id)
+    """Grade a finalized case run against the manifest pinned when it was recorded."""
+    cp = _finalized(agent_store, run_id)
+    task = agent_store.get_record("task", agent_store.run_record(run_id).task)
+    manifest = CaseManifest.model_validate(agent_store.get_json(task.inputs["case"]))
+    produced = agent_store.receipt(cp.frontier[0])
     ref = publish_reference_case(evaluator_store, reference) if reference else None
     return evaluate_observation(
         agent_store,
         evaluator_store,
         run_id=run_id,
-        observation_digest=digest,
-        case=case.manifest,
+        observation_digest=cp.visible["final"],
+        case=manifest,
         policy=policy,
         reference=ref,
+        receipt_status=produced.status,
+        case_digest=task.inputs["case"],
     )

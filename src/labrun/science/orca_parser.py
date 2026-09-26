@@ -169,7 +169,7 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
     sections_seen = 0
     eom_type: str | None = None
     parsed: list[_Parsed] = []
-    unreadable: set[tuple] = set()  # (multiplicity, root) of state lines not read
+    unreadable: list[tuple[tuple, _Section]] = []  # ((multiplicity, root), section)
 
     for n, line in enumerate(r.lines, start=1):
         stripped = line.strip()
@@ -218,13 +218,13 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
         elif m := _IROOT.match(line):
             root = (section.multiplicity, int(m.group(1)))
             tokens = m.group(2).split()
-            if len(tokens) >= 2 and _NUMBER.fullmatch(tokens[1]):
+            if all(_NUMBER.fullmatch(t) for t in tokens):
                 continue  # property table row (e.g. state dipole moments), not a state
             state = None if r.cut("excited_states", n) else _read_iroot(r, section, m, tokens, n)
         else:
             continue
         if state is None:
-            unreadable.add(root)
+            unreadable.append((root, section))
         else:
             parsed.append(_Parsed(state, section, r.ev(n)))
 
@@ -323,23 +323,38 @@ def _read_iroot(
     )
 
 
+def _reported(sections: list[_Section]) -> list[bool]:
+    """Which listings count as excitation energies (see the module docstring)."""
+
+    def excitation(s: _Section) -> bool:
+        return s.eom_type not in _NOT_EXCITATIONS
+
+    steom = any(excitation(s) and s.method == "STEOM-CCSD" for s in sections)
+    return [excitation(s) and not (steom and s.method == "CIS") for s in sections]
+
+
 def _resolve_states(
-    r: _Reader, parsed: list[_Parsed], unreadable: set[tuple]
+    r: _Reader, parsed: list[_Parsed], unreadable: list[tuple[tuple, _Section]]
 ) -> tuple[list[ExcitedState], str, str | None]:
     """Pick the reported listing, dedupe identical repeats, flag conflicts.
 
-    A root with any unreadable state line is dropped even if a repeat parsed.
+    Unreadable lines in a discarded listing (IP/EA-EOM, the STEOM CIS guess)
+    do not matter. A reported root with any unreadable line is dropped even
+    if a repeat parsed.
     """
-    kept = [p for p in parsed if p.section.eom_type not in _NOT_EXCITATIONS]
-    if len(kept) < len(parsed) and not kept:
+    sections = [p.section for p in parsed] + [sec for _, sec in unreadable]
+    reported = _reported(sections)
+    unreadable = {
+        key for (key, _), ok in zip(unreadable, reported[len(parsed) :], strict=True) if ok
+    }
+    kept = [p for p, ok in zip(parsed, reported[: len(parsed)], strict=True) if ok]
+    if parsed and all(p.section.eom_type in _NOT_EXCITATIONS for p in parsed):
         r.problem(
             "excited_states",
             "unresolved",
             "only IP/EA-EOM roots printed; these are not excitation energies",
             parsed[0].section.evidence.line if parsed[0].section.evidence else None,
         )
-    if any(p.section.method == "STEOM-CCSD" for p in kept):
-        kept = [p for p in kept if p.section.method != "CIS"]  # CIS guess for STEOM
     methods = {p.section.method for p in kept}
     if len(methods) > 1:
         for method in sorted(methods, key=str):
