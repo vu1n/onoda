@@ -302,6 +302,117 @@ def cmd_case_evaluate(a) -> Any:
     }
 
 
+def cmd_pi_doctor(a) -> Any:
+    from onoda.adapters.pi.runtime import doctor
+
+    report = doctor()
+    if not report["ok"]:
+        raise OnodaError("pinned Pi runtime is not usable: " + "; ".join(report["problems"]))
+    return report
+
+
+def cmd_pi_variants(a) -> Any:
+    from onoda.adapters.pi.contract import VARIANTS
+
+    return [
+        {
+            "id": v.id,
+            "question": v.question,
+            "ladder": v.ladder,
+            "rlm": v.rlm,
+            "mechanisms": list(v.mechanisms),
+            "runnable_in_m3": not v.rlm,
+        }
+        for v in VARIANTS.values()
+    ]
+
+
+def cmd_pi_run(a) -> Any:
+    from onoda.adapters.pi.contract import Script
+    from onoda.adapters.pi.run import DEFAULT_INSTRUCTION, run_case
+    from onoda.adapters.pi.runtime import LiveSettings
+
+    if bool(a.script) == bool(a.live):
+        raise OnodaError("give exactly one of --script (offline) or --live")
+    script = Script.model_validate_json(Path(a.script).read_text()) if a.script else None
+    live = None
+    if a.live:
+        live = LiveSettings(
+            provider=a.provider,
+            model=a.model,
+            credential_env=a.credential_env,
+            max_requests=a.max_requests,
+            max_cost_usd=a.max_cost_usd,
+        )
+    pi = run_case(
+        _store(a.store),
+        _case(a.case_id, a.cases_root),
+        run_id=a.run_id,
+        variant_id=a.variant,
+        work_dir=Path(a.work_dir),
+        script=script,
+        live=live,
+        instruction=a.instruction or DEFAULT_INSTRUCTION,
+        docs={Path(d).name: Path(d).read_bytes() for d in a.doc},
+        ladder=Path(a.ladder).read_bytes() if a.ladder else None,
+        synthetic_ladder=a.synthetic_ladder,
+        # A live run's request cap is its own explicit setting (A35); never defaulted.
+        max_requests=a.max_requests if a.max_requests is not None else (0 if a.live else 16),
+        max_acquisitions=a.max_acquisitions,
+        timeout_s=a.timeout,
+    )
+    r = pi.ingest
+    return {
+        "run_id": r.run_id,
+        "status": r.status,
+        "complete": r.complete,
+        "invocations": len(r.invocations),
+        "claim": r.claim,
+        "observation_pack": r.observation_pack,
+        "pi_exit_code": pi.exit_code,
+    }
+
+
+def cmd_pi_replay(a) -> Any:
+    from onoda.adapters.pi.run import replay_run_pi
+
+    store = _store(a.store)
+    case_id = store.run_record(a.run_id).config.get("case_id")
+    return replay_run_pi(
+        store,
+        a.run_id,
+        _case(case_id, a.cases_root),
+        work_dir=Path(a.work_dir),
+        timeout_s=a.timeout,
+    )
+
+
+def cmd_pi_evaluate(a) -> Any:
+    from onoda.adapters.pi.ingest import run_claim
+    from onoda.adapters.pi.task import evaluate_claims
+
+    store = _store(a.store)
+    run = store.run_record(a.run_id)
+    if run.config.get("mode") not in ("pi-scripted", "pi-live"):
+        raise OnodaError(f"run {a.run_id} is not a Pi run")
+    claims = [e for e in store.events(a.run_id) if e.type == "pi.claim"]
+    ev = evaluate_claims(
+        _store(a.evaluator_store, evaluator=True),
+        run_id=a.run_id,
+        case=_case(run.config["case_id"], a.cases_root),
+        claim=run_claim(store, a.run_id),
+        claim_ref=claims[-1].payload_refs["claim"] if claims else None,
+    )
+    return {
+        "evaluation_id": ev.evaluation_id,
+        "evaluator": ev.evaluator,
+        "reference_version": ev.reference_version,
+        "metrics": ev.metrics,
+        "unresolved": ev.unresolved,
+        "synthetic_run": "synthetic" in run.labels,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="onoda", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -408,6 +519,47 @@ def build_parser() -> argparse.ArgumentParser:
     ce.add_argument("--reference-case")
     ce.add_argument("--cases-root")
     ce.set_defaults(func=cmd_case_evaluate)
+
+    pi = sub.add_parser("pi", help="Pi agent runs, SoL-Pi variants S0-S3 (M3)")
+    pi = pi.add_subparsers(dest="pi_command", required=True)
+    pi.add_parser("doctor", help="check the pinned Pi/SoL-Pi install").set_defaults(
+        func=cmd_pi_doctor
+    )
+    pi.add_parser("variants", help="list experiment arms").set_defaults(func=cmd_pi_variants)
+    pr = pi.add_parser("run", help="run one variant on one case and ingest it")
+    pr.add_argument("case_id")
+    pr.add_argument("--variant", required=True)
+    pr.add_argument("--run-id", required=True)
+    pr.add_argument("--store", required=True)
+    pr.add_argument("--work-dir", required=True)
+    pr.add_argument("--script", help="scripted-provider script (offline; outputs synthetic)")
+    pr.add_argument("--live", action="store_true", help="real provider; every live flag needed")
+    pr.add_argument("--provider")
+    pr.add_argument("--model")
+    pr.add_argument("--credential-env", help="name of the env var holding the API key")
+    pr.add_argument("--max-cost-usd")
+    pr.add_argument("--max-requests", type=int)
+    pr.add_argument("--max-acquisitions", type=int, default=1)
+    pr.add_argument("--doc", action="append", default=[], help="allowed documentation (.md)")
+    pr.add_argument("--ladder", help="advisory ladder document (required from S1 on)")
+    pr.add_argument("--synthetic-ladder", action="store_true")
+    pr.add_argument("--instruction")
+    pr.add_argument("--timeout", type=float, default=300)
+    pr.add_argument("--cases-root")
+    pr.set_defaults(func=cmd_pi_run)
+    rp2 = pi.add_parser("replay", help="re-run a scripted run; fails closed on any drift")
+    rp2.add_argument("run_id")
+    rp2.add_argument("--store", required=True)
+    rp2.add_argument("--work-dir", required=True)
+    rp2.add_argument("--timeout", type=float, default=300)
+    rp2.add_argument("--cases-root")
+    rp2.set_defaults(func=cmd_pi_replay)
+    pe = pi.add_parser("evaluate", help="grade a Pi run's claim in a separate evaluator store")
+    pe.add_argument("run_id")
+    pe.add_argument("--store", required=True)
+    pe.add_argument("--evaluator-store", required=True)
+    pe.add_argument("--cases-root")
+    pe.set_defaults(func=cmd_pi_evaluate)
     return p
 
 

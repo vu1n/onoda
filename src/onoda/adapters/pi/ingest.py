@@ -452,7 +452,8 @@ class _Writer:
         self.done: dict[str, Event] = {k: e for e in existing if (k := _step_key(e))}
         self.n_invocations = sum(e.type == "invocation.committed" for e in existing)
         self.frontier: list[str] = []
-        self.visible = {f"task.{k}": v for k, v in sorted(task.inputs.items())}
+        # The case manifest is provenance for receipts, never part of the bundle.
+        self.visible = {f"task.{k}": v for k, v in sorted(task.inputs.items()) if k != "case"}
         self.obs: dict[str, str] = {}
         self.compactions: list[dict[str, Any]] = []
         self.jobs: list[dict[str, Any]] = []
