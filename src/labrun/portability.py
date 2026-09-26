@@ -909,13 +909,21 @@ def _check_inventory(files: dict[str, bytes], manifest: dict[str, Any]) -> None:
             raise IntegrityError(f"{path} does not match its inventory size and digest")
 
 
+def _ref_key(ref: str) -> tuple[str, str]:
+    kind, _, record_id = ref.partition("/")
+    return kind, record_id
+
+
 def _parse_journal(run_id: str, raw: bytes) -> list[Event]:
     if raw and not raw.endswith(b"\n"):
         raise IntegrityError(f"journal {run_id} has a torn final line")
     out: list[Event] = []
     for n, line in enumerate(raw.splitlines(), start=1):
         try:
-            event = load_record("event", json.loads(line))
+            data = json.loads(line)
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+            event = load_record("event", data)
         except ValueError as exc:
             raise IntegrityError(f"journal {run_id} line {n} is invalid") from exc
         assert isinstance(event, Event)
@@ -1024,6 +1032,19 @@ def import_bundle(
         raise ImportRejected(
             f"bundle closure incomplete, not present and not declared omitted: {detail}"
         )
+    # Every journal written must be one the closure vouched for, and every event in
+    # it must reference committed data: import cannot bypass commit-before-visible.
+    for run_id, events in journals.items():
+        if run_id not in manifest["roots"] and run_id not in closure.cuts:
+            raise ImportRejected(f"journal {run_id} is outside the bundle's declared closure")
+        cut = closure.cuts.get(run_id)
+        if run_id not in manifest["roots"] and cut is not None and len(events) > cut:
+            raise ImportRejected(f"ancestor journal {run_id} extends past its cut {cut}")
+        for e in events:
+            for ref in e.payload_refs.values():
+                present = ref in objects or _ref_key(ref) in records or store.ref_exists(ref)
+                if not present and ref not in omissions:
+                    raise ImportRejected(f"journal {run_id} event {e.seq} references missing {ref}")
     for (kind, _), rec in sorted(records.items()):
         if isinstance(rec, ArtifactDescriptor) and rec.visibility not in store.allowed_visibility:
             raise VisibilityError(f"this store does not accept {rec.visibility!r} artifact")
