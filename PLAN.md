@@ -168,3 +168,21 @@ flowchart TD
     M2_003 --> M2_005
     M2_004 --> M2_005
 ```
+
+## Deviations
+
+- **M2-005 footprint widened after review.** The correctness review found
+  that M1 commands crashed on or mislabelled case runs. Fixes touched
+  `src/labrun/controller.py::Controller.resume` (refuses checkpoints that do
+  not declare semantic restart) and `src/labrun/portability.py::_capabilities`
+  (honours checkpoint-declared `semantic_restart`/`fork`/`reanalyze`), both
+  outside the planned footprint. No lane was live, so nothing collided.
+- **Lane files edited during integration.** `orca_parser.py` (undecodable
+  bytes, unit-slot garbage, discarded-listing corruption), `orca_local.py`
+  (launch errors, process-group timeout) and `evaluator.py` (receipt status,
+  pinned manifest digest, empty policy) were changed by M2-005 after their
+  lanes landed, each with tests.
+- **Deferred structural findings** (for a later pass): share
+  commit-before-visible primitives between `Controller` and the case runner;
+  a public `Store.final_checkpoint`; a public evaluation-id helper instead of
+  importing `labrun.evaluation._next_evaluation_id`.
