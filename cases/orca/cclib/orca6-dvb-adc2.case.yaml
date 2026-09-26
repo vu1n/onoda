@@ -1,0 +1,41 @@
+case_id: orca6-dvb-adc2
+title: Divinylbenzene ADC(2)/STO-3G, 2 singlet roots
+program: ORCA
+program_version: 6.0.1
+method: ADC(2)/STO-3G
+split: development
+input:
+  path: basicORCA6.0/dvb_adc2.inp
+  sha256: sha256:d3ce3af223c86488275be1855c200fa8ccab889a38f07d7bdcdb87cd5ce087aa
+outputs:
+  log:
+    path: basicORCA6.0/dvb_adc2.log
+    sha256: sha256:03c839563d7b6debbdfa83b3a767abe3bc8b1bde5c7a5b3b4fd19cadd247669a
+provenance:
+  origin: cclib regression test data (authentic ORCA output produced by the cclib
+    developers)
+  repository: https://github.com/cclib/cclib
+  commit: f90be37ffa1ab4cfec97495bdd01d670ca329f17
+  upstream_path: data/ORCA/basicORCA6.0/dvb_adc2.log
+  license: BSD-3-Clause
+  license_file: LICENSE
+  retrieved: '2026-09-26'
+  executed_here: false
+  notes: ''
+request:
+  roots_by_multiplicity:
+    1: 2
+  expects_final_energy: true
+  source_lines:
+  - NRoots 2
+  - DoTriplet false
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Request fields transcribed from the input by the harness author; no human
+    has reviewed this case yet.
+labels:
+- authentic
+- acquired
+- not-executed-here

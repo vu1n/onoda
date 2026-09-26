@@ -1,270 +1,188 @@
-# Plan: M0 + M1 — portable offline slice of the scientific-agent harness
+# Plan: M2 — scientific smoke tests (ORCA)
 
-Implements the handoff in `docs/handoff/` (v0.2; `SOL_PI_DELTA.md` overrides
-conflicting text, so the first agent adapter is Pi, not Prime). The critical
-path is contract → controller/fixture → fork → CLI + end-to-end demo. The
-shared contract (`labrun.canonical`, `labrun.records`, `labrun.store`) is
-HX-001 and already landed; everything else builds on its public surface.
+BUILD_SPEC §6 M2: local solver adapter, parsers, fixed-input reviewed cases,
+external evaluator skeleton; gate "real artifacts validate; discrepancies and
+unresolved checks are visible". ORCA is licensed and not installed here
+(assumptions register A7), so authentic outputs come from cclib's public
+regression data (BSD-3-Clause, pinned by commit and sha256) and live execution
+is built but fails closed until an operator configures a user-provided binary.
+
+The M0+M1 plan is kept at `docs/plans/M0-M1-PLAN.md`.
+
+Critical path: contract → parser → integration (runner, CLI, demo, docs).
+The solver adapter and evaluator run beside the parser.
 
 Test commands for every lane: `uv run pytest`, `uv run ruff check .`,
 `uv run ruff format --check .`.
 
-## HX-001 — Core contract
+## M2-001 — Contract: observation schema and pinned cases
 
-RFC 8785 canonical hashing (floats rejected), versioned frozen records with a
-migration registry, a content-addressed store with commit-before-visible
-ordering, hash-chained per-run journals, crash recovery, disposable index.
+The parsed-observation schema (`OrcaObservation`, `Quantity`, `Evidence`,
+`Problem`) is the only thing parser and evaluator share. Case manifests pin
+authentic ORCA inputs/outputs by sha256 with provenance, license, and review
+status. Lands first, in the main working copy.
 
 ```yaml
-id: HX-001
+id: M2-001
 depth: deep
 depends_on: []
 footprint:
-  modifies:  # landed in commit 8b63d2e
-    - "pyproject.toml::*"
-    - "src/labrun/__init__.py::*"
-    - "src/labrun/canonical.py::*"
-    - "src/labrun/errors.py::*"
-    - "src/labrun/records.py::*"
-    - "src/labrun/clock.py::*"
-    - "src/labrun/store.py::*"
-    - "tests/test_core.py::*"
+  modifies:  # landed in the main working copy before any lane dispatched
+    - "src/labrun/science/__init__.py::*"
+    - "src/labrun/science/contract.py::*"
+    - "cases/orca/cclib/*"
+    - ".gitattributes::*"
+    - "PLAN.md::*"
 produces:
-  - "src/labrun/canonical.py::canonical_bytes"
-  - "src/labrun/canonical.py::digest_of"
-  - "src/labrun/canonical.py::sha256_digest"
-  - "src/labrun/errors.py::LabrunError"
-  - "src/labrun/records.py::Record"
-  - "src/labrun/records.py::Checkpoint"
-  - "src/labrun/records.py::InvocationReceipt"
-  - "src/labrun/records.py::Run"
-  - "src/labrun/store.py::Store"
-  - "src/labrun/store.py::record_ref"
-  - "src/labrun/clock.py::LogicalClock"
-gate: "uv run pytest tests/test_core.py passes; ruff clean"
+  - "src/labrun/science/contract.py::OrcaObservation"
+  - "src/labrun/science/contract.py::ExcitedState"
+  - "src/labrun/science/contract.py::Quantity"
+  - "src/labrun/science/contract.py::Evidence"
+  - "src/labrun/science/contract.py::Problem"
+  - "src/labrun/science/contract.py::CaseManifest"
+  - "src/labrun/science/contract.py::load_case"
+  - "src/labrun/science/contract.py::case_manifests"
+gate: "uv run python -c 'from labrun.science.contract import case_manifests, load_case; [load_case(p) for p in case_manifests().values()]' exits 0"
 ```
 
-## HX-002 — Jobs gateway, budgets ledger, controller and synthetic fixture
+## M2-002 — Deterministic ORCA output parser
 
-The executable heart: a mock job gateway with durable submission intents and
-reconciliation (T10), a budget ledger with experiment-level quotas,
-reservations and three cost views (T11), a decision-provider interface with
-mock and recorded implementations that fails closed on request change (T04,
-T06), and a phase-driven controller that runs the synthetic fixture workflow
-through all five checkpoint boundaries and resumes from the journal (T14).
-Run by the orchestrator in the main working copy because every later lane
-consumes its surface.
+`parse_orca_output(data, *, synthetic=False) -> OrcaObservation` for ORCA 5.x
+and 6.x text output: program version, termination, SCF convergence and cycle
+count, final single-point energy, excited states (TD-DFT/TDA state lines;
+EOM/ADC `IROOT` lines), warnings. Every value is the printed decimal text
+with units and line evidence. Partial, malformed, wrong-unit, and ambiguous
+input yields explicit `Problem`s, never a default (T18). Values are
+cross-checked against cclib's independent parse of the same authentic files.
 
 ```yaml
-id: HX-002
+id: M2-002
 depth: deep
-executor: orchestrator
-depends_on: ["HX-001"]
+executor: claude-opus
+depends_on: ["M2-001"]
 footprint:
   creates:
-    - "src/labrun/jobs.py"
-    - "src/labrun/budgets.py"
-    - "src/labrun/decisions.py"
-    - "src/labrun/fixture.py"
-    - "src/labrun/controller.py"
-    - "tests/conftest.py"
-    - "tests/test_jobs.py"
-    - "tests/test_budgets.py"
-    - "tests/test_decisions.py"
-    - "tests/test_controller.py"
-produces:
-  - "src/labrun/controller.py::Controller"
-  - "src/labrun/controller.py::RunState"
-  - "src/labrun/fixture.py::PARSERS"
-  - "src/labrun/fixture.py::POLICIES"
-  - "src/labrun/budgets.py::cost_views"
-  - "src/labrun/decisions.py::RecordedDecisionProvider"
-  - "tests/conftest.py::fixture_run"
-gate: "uv run pytest tests/test_jobs.py tests/test_budgets.py tests/test_decisions.py tests/test_controller.py passes (T04, T06, T10, T11 ledger, T14)"
-assumptions:
-  - "fork creation lives in HX-006; the controller only needs to resume a run whose first checkpoint was written by someone else"
-```
-
-## HX-003 — Export, import, profiles, capabilities
-
-Bundle export (directory or deterministic tar.gz) with inventory manifest,
-schemas, environment and provenance sections, ancestor closure, and
-visibility profiles (agent-visible never contains evaluator data or
-credentials). Import validates checksums, schema versions, closure, path
-safety, link escapes, sizes and expansion, and never executes anything.
-`inspect_capabilities` reports supported / blocked-by-missing-input /
-blocked-by-environment / unavailable-provider-state. Thin bundles and
-redaction produce explicit omissions. Tests build synthetic runs by hand
-through `Store`, so this lane does not wait for the controller.
-
-```yaml
-id: HX-003
-depth: deep
-depends_on: ["HX-001"]
-footprint:
-  creates:
-    - "src/labrun/portability.py"
-    - "tests/test_portability.py"
-produces:
-  - "src/labrun/portability.py::export_bundle"
-  - "src/labrun/portability.py::import_bundle"
-  - "src/labrun/portability.py::inspect_capabilities"
-gate: "uv run pytest tests/test_portability.py passes (T08, T12, T13 export side, T09 path independence)"
-```
-
-## HX-004 — SoL-Pi context mechanisms as recorded fixtures
-
-ObservationPack handles backed by store digests (resolve after export/import),
-paged recall as a recorded read, compaction events with trigger inputs,
-evidence-preserving reducer receipts with deterministic verification and
-recorded fallback, and Action Fusion decomposition that refuses to fuse
-submit/cancel/budget-affecting operations. Offline, no Pi install.
-
-```yaml
-id: HX-004
-depth: routine
-depends_on: ["HX-001"]
-footprint:
-  creates:
-    - "src/labrun/context.py"
-    - "tests/test_context.py"
-produces:
-  - "src/labrun/context.py::ObservationPack"
-gate: "uv run pytest tests/test_context.py passes (SOL_PI_DELTA M1 fixture tests)"
-```
-
-## HX-005 — M0 contracts: source pins, assumptions register, adapter seam
-
-Pin upstream sources (Pi 0.85.1 npm integrity, SoL-Pi commit, RFC 8785
-library, paper ids) in a machine-readable file; write the assumptions
-register (handoff + SoL-Pi additions); sketch the smallest Pi adapter seam
-as a typed Protocol plus a doc, without installing Pi.
-
-```yaml
-id: HX-005
-depth: routine
-depends_on: ["HX-001"]
-footprint:
-  creates:
-    - "provenance/sources.json"
-    - "docs/ASSUMPTIONS.md"
-    - "docs/ADAPTER_SEAM.md"
-    - "src/labrun/adapters/__init__.py"
-    - "src/labrun/adapters/agents.py"
-    - "tests/test_sources.py"
-produces:
-  - "src/labrun/adapters/agents.py::AgentAdapter"
-gate: "uv run pytest tests/test_sources.py passes (sources.json parses, every pin has a revision or an explicit unresolved marker)"
-```
-
-HX-005 depends on HX-001 only for the package layout (ordering-only edge); HX-009
-consumes its `AgentAdapter` seam when documenting the capability matrix.
-
-## HX-006 — Fork, invalidation, visibility cut, provenance-filtered memory
-
-Fork from a quiescent checkpoint with a validated declaration; compute the
-invalidated set (changed node + descendants) for policy, parser, input and
-wavefunction-like interventions; child view that refuses artifacts, records
-and memory lessons outside its ancestry cut, including disguised summaries
-derived from future evidence. Resumes via the HX-002 controller.
-
-```yaml
-id: HX-006
-depth: deep
-depends_on: ["HX-002"]
-footprint:
-  creates:
-    - "src/labrun/forks.py"
-    - "src/labrun/memory.py"
-    - "tests/test_forks.py"
-produces:
-  - "src/labrun/forks.py::fork_run"
-gate: "uv run pytest tests/test_forks.py passes (T03, T05, T07, T11 branch views)"
-```
-
-## HX-007 — Offline replay and deterministic reanalysis
-
-Replay reconstructs events and checkpoint state with no network or provider
-access and returns the normalized final state; reanalysis reruns a named pure
-transform on recorded bytes, writes a new derivation receipt linked to the
-original, and compares digests.
-
-```yaml
-id: HX-007
-depth: routine
-depends_on: ["HX-002"]
-footprint:
-  creates:
-    - "src/labrun/replay.py"
-    - "tests/test_replay.py"
-produces:
-  - "src/labrun/replay.py::replay_run"
-  - "src/labrun/replay.py::reanalyze"
-gate: "uv run pytest tests/test_replay.py passes (T02, replay half of T01)"
-```
-
-## HX-008 — Protected evaluation derivations
-
-Fixture graders run over immutable outputs with references held only in an
-evaluator store; each evaluation is a new record; comparison refuses mixed
-evaluator versions.
-
-```yaml
-id: HX-008
-depth: routine
-depends_on: ["HX-002"]
-footprint:
-  creates:
-    - "src/labrun/evaluation.py"
-    - "tests/test_evaluation.py"
-produces:
-  - "src/labrun/evaluation.py::evaluate_run"
-gate: "uv run pytest tests/test_evaluation.py passes (T16, T13 evaluator side)"
-```
-
-## HX-009 — CLI, clean-workspace demo, docs
-
-`labrun` CLI matching PORTABLE_RUN_SPEC §14, the end-to-end sequence in a
-fresh temp directory with network disabled (T01, T09), README with capability
-matrix and limitations, repo agent instructions.
-
-```yaml
-id: HX-009
-depth: routine
-executor: orchestrator
-depends_on: ["HX-003", "HX-004", "HX-005", "HX-006", "HX-007", "HX-008"]
-footprint:
-  creates:
-    - "src/labrun/cli.py"
-    - "tests/test_end_to_end.py"
-    - "scripts/demo.sh"
-    - "CLAUDE.md"
+    - "src/labrun/science/orca_parser.py"
+    - "tests/test_orca_parser.py"
   modifies:
+    - "pyproject.toml::*"
+    - "uv.lock::*"
+produces:
+  - "src/labrun/science/orca_parser.py::parse_orca_output"
+  - "src/labrun/science/orca_parser.py::PARSER_ID"
+gate: "uv run pytest tests/test_orca_parser.py passes, covering every vendored case plus truncated/missing-diagnostic/malformed-number/wrong-unit/ambiguous mutations"
+assumptions:
+  - "cclib is acceptable as a dev-only dependency for the cross-check; it must not become a runtime dependency"
+  - "STEOM output may interleave CIS and STEOM root listings; if the parser can tell them apart by section it reports them, otherwise it reports ambiguous"
+```
+
+## M2-003 — Local ORCA solver adapter (fails closed)
+
+A scheduler with the same surface as `labrun.jobs.MockScheduler`
+(`submit/lookup/status/collect/cancel/executions`) that runs a
+user-provided ORCA binary in a job directory outside the store. Disabled by
+default; unresolved settings (binary path, wall-time limit, working root)
+raise before anything runs. Submission intent is persisted before launch so
+a repeated key never runs twice. Records the binary's sha256 and the exact
+command. Tests use a clearly labelled stand-in executable, never presented
+as ORCA.
+
+```yaml
+id: M2-003
+depth: routine
+executor: claude-sonnet
+depends_on: ["M2-001"]
+footprint:
+  creates:
+    - "src/labrun/science/orca_local.py"
+    - "tests/test_orca_local.py"
+produces:
+  - "src/labrun/science/orca_local.py::OrcaSettings"
+  - "src/labrun/science/orca_local.py::OrcaLocalScheduler"
+gate: "uv run pytest tests/test_orca_local.py passes: disabled-by-default refusal, unresolved-setting refusal, idempotent resubmission, timeout -> failed status, stand-in outputs collected and labelled"
+```
+
+Ordering-only on M2-001: it needs the `labrun.science` package to exist.
+
+## M2-004 — External evaluator skeleton
+
+A protected derivation over `OrcaObservation`s: execution status, parse
+integrity, state identification against the case's declared request, and
+reference comparison under a declared policy. A policy with no justified
+tolerance (assumptions A6) reports the numerical differences and marks the
+check `unresolved`. Pairing states is by declared identity (multiplicity +
+root order within multiplicity, symmetry must agree when both sides state
+it), never by nearest energy. Writes new `Evaluation` records only to an
+evaluator-visibility store.
+
+```yaml
+id: M2-004
+depth: deep
+executor: claude-opus
+depends_on: ["M2-001"]
+footprint:
+  creates:
+    - "src/labrun/science/evaluator.py"
+    - "tests/test_science_evaluator.py"
+produces:
+  - "src/labrun/science/evaluator.py::ComparisonPolicy"
+  - "src/labrun/science/evaluator.py::POLICIES"
+  - "src/labrun/science/evaluator.py::publish_case_reference"
+  - "src/labrun/science/evaluator.py::evaluate_observation"
+gate: "uv run pytest tests/test_science_evaluator.py passes: unresolved-tolerance reports differences, missing evidence is unresolved not pass, symmetry disagreement is flagged, reference never written to an agent store, re-evaluation creates a new record"
+```
+
+## M2-005 — Integration: case runs, CLI, demo, docs
+
+Record a fixed-input case as a run in the agent store (acquired authentic
+outputs, or a live execution through M2-003 when enabled), parse it through
+M2-002 as a derivation, and evaluate through M2-004 in a separate evaluator
+store. `labrun case list|ingest|evaluate`, a demo section, the assumptions
+rows this milestone adds, and the README capability matrix.
+
+```yaml
+id: M2-005
+depth: deep
+depends_on: ["M2-002", "M2-003", "M2-004"]
+footprint:
+  creates:
+    - "src/labrun/science/runner.py"
+    - "tests/test_smoke_cases.py"
+  modifies:
+    - "src/labrun/cli.py::*"
+    - "scripts/demo.sh::*"
+    - "docs/ASSUMPTIONS.md::*"
     - "README.md::*"
-gate: "uv run pytest passes in full; scripts/demo.sh exits 0 in a fresh temp dir with network blocked"
+    - "CLAUDE.md::*"
+gate: "full uv run pytest + ruff check + ruff format --check pass, and scripts/demo.sh prints the ORCA 6 vs 5 TD-DFT discrepancy as unresolved"
 ```
 
 ## Graph
 
 ```mermaid
 flowchart TD
-    HX_001["HX-001 core contract<br/>deep"] ==> HX_002["HX-002 controller + fixture<br/>deep · orchestrator"]
-    HX_001 --> HX_003["HX-003 export/import<br/>deep"]
-    HX_001 --> HX_004["HX-004 SoL-Pi context<br/>routine"]
-    HX_001 --> HX_005["HX-005 M0 pins + seam<br/>routine"]
-    HX_002 ==> HX_006["HX-006 fork + memory<br/>deep"]
-    HX_002 --> HX_007["HX-007 replay/reanalyze<br/>routine"]
-    HX_002 --> HX_008["HX-008 evaluation<br/>routine"]
-    HX_003 --> HX_009
-    HX_004 --> HX_009
-    HX_005 --> HX_009
-    HX_006 ==> HX_009["HX-009 CLI + demo<br/>routine · orchestrator"]
-    HX_007 --> HX_009
-    HX_008 --> HX_009
+    M2_001["M2-001 contract + pinned cases<br/>deep"] ==> M2_002["M2-002 ORCA parser<br/>deep · claude-opus"]
+    M2_001 --> M2_003["M2-003 local solver adapter<br/>routine · claude-sonnet"]
+    M2_001 --> M2_004["M2-004 evaluator skeleton<br/>deep · claude-opus"]
+    M2_002 ==> M2_005["M2-005 integration: runner, CLI, demo, docs<br/>deep"]
+    M2_003 --> M2_005
+    M2_004 --> M2_005
 ```
 
 ## Deviations
 
-- HX-002 and HX-009 run in the orchestrator's main working copy rather than a
-  lane: HX-002's surface is consumed by three later lanes and HX-009 is the
-  integration sink.
+- **M2-005 footprint widened after review.** The correctness review found
+  that M1 commands crashed on or mislabelled case runs. Fixes touched
+  `src/labrun/controller.py::Controller.resume` (refuses checkpoints that do
+  not declare semantic restart) and `src/labrun/portability.py::_capabilities`
+  (honours checkpoint-declared `semantic_restart`/`fork`/`reanalyze`), both
+  outside the planned footprint. No lane was live, so nothing collided.
+- **Lane files edited during integration.** `orca_parser.py` (undecodable
+  bytes, unit-slot garbage, discarded-listing corruption), `orca_local.py`
+  (launch errors, process-group timeout) and `evaluator.py` (receipt status,
+  pinned manifest digest, empty policy) were changed by M2-005 after their
+  lanes landed, each with tests.
+- **Deferred structural findings** (for a later pass): share
+  commit-before-visible primitives between `Controller` and the case runner;
+  a public `Store.final_checkpoint`; a public evaluation-id helper instead of
+  importing `labrun.evaluation._next_evaluation_id`.

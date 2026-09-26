@@ -1,0 +1,41 @@
+case_id: orca6-dvb-eom-ccsd
+title: Divinylbenzene EOM-CCSD/STO-3G, 2 singlet roots
+program: ORCA
+program_version: 6.0.1
+method: EOM-CCSD/STO-3G
+split: development
+input:
+  path: basicORCA6.0/dvb_eom_ccsd.inp
+  sha256: sha256:470829fde257dccacf13be1c2e6279f57759e71c75e4e2f5b1a7c033b6859108
+outputs:
+  log:
+    path: basicORCA6.0/dvb_eom_ccsd.log
+    sha256: sha256:71ae659e8c92b895b9ddf8a8601f8e8a5e38de4eaf6dea3585f94fe0a58c9218
+provenance:
+  origin: cclib regression test data (authentic ORCA output produced by the cclib
+    developers)
+  repository: https://github.com/cclib/cclib
+  commit: f90be37ffa1ab4cfec97495bdd01d670ca329f17
+  upstream_path: data/ORCA/basicORCA6.0/dvb_eom_ccsd.log
+  license: BSD-3-Clause
+  license_file: LICENSE
+  retrieved: '2026-09-26'
+  executed_here: false
+  notes: ''
+request:
+  roots_by_multiplicity:
+    1: 2
+  expects_final_energy: true
+  source_lines:
+  - NRoots 2
+  - DoTriplet false
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Request fields transcribed from the input by the harness author; no human
+    has reviewed this case yet.
+labels:
+- authentic
+- acquired
+- not-executed-here

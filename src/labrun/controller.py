@@ -165,6 +165,9 @@ class Controller:
                 f"{mode!r} resume unsupported: checkpoints hold semantic state only"
             )
         self.store.recover()
+        latest = self.checkpoints(run_id)
+        if latest and latest[-1][2].capabilities.get("semantic_restart") != "supported":
+            raise CapabilityError(f"run {run_id}'s checkpoints do not support semantic restart")
         return self.advance(run_id)
 
     def advance(self, run_id: str, *, until: Boundary | None = None) -> RunState:

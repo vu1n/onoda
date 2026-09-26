@@ -1,0 +1,43 @@
+case_id: orca6-dvb-steom-ccsd
+title: Divinylbenzene STEOM-CCSD/STO-3G, 2 singlet roots
+program: ORCA
+program_version: 6.0.1
+method: STEOM-CCSD/STO-3G
+split: development
+input:
+  path: basicORCA6.0/dvb_steom_ccsd.inp
+  sha256: sha256:ad4991e3d695bacbbb7e23ac1119553f54b895a65cae687c72260419cfd7f0bd
+outputs:
+  log:
+    path: basicORCA6.0/dvb_steom_ccsd.log
+    sha256: sha256:0de928d463b83f7c223dc334da8b358dc5e3292f92993c1a0d09a36d43f81f08
+provenance:
+  origin: cclib regression test data (authentic ORCA output produced by the cclib
+    developers)
+  repository: https://github.com/cclib/cclib
+  commit: f90be37ffa1ab4cfec97495bdd01d670ca329f17
+  upstream_path: data/ORCA/basicORCA6.0/dvb_steom_ccsd.log
+  license: BSD-3-Clause
+  license_file: LICENSE
+  retrieved: '2026-09-26'
+  executed_here: false
+  notes: ORCA 6.0.1 build. The log prints a CIS guess listing and IP/EA-EOM listings
+    before the STEOM roots; orca-parser@1 attributes each listing to its section header
+    and reports only the STEOM roots.
+request:
+  roots_by_multiplicity:
+    1: 2
+  expects_final_energy: true
+  source_lines:
+  - NRoots 2
+  - DoTriplet false
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Request fields transcribed from the input by the harness author; no human
+    has reviewed this case yet.
+labels:
+- authentic
+- acquired
+- not-executed-here

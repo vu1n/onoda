@@ -1,0 +1,38 @@
+case_id: orca6-water-mp2
+title: Water MP2/STO-3G single point
+program: ORCA
+program_version: 6.0.1
+method: MP2/STO-3G
+split: development
+input:
+  path: basicORCA6.0/water_mp2.inp
+  sha256: sha256:7d2ca680f644e0c3c156b3c83dc539c065dcd2195d06acff2b5ba749b7f73333
+outputs:
+  log:
+    path: basicORCA6.0/water_mp2.out
+    sha256: sha256:7c27896ef6f70bbd8463109347ca027e377221474e0ad4a2ce85b854101dd04e
+provenance:
+  origin: cclib regression test data (authentic ORCA output produced by the cclib
+    developers)
+  repository: https://github.com/cclib/cclib
+  commit: f90be37ffa1ab4cfec97495bdd01d670ca329f17
+  upstream_path: data/ORCA/basicORCA6.0/water_mp2.out
+  license: BSD-3-Clause
+  license_file: LICENSE
+  retrieved: '2026-09-26'
+  executed_here: false
+  notes: ''
+request:
+  roots_by_multiplicity: {}
+  expects_final_energy: true
+  source_lines: []
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Request fields transcribed from the input by the harness author; no human
+    has reviewed this case yet.
+labels:
+- authentic
+- acquired
+- not-executed-here

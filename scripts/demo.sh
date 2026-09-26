@@ -3,6 +3,8 @@
 # execute -> checkpoint -> export -> import elsewhere -> delete original -> replay
 # -> reanalyze -> fork before the decision under two policies -> run suffixes
 # -> compare lineage and costs -> grade in a protected evaluator store.
+# M2 then records authentic ORCA outputs, exports and imports them, and grades
+# the ORCA 6.0 TD-DFT case against ORCA 5.0 with the discrepancy left unresolved.
 # Every command runs with networking disabled when `unshare -rn` is available.
 set -euo pipefail
 
@@ -57,5 +59,21 @@ say "grade in a separate evaluator store"
 for run in branch-v1 branch-v2; do
   labrun evaluate "$run" --store ./store-b --evaluator-store ./evaluator | jq -c '{evaluation_id, assignments}'
 done
+
+say "M2: pinned authentic ORCA cases (acquired from cclib, not executed here)"
+labrun case list --cases-root "$ROOT/cases" | jq -c '.[] | {case_id, program, review}'
+
+say "record, parse, and export the ORCA 6.0 TD-DFT case; grade it against ORCA 5.0 after import"
+labrun case ingest orca6-dvb-tddft --run-id td6 --store ./orca-a --cases-root "$ROOT/cases" \
+  | jq -c '{mode, termination, scf, excited_states_status, states, problems}'
+labrun export td6 --store ./orca-a --out td6.tar.gz | jq -c '{profile, files}'
+labrun import td6.tar.gz --store ./orca-b | jq -c '{roots, objects, records}'
+labrun case evaluate td6 --store ./orca-b --evaluator-store ./orca-evaluator \
+  --reference-case orca5-dvb-tddft --cases-root "$ROOT/cases" \
+  | jq -c '{assignments, unresolved, reason: .metrics["reference_comparison.reason"], first_singlet_diff_au: .metrics["diff.energy_au.m1.r1"], final_energy_diff_eh: .metrics["diff.final_energy"]}'
+
+say "live ORCA execution is off unless an operator enables it"
+labrun case ingest orca6-water-mp2 --run-id live --store ./orca-a --execute --cases-root "$ROOT/cases" \
+  || echo "(refused as expected)"
 
 say "done (workspace $WORK is removed on exit)"
