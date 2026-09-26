@@ -19,13 +19,12 @@ artifact or a journal event, never hidden agent-side state:
 
 from __future__ import annotations
 
-import uuid
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from labrun.canonical import canonical_bytes, sha256_digest
+from labrun.canonical import canonical_bytes, digest_of, sha256_digest
 from labrun.clock import Clock
 from labrun.errors import CanonicalizationError, CapabilityError
 from labrun.records import Event, InvocationReceipt, StepSpec, Usage
@@ -382,7 +381,8 @@ def decompose_fused_call(store: Store, run_id: str, steps: list[dict[str, Any]])
                 f"cannot fuse {operation!r}: not in the idempotent local-check allowlist"
             )
 
-    fusion_id = uuid.uuid4().hex
+    # Deterministic: the same fused call at the same journal position gets the same id.
+    fusion_id = digest_of({"run": run_id, "at": len(store.events(run_id)), "steps": steps})
     events: list[Event] = []
     for index, step in enumerate(steps):
         payload = dict(step)
