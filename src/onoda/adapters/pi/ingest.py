@@ -1,0 +1,1116 @@
+"""Ingest a Pi spool into the store as a portable run record (SOL_PI_DELTA §4, A37).
+
+The Pi process never writes the store. Its extensions write an fsynced spool
+(the write-ahead log); after the process exits, `ingest_spool` replays that
+spool into ordinary records, in spool order, bytes before records before the
+journal event that cites them:
+
+- `provider.request`/`provider.response` pairs become `decision` receipts
+  (inputs `context`, outputs `message`, the request's replay key in
+  metadata). Requests to the reducer model are their own receipts, labelled
+  `reducer`. Scripted runs are `simulated` and labelled `synthetic`.
+- allowed `tool.call`s become `read`/`execution` receipts when their visible
+  result arrives; blocked calls become `pi.tool-blocked` events, never
+  receipts.
+- `task.acquire` is an acquisition `read` receipt citing the pinned output
+  with `executed_here: false`, followed by a `job-collected` checkpoint.
+- Action Fusion calls (`edit`/`write` with `then_run`) are decomposed with
+  `context.decompose_fused_call` into `write_input` + `validate_input`.
+- ObservationPack archives under `<session_dir>/sol-pi/<session_id>/
+  observation-pack/` are imported as `context.observation-archived` events
+  (obs id -> store digest), `obs_recall` calls as `context.page`.
+- a raw tool result that differs from the visible one is `context.reduced`.
+- `compaction` lines with phase `done` go through `context.record_compaction`.
+- the agent's claim is a `pi-claim` artifact cited by a `pi.claim` event.
+
+Everything in the spool is untrusted input: every line and object is
+validated, and anything inconsistent (a torn object, a result for an unknown
+call, a fused solver submission recorded as allowed) raises before a single
+record is written. Each write is keyed by its spool position, so re-running
+an interrupted ingest continues it, re-ingesting a finished one is a no-op,
+and a different spool under the same run id is refused.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from pydantic import ValidationError
+
+from onoda.adapters.pi.contract import (
+    CTX_COMPACTIONS,
+    CTX_MECHANISMS,
+    CTX_OBSERVATION_PACK,
+    CTX_REQUESTS,
+    CTX_RUNTIME,
+    CTX_VARIANT,
+    DECIMAL_RE,
+    PI_CAPABILITIES,
+    PI_EXPERIMENT,
+    PI_PACKAGE,
+    RUN_MODES,
+    SCRIPTED_PROVIDER,
+    SCRIPTED_REDUCER_MODEL,
+    SPOOL_EVENTS,
+    SPOOL_OBJECTS,
+    TOOL_CASE_INPUT,
+    TOOL_ORCA_RUN,
+    TOOL_REPORT,
+    UNFUSABLE_COMMAND_TOKENS,
+    VARIANTS,
+    Claim,
+    Compaction,
+    ProviderRequest,
+    ProviderResponse,
+    ReplayMismatchLine,
+    Script,
+    ScriptTurn,
+    SpoolEnd,
+    SpoolStart,
+    TaskAcquire,
+    TaskClaim,
+    ToolCall,
+    ToolResult,
+    parse_spool_line,
+)
+from onoda.canonical import canonical_bytes, sha256_digest
+from onoda.context import decompose_fused_call, record_compaction
+from onoda.errors import CapabilityError, IntegrityError, MissingObjectError, OnodaError
+from onoda.records import Checkpoint, Event, InvocationReceipt, Run, StepSpec, TaskManifest, Usage
+from onoda.store import Store, check_safe_id, record_ref
+
+ACTOR = "pi-ingest"
+ACQUIRE = "acquire:orca-output"  # same operation name as the M2 case runner's acquisition
+READ_TOOLS = frozenset({TOOL_CASE_INPUT, TOOL_ORCA_RUN, "read", "obs_recall"})
+FUSED_TOOLS = frozenset({"edit", "write"})
+OBS_RECALL = "obs_recall"
+_OBS_ID = re.compile(r"^obs_[0-9a-f]{24}$")
+_SESSION_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    """What the journal holds for one ingested run (read back from the store)."""
+
+    run_id: str
+    spool: str  # digest of the ingested events.jsonl
+    complete: bool  # the spool ended with `spool.end` and a finalized checkpoint exists
+    status: str | None  # `spool.end` status
+    noop: bool  # this call found the spool already ingested
+    invocations: tuple[str, ...]
+    checkpoints: tuple[str, ...]
+    claim: str | None  # digest of the last claim
+    observation_pack: dict[str, str]  # obs id -> store digest
+
+
+# ------------------------------------------------------------------ reading
+
+
+def _read_file(path: Path, what: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise IntegrityError(f"{what} {path.name} is not a regular file")
+    return path.read_bytes()
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"non-finite number {name}")
+
+
+def _load_json(data: bytes, what: str) -> Any:
+    try:
+        return json.loads(data, parse_constant=_reject_constant)
+    except ValueError as exc:
+        raise IntegrityError(f"{what} is not valid JSON: {exc}") from exc
+
+
+def _number(value: Any) -> int | str | None:
+    """A JSON number as a canonical value (ints stay, floats become decimal text); else None."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float) and DECIMAL_RE.match(repr(value)):
+        return repr(value)
+    return None
+
+
+def _decimalize(value: Any) -> Any:
+    """Floats (e.g. SoL-Pi's cacheWriteReadRatio) as decimal text, so records stay float-free."""
+    if isinstance(value, float):
+        if (text := _number(value)) is None:
+            raise OnodaError(f"non-finite number {value!r} in the SoL-Pi config")
+        return text
+    if isinstance(value, dict):
+        return {k: _decimalize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_decimalize(v) for v in value]
+    return value
+
+
+def _cited(line: Any) -> list[str]:
+    """Object hashes a spool line cites."""
+    match line:
+        case ProviderRequest():
+            return [line.context]
+        case ProviderResponse():
+            return [line.message]
+        case ToolCall():
+            return [line.input]
+        case ToolResult():
+            return [line.content] + ([line.details] if line.details else [])
+        case TaskAcquire():
+            return [line.output]
+        case TaskClaim():
+            return [line.claim]
+        case Compaction():
+            return [line.details] if line.details else []
+    return []
+
+
+@dataclass(frozen=True)
+class _Spool:
+    lines: tuple[Any, ...]
+    objects: dict[str, bytes]  # sha256 hex -> verified bytes
+    events: bytes  # events.jsonl up to its last complete line
+    digest: str
+    torn_tail: bool
+
+    @property
+    def start(self) -> SpoolStart:
+        return self.lines[0]
+
+    @property
+    def end(self) -> SpoolEnd | None:
+        return self.lines[-1] if isinstance(self.lines[-1], SpoolEnd) else None
+
+
+def _read_spool(spool_dir: Path) -> _Spool:
+    raw = _read_file(spool_dir / SPOOL_EVENTS, "spool")
+    # A torn final line was never fsynced, so nothing downstream saw it (WAL rule).
+    torn_tail = bool(raw) and not raw.endswith(b"\n")
+    if torn_tail:
+        raw = raw[: raw.rfind(b"\n") + 1]
+    lines = []
+    for n, text in enumerate(raw.splitlines()):
+        data = _load_json(text, f"spool line {n}")
+        if not isinstance(data, dict):
+            raise IntegrityError(f"spool line {n} is not an object")
+        try:
+            line = parse_spool_line(data)
+        except ValidationError as exc:
+            raise IntegrityError(f"spool line {n} violates the contract: {exc}") from exc
+        if line.seq != n:
+            raise IntegrityError(f"spool line {n} has seq {line.seq}")
+        lines.append(line)
+    if not lines or not isinstance(lines[0], SpoolStart):
+        raise IntegrityError("spool does not begin with spool.start")
+    for line in lines[1:]:
+        if isinstance(line, SpoolStart):
+            raise IntegrityError(f"second spool.start at seq {line.seq}")
+        if isinstance(line, SpoolEnd) and line is not lines[-1]:
+            raise IntegrityError(f"spool.end at seq {line.seq} is not the last line")
+    objects: dict[str, bytes] = {}
+    for line in lines:
+        for hexdigest in _cited(line):
+            if hexdigest in objects:
+                continue
+            data = _read_file(spool_dir / SPOOL_OBJECTS / hexdigest, "spool object")
+            if hashlib.sha256(data).hexdigest() != hexdigest:
+                raise IntegrityError(f"spool object {hexdigest} does not match its name")
+            objects[hexdigest] = data
+    return _Spool(tuple(lines), objects, raw, sha256_digest(raw), torn_tail)
+
+
+@dataclass(frozen=True)
+class _Archive:
+    """SoL-Pi ObservationPack's session archive: objects/<obs id>.txt + ledger.jsonl."""
+
+    objects: dict[str, bytes] = field(default_factory=dict)
+    ledger: bytes | None = None
+    stats: dict[str, dict[str, int]] = field(default_factory=dict)  # obs id -> event counts
+
+
+def _read_archive(start: SpoolStart) -> _Archive:
+    if not _SESSION_ID.match(start.session_id):
+        raise IntegrityError(f"unsafe Pi session id {start.session_id!r}")
+    root = Path(start.session_dir) / "sol-pi" / start.session_id / "observation-pack"
+    if not root.is_dir() or root.is_symlink():
+        return _Archive()
+    objects: dict[str, bytes] = {}
+    obj_dir = root / "objects"
+    if obj_dir.is_dir() and not obj_dir.is_symlink():
+        for path in sorted(obj_dir.iterdir()):
+            obs_id = path.name.removesuffix(".txt")
+            if not (path.name.endswith(".txt") and _OBS_ID.match(obs_id)):
+                raise IntegrityError(f"unexpected ObservationPack object {path.name}")
+            objects[obs_id] = _read_file(path, "ObservationPack object")
+    ledger_path = root / "ledger.jsonl"
+    if not ledger_path.exists():
+        return _Archive(objects)
+    ledger = _read_file(ledger_path, "ObservationPack ledger")
+    # SoL-Pi appends without fsync; a torn final entry is dropped like a torn spool line.
+    if ledger and not ledger.endswith(b"\n"):
+        ledger = ledger[: ledger.rfind(b"\n") + 1]
+    stats: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"full": 0, "placeholder": 0, "recall": 0}
+    )
+    for n, text in enumerate(ledger.splitlines()):
+        entry = _load_json(text, f"ObservationPack ledger line {n}")
+        if not isinstance(entry, dict) or entry.get("event") not in (
+            "full",
+            "placeholder",
+            "recall",
+        ):
+            raise IntegrityError(f"ObservationPack ledger line {n} is not a known entry")
+        obs_id = entry.get("id")
+        if obs_id not in objects:
+            raise IntegrityError(f"ObservationPack ledger cites unarchived {obs_id!r}")
+        content_hash = entry.get("contentHash")
+        if content_hash is not None and content_hash != hashlib.sha256(objects[obs_id]).hexdigest():
+            raise IntegrityError(f"ObservationPack object {obs_id} does not match its ledger hash")
+        stats[obs_id][entry["event"]] += 1
+    return _Archive(objects, ledger, dict(stats))
+
+
+def _observation_id(line: ToolResult, content: Any) -> tuple[str, bytes] | None:
+    """The id SoL-Pi would archive this visible result under, and its text (observation.ts)."""
+    if line.is_error or not isinstance(content, list) or not content:
+        return None
+    if not all(isinstance(b, dict) and b.get("type") == "text" for b in content):
+        return None
+    text = "\n".join(str(b.get("text", "")) for b in content).encode()
+    content_hash = hashlib.sha256(text).hexdigest()
+    key = f"{line.tool_name}\0{line.tool_call_id}\0{content_hash}".encode()
+    return f"obs_{hashlib.sha256(key).hexdigest()[:24]}", text
+
+
+# ---------------------------------------------------------------- validation
+
+
+@dataclass
+class _Call:
+    line: ToolCall
+    args: dict[str, Any]
+    fused: list[dict[str, Any]] | None
+    raw: ToolResult | None = None
+    visible: ToolResult | None = None
+
+
+@dataclass
+class _Analysis:
+    calls: dict[str, _Call]
+    request_of: dict[int, ProviderRequest]  # response seq -> its request
+    unanswered: list[ProviderRequest]
+    observation_of: dict[int, str]  # visible result seq -> archived obs id
+    reducer_models: frozenset[str]
+
+
+def _fused_steps(line: ToolCall, args: dict[str, Any], tokens: tuple[str, ...]):
+    then_run = args.get("then_run")
+    if line.tool_name not in FUSED_TOOLS or then_run is None:
+        return None
+    command = then_run.get("command") if isinstance(then_run, dict) else None
+    if not isinstance(command, str):
+        if line.decision == "blocked":
+            return []  # marks the call as fused; there is nothing to decompose
+        # An allowed then_run we cannot read could be anything, including a submission.
+        raise IntegrityError(f"allowed fused call {line.tool_call_id} has a malformed then_run")
+    path = args.get("path") if isinstance(args.get("path"), str) else None
+    if line.decision == "allowed":
+        hits = sorted(t for t in tokens if t in command.lower())
+        if hits:
+            raise CapabilityError(
+                f"spool records fused call {line.tool_call_id} as allowed although its then_run "
+                f"contains unfusable {hits}; a fused submission is never allowed, so the spool "
+                "is untrusted and nothing was ingested"
+            )
+    validate: dict[str, Any] = {"operation": "validate_input", "command": command}
+    if "timeout" in then_run:
+        validate["timeout_s"] = _number(then_run["timeout"])  # None if not a number
+    common = {"tool_call_id": line.tool_call_id, "tool": line.tool_name}
+    return [{"operation": "write_input", "path": path, **common}, {**validate, **common}]
+
+
+def _analyze(
+    spool: _Spool, archive: _Archive, task: TaskManifest, config: dict[str, Any]
+) -> _Analysis:
+    """Check the whole spool against the contract and the run; raises before any write."""
+    start = spool.start
+    variant = VARIANTS.get(start.variant)
+    if start.variant != config["variant"] or variant is None:
+        raise OnodaError(f"spool variant {start.variant!r} is not the run's {config['variant']!r}")
+    if set(start.mechanisms) != set(variant.mechanisms):
+        raise IntegrityError(f"spool mechanisms {start.mechanisms} do not match {variant.id}")
+    if start.scripted != (config["mode"] == "pi-scripted"):
+        raise OnodaError(f"spool scripted={start.scripted} contradicts mode {config['mode']!r}")
+    reducer_models = frozenset(
+        m for m in (SCRIPTED_REDUCER_MODEL, config.get("reducer_model")) if m is not None
+    )
+    if start.model in reducer_models:
+        raise OnodaError(f"agent model {start.model!r} is also the reducer model")
+    tokens = tuple(t.lower() for t in (*UNFUSABLE_COMMAND_TOKENS, *config.get("unfusable", ())))
+
+    calls: dict[str, _Call] = {}
+    pending: dict[int, list[ProviderRequest]] = defaultdict(list)
+    request_of: dict[int, ProviderRequest] = {}
+    observation_of: dict[int, str] = {}
+
+    def call_for(line: Any, tool: str | None = None) -> _Call:
+        call = calls.get(line.tool_call_id)
+        if call is None:
+            raise IntegrityError(f"seq {line.seq} cites unknown tool call {line.tool_call_id!r}")
+        if tool is not None and (call.line.tool_name != tool or call.line.decision != "allowed"):
+            raise IntegrityError(f"seq {line.seq} is not from an allowed {tool} call")
+        return call
+
+    for line in spool.lines:
+        match line:
+            case ProviderRequest():
+                pending[line.request_index].append(line)
+            case ProviderResponse():
+                if not pending[line.request_index]:
+                    raise IntegrityError(f"response at seq {line.seq} answers no request")
+                request_of[line.seq] = pending[line.request_index].pop(0)
+                if line.cost_usd is not None and not DECIMAL_RE.match(line.cost_usd):
+                    raise IntegrityError(f"cost at seq {line.seq} is not decimal text")
+            case ToolCall():
+                if line.tool_call_id in calls:
+                    raise IntegrityError(f"tool call {line.tool_call_id!r} spooled twice")
+                args = _load_json(spool.objects[line.input], f"input of {line.tool_call_id}")
+                if not isinstance(args, dict):
+                    raise IntegrityError(f"input of {line.tool_call_id} is not an object")
+                fused = _fused_steps(line, args, tokens)
+                calls[line.tool_call_id] = _Call(line, args, fused)
+            case ToolResult():
+                call = call_for(line)
+                if call.visible is not None or (line.stage == "raw" and call.raw is not None):
+                    raise IntegrityError(f"duplicate {line.stage} result at seq {line.seq}")
+                if line.stage == "raw":
+                    call.raw = line
+                    continue
+                call.visible = line
+                if call.line.decision != "allowed":
+                    continue
+                content = _load_json(spool.objects[line.content], f"result at seq {line.seq}")
+                found = _observation_id(line, content)
+                if found and found[0] in archive.objects:
+                    if archive.objects[found[0]] != found[1]:
+                        raise IntegrityError(f"archived {found[0]} differs from its tool result")
+                    observation_of[line.seq] = found[0]
+            case TaskAcquire():
+                call_for(line, TOOL_ORCA_RUN)
+                pinned = task.inputs.get("output")
+                if pinned is not None and pinned != f"sha256:{line.output}":
+                    raise IntegrityError(f"acquired output at seq {line.seq} is not the pinned one")
+                if task.target.get("case_id", line.case_id) != line.case_id:
+                    raise IntegrityError(f"acquisition at seq {line.seq} is for another case")
+            case TaskClaim():
+                call_for(line, TOOL_REPORT)
+                try:
+                    Claim.model_validate_json(spool.objects[line.claim])
+                except ValidationError as exc:
+                    raise IntegrityError(f"claim at seq {line.seq} is not a valid Claim") from exc
+    unanswered = sorted((r for rs in pending.values() for r in rs), key=lambda r: r.seq)
+    return _Analysis(calls, request_of, unanswered, observation_of, reducer_models)
+
+
+# ------------------------------------------------------------------ writing
+
+
+def _step_key(event: Event) -> str | None:
+    """Every event an ingest writes carries its spool-derived step key."""
+    if "step_key" in event.payload:
+        return event.payload["step_key"]
+    trigger = event.payload.get("trigger_inputs")
+    return trigger.get("step_key") if isinstance(trigger, dict) else None
+
+
+class _Writer:
+    """Commit-before-visible writes for one run, each skipped if its step key is journaled."""
+
+    def __init__(
+        self,
+        store: Store,
+        run: Run,
+        task: TaskManifest,
+        spool: _Spool,
+        archive: _Archive,
+        analysis: _Analysis,
+        sol_pi_config: dict[str, Any] | None,
+    ):
+        self.store, self.run, self.task = store, run, task
+        self.spool, self.archive, self.a = spool, archive, analysis
+        self.sol_pi_config = sol_pi_config
+        self.scripted = spool.start.scripted
+        self.synthetic = ["synthetic"] if self.scripted else []
+        self.runtime = {"pi": spool.start.pi_version, "sol_pi": spool.start.sol_pi_commit}
+        existing = store.events(run.run_id)
+        self.done: dict[str, Event] = {k: e for e in existing if (k := _step_key(e))}
+        self.n_invocations = sum(e.type == "invocation.committed" for e in existing)
+        self.frontier: list[str] = []
+        self.visible = {f"task.{k}": v for k, v in sorted(task.inputs.items())}
+        self.obs: dict[str, str] = {}
+        self.compactions: list[dict[str, Any]] = []
+        self.jobs: list[dict[str, Any]] = []
+        self.requests = 0
+        self.claims = 0
+        self.decision_by_index: dict[int, str] = {}
+        self.raw_content: dict[str, str] = {}
+        self.raw_details: dict[str, str] = {}
+
+    # ---- primitives
+
+    def emit(self, key: str, type: str, *, payload=None, refs=None, causes=()) -> Event:
+        if key in self.done:
+            return self.done[key]
+        event = self.store.append_event(
+            self.run.run_id,
+            actor=ACTOR,
+            type=type,
+            payload={**(payload or {}), "step_key": key},
+            payload_refs=refs,
+            causes=causes,
+        )
+        self.done[key] = event
+        return event
+
+    def obj(self, hexdigest: str, media_type: str, labels: list[str]) -> str:
+        data = self.spool.objects[hexdigest]
+        return self.store.put_bytes(data, media_type=media_type, labels=labels).digest
+
+    def invocation(
+        self,
+        key: str,
+        spec: StepSpec,
+        kind: str,
+        inputs: dict[str, str],
+        outputs: dict[str, str],
+        *,
+        status: str = "succeeded",
+        parents: list[str] | None = None,
+        metadata: dict[str, Any],
+        labels: list[str],
+        usage: Usage,
+    ) -> str:
+        if key in self.done:
+            inv_id = self.done[key].payload["invocation_id"]
+        else:
+            spec_id = self.store.put_record(spec)
+            self.n_invocations += 1
+            inv_id = f"{self.run.run_id}.i{self.n_invocations:03d}"
+            if self.store.has_record("invocation", inv_id):
+                # Committed just before a crash, not yet journaled: journal it as is.
+                if self.store.receipt(inv_id).spec_digest != spec_id:
+                    raise OnodaError(f"orphan receipt {inv_id} belongs to another step")
+            else:
+                now = self.store.clock.now()
+                self.store.put_record(
+                    InvocationReceipt.new(
+                        invocation_id=inv_id,
+                        run_id=self.run.run_id,
+                        spec_digest=spec_id,
+                        invocation_kind=kind,
+                        inputs=inputs,
+                        outputs=outputs,
+                        parents=parents or [],
+                        status=status,
+                        metadata=metadata,
+                        usage=usage,
+                        started_at=now,
+                        finished_at=now,
+                        labels=labels,
+                    )
+                )
+            self.emit(
+                key,
+                "invocation.committed",
+                payload={"invocation_id": inv_id},
+                refs={"receipt": record_ref("invocation", inv_id)},
+            )
+        self.frontier.append(inv_id)
+        return inv_id
+
+    def checkpoint(self, key: str, boundary: str, phase: str) -> None:
+        if key in self.done:
+            return
+        events = self.store.events(self.run.run_id)
+        cp = Checkpoint.new(
+            run_id=self.run.run_id,
+            boundary=boundary,
+            event_seq=events[-1].seq if events else 0,
+            frontier=list(self.frontier),
+            visible=dict(self.visible),
+            phase=phase,
+            policy={"mode": self.run.config["mode"], "variant": self.run.config["variant"]},
+            context={
+                CTX_VARIANT: self.spool.start.variant,
+                CTX_MECHANISMS: self.sol_pi_config,
+                CTX_RUNTIME: self.runtime,
+                CTX_OBSERVATION_PACK: dict(self.obs),
+                CTX_COMPACTIONS: list(self.compactions),
+                CTX_REQUESTS: self.requests,
+            },
+            jobs=list(self.jobs),
+            quiescent=True,
+            capabilities=dict(PI_CAPABILITIES),
+        )
+        digest = self.store.put_record(cp)
+        self.emit(
+            key,
+            "checkpoint",
+            payload={"boundary": boundary, "phase": phase},
+            refs={"checkpoint": record_ref("checkpoint", digest)},
+        )
+
+    def tool_spec(self, name: str, inputs: dict[str, str]) -> StepSpec:
+        return StepSpec.new(
+            operation=f"pi.tool:{name}",
+            inputs=inputs,
+            code_ref=f"{PI_PACKAGE}@{self.runtime['pi']}",
+            environment={k: v or "" for k, v in self.runtime.items()},
+            determinism="external",
+        )
+
+    # ---- spool lines
+
+    def ingest(self) -> None:
+        spool_desc = self.store.put_bytes(
+            self.spool.events, media_type="application/x-ndjson", labels=["pi-spool"]
+        )
+        self.emit(
+            "run.created",
+            "run.created",
+            refs={
+                "run": record_ref("run", self.run.run_id),
+                "task": record_ref("task", self.task.task_id),
+                "spool": spool_desc.digest,
+            },
+        )
+        self.checkpoint("checkpoint:initialized", "initialized", "agent")
+        handlers = {
+            ProviderRequest: self.on_request,
+            ProviderResponse: self.on_response,
+            ToolCall: self.on_call,
+            ToolResult: self.on_result,
+            TaskAcquire: self.on_acquire,
+            TaskClaim: self.on_claim,
+            Compaction: self.on_compaction,
+            ReplayMismatchLine: self.on_mismatch,
+        }
+        for line in self.spool.lines[1:]:
+            if handler := handlers.get(type(line)):
+                handler(line)
+        self.flush()
+        end = self.spool.end
+        if end is not None:
+            self.emit(
+                "spool.end",
+                "pi.spool-end",
+                payload={"status": end.status, "requests": end.requests, "reason": end.reason},
+            )
+            if self.claims:
+                self.visible["final"] = self.visible[f"claim.{self.claims}"]
+            self.checkpoint("checkpoint:finalized", "finalized", end.status)
+        self.emit(
+            "ingested",
+            "pi.ingested",
+            payload={"complete": end is not None, "torn_tail": self.spool.torn_tail},
+            refs={"spool": spool_desc.digest},
+        )
+
+    def on_request(self, line: ProviderRequest) -> None:
+        self.requests += 1
+        self.obj(line.context, "application/json", ["pi-context", *self.synthetic])
+
+    def decision(self, req: ProviderRequest, resp: ProviderResponse | None) -> None:
+        reducer = req.model in self.a.reducer_models
+        provider = self.spool.start.provider
+        if reducer:
+            provider = self.run.config.get("reducer_provider") or (
+                SCRIPTED_PROVIDER if self.scripted else "unknown"
+            )
+        role = "reducer" if reducer else "agent"
+        ctx = self.obj(req.context, "application/json", ["pi-context", *self.synthetic])
+        outputs, metadata = (
+            {},
+            {
+                "role": role,
+                "provider": provider,
+                "model": req.model,
+                "request_index": req.request_index,
+                "source": req.source,
+                "replay_key": req.replay_key,
+                "spool_seq": req.seq,
+            },
+        )
+        usage = Usage(units={}, measured=False, simulated=self.scripted, cost_usd=None)
+        if resp is not None:
+            outputs["message"] = self.obj(
+                resp.message, "application/json", ["pi-message", *self.synthetic]
+            )
+            metadata["stop_reason"] = resp.stop_reason
+            usage = Usage(
+                units=dict(resp.usage_tokens),
+                measured=not self.scripted,
+                simulated=self.scripted,
+                cost_usd=resp.cost_usd,
+                price_table="pi-computed" if resp.cost_usd is not None else None,
+            )
+        spec = StepSpec.new(
+            operation="pi.provider-request",
+            inputs={"context": ctx},
+            config={"provider": provider, "model": req.model, "role": role},
+            code_ref=f"{PI_PACKAGE}@{self.runtime['pi']}",
+            determinism="nondeterministic",
+        )
+        inv_id = self.invocation(
+            f"request:{req.seq}",
+            spec,
+            "decision",
+            {"context": ctx},
+            outputs,
+            status="succeeded" if resp is not None else "failed",
+            metadata=metadata,
+            labels=[role, *self.synthetic],
+            usage=usage,
+        )
+        if not reducer:
+            self.decision_by_index[req.request_index] = inv_id
+
+    def on_response(self, line: ProviderResponse) -> None:
+        self.decision(self.a.request_of[line.seq], line)
+
+    def on_call(self, line: ToolCall) -> None:
+        call = self.a.calls[line.tool_call_id]
+        inp = self.obj(line.input, "application/json", ["pi-tool-input", *self.synthetic])
+        base = {"tool_call_id": line.tool_call_id, "tool_name": line.tool_name}
+        if line.decision == "blocked":
+            self.emit(
+                f"tool:{line.seq}",
+                "pi.tool-blocked",
+                payload={**base, "reason": line.reason, "fused": call.fused is not None},
+                refs={"input": inp},
+            )
+        elif call.fused is not None:
+            self.fuse(line, call.fused)
+        elif line.tool_name == OBS_RECALL:
+            # Arguments are the model's, unvalidated by Pi at this point: keep only well-typed ones.
+            obs_id = call.args.get("id")
+            obs_id = obs_id if isinstance(obs_id, str) else None
+            offset = call.args.get("offset", 0)
+            offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else None
+            handle = self.archived(obs_id) if obs_id in self.archive.objects else None
+            self.emit(
+                f"page:{line.seq}",
+                "context.page",
+                payload={**base, "obs_id": obs_id, "offset": offset, "handle": handle},
+                refs={"observation": handle} if handle else None,
+            )
+
+    def fuse(self, line: ToolCall, steps: list[dict[str, Any]]) -> None:
+        keyed = [{**s, "step_key": f"fuse:{line.seq}:{i}"} for i, s in enumerate(steps)]
+        recorded = [s["step_key"] in self.done for s in keyed]
+        if all(recorded):
+            return
+        if not any(recorded):
+            for event in decompose_fused_call(self.store, self.run.run_id, keyed):
+                self.done[event.payload["step_key"]] = event
+            return
+        # Interrupted mid-decomposition (already validated): finish it as
+        # decompose_fused_call would have, under the recorded fusion id.
+        prev = self.done[keyed[0]["step_key"]]
+        for index, step in enumerate(keyed):
+            if step["step_key"] in self.done:
+                prev = self.done[step["step_key"]]
+                continue
+            prev = self.store.append_event(
+                self.run.run_id,
+                actor="context.fusion",
+                type="context.fused-step",
+                payload={**step, "fusion_id": prev.payload["fusion_id"], "step_index": index},
+                causes=[prev.event_id],
+            )
+            self.done[step["step_key"]] = prev
+
+    def on_result(self, line: ToolResult) -> None:
+        content = self.obj(line.content, "application/json", ["pi-tool-result"])
+        details = (
+            self.obj(line.details, "application/json", ["pi-tool-details"])
+            if line.details
+            else None
+        )
+        call = self.a.calls[line.tool_call_id]
+        if line.stage == "raw":
+            self.raw_content[line.tool_call_id] = content
+            if details:
+                self.raw_details[line.tool_call_id] = details
+            return
+        if call.line.decision == "blocked":
+            self.emit(
+                f"result:{line.seq}",
+                "pi.tool-blocked-result",
+                payload={"tool_call_id": line.tool_call_id, "is_error": line.is_error},
+                refs={"content": content},
+            )
+            return
+        raw = self.raw_content.get(line.tool_call_id)
+        reduced = raw is not None and raw != content
+        inv_id = self.tool_receipt(call, content, details, raw if reduced else None, line.is_error)
+        if reduced:
+            self.emit(
+                f"reduced:{line.seq}",
+                "context.reduced",
+                payload={
+                    "tool_call_id": line.tool_call_id,
+                    "tool_name": line.tool_name,
+                    "invocation_id": inv_id,
+                },
+                refs={"raw": raw, "visible": content},
+            )
+        if obs_id := self.a.observation_of.get(line.seq):
+            self.archived(obs_id, tool_call_id=line.tool_call_id)
+
+    def tool_receipt(
+        self, call: _Call, content: str | None, details: str | None, raw: str | None, error: bool
+    ) -> str:
+        line = call.line
+        inp = self.obj(line.input, "application/json", ["pi-tool-input", *self.synthetic])
+        outputs = {}
+        if content:
+            outputs["result"] = content
+        if raw:
+            outputs["raw"] = raw
+        if details := details or self.raw_details.get(line.tool_call_id):
+            outputs["details"] = details
+        # No visible result: the tool may or may not have run, as for an unreconciled job.
+        status = "submission_uncertain" if content is None else "failed" if error else "succeeded"
+        parent = self.decision_by_index.get(line.request_index)
+        return self.invocation(
+            f"tool:{line.seq}",
+            self.tool_spec(line.tool_name, {"input": inp}),
+            "read" if line.tool_name in READ_TOOLS else "execution",
+            {"input": inp},
+            outputs,
+            status=status,
+            parents=[parent] if parent else [],
+            metadata={
+                "tool_call_id": line.tool_call_id,
+                "tool_name": line.tool_name,
+                "request_index": line.request_index,
+                "fused": call.fused is not None,
+                "result": "recorded" if content else "missing",
+            },
+            labels=list(self.synthetic),
+            usage=Usage(units={}, measured=False, simulated=self.scripted, cost_usd=None),
+        )
+
+    def archived(self, obs_id: str, *, tool_call_id: str | None = None) -> str:
+        if obs_id in self.obs:
+            return self.obs[obs_id]
+        data = self.archive.objects[obs_id]
+        digest = self.store.put_bytes(
+            data, media_type="text/plain", encoding="utf-8", labels=["observation"]
+        ).digest
+        self.obs[obs_id] = digest
+        self.emit(
+            f"obs:{obs_id}",
+            "context.observation-archived",
+            payload={
+                "obs_id": obs_id,
+                "size": len(data),
+                "tool_call_id": tool_call_id,
+                "ledger": self.archive.stats.get(obs_id, {}),
+            },
+            refs={"observation": digest},
+        )
+        return digest
+
+    def on_acquire(self, line: TaskAcquire) -> None:
+        call = self.a.calls[line.tool_call_id]
+        output = self.store.put_bytes(
+            self.spool.objects[line.output],
+            media_type="text/plain",
+            source={"case_id": line.case_id},
+            labels=["job-output", "acquired"],
+        ).digest
+        tool_input = self.obj(
+            call.line.input, "application/json", ["pi-tool-input", *self.synthetic]
+        )
+        inputs = {"input": self.task.inputs.get("input", tool_input)}
+        metadata: dict[str, Any] = {
+            "executed_here": False,
+            "case_id": line.case_id,
+            "tool_call_id": line.tool_call_id,
+            "pinned": "output" in self.task.inputs,
+        }
+        if provenance := self._case_provenance():
+            metadata["provenance"] = provenance
+        spec = StepSpec.new(
+            operation=ACQUIRE,
+            inputs=inputs,
+            config={"case_id": line.case_id},
+            code_ref="onoda.adapters.pi:orca_run",
+            determinism="external",
+        )
+        inv_id = self.invocation(
+            f"acquire:{line.seq}",
+            spec,
+            "read",
+            inputs,
+            {"log": output},
+            metadata=metadata,
+            labels=["acquired"],
+            usage=Usage(units={}, measured=False, simulated=False, cost_usd=None),
+        )
+        self.jobs.append({"tool_call_id": line.tool_call_id, "invocation_id": inv_id})
+        self.visible[f"acquired.{len(self.jobs)}"] = output
+        self.checkpoint(f"checkpoint:job-collected:{line.seq}", "job-collected", "agent")
+
+    def _case_provenance(self) -> dict[str, Any] | None:
+        """Provenance from the pinned M2 case manifest, when the task carries one."""
+        case = self.task.inputs.get("case")
+        if case is None or not self.store.has_object(case):
+            return None
+        manifest = self.store.get_json(case)
+        prov = manifest.get("provenance") if isinstance(manifest, dict) else None
+        return prov if isinstance(prov, dict) else None
+
+    def on_claim(self, line: TaskClaim) -> None:
+        claim = self.obj(line.claim, "application/json", ["pi-claim", *self.synthetic])
+        self.claims += 1
+        self.visible[f"claim.{self.claims}"] = claim
+        self.emit(
+            f"claim:{line.seq}",
+            "pi.claim",
+            payload={"tool_call_id": line.tool_call_id},
+            refs={"claim": claim},
+        )
+
+    def on_compaction(self, line: Compaction) -> None:
+        details = (
+            self.obj(line.details, "application/json", ["pi-compaction"]) if line.details else None
+        )
+        self.compactions.append({"seq": line.seq, "phase": line.phase, "details": details})
+        key = f"compaction:{line.seq}"
+        if line.phase != "done":
+            self.emit(
+                key,
+                "pi.compaction",
+                payload={"phase": line.phase},
+                refs={"details": details} if details else None,
+            )
+            return
+        if key in self.done:
+            return
+        summary, trigger = b"", {"step_key": key, "spool_seq": line.seq, "details": details}
+        if details:
+            data = self.spool.objects[line.details]
+            entry = _load_json(data, f"compaction details at seq {line.seq}")
+            if isinstance(entry, dict) and isinstance(entry.get("summary"), str):
+                summary = entry["summary"].encode()
+                if isinstance(entry.get("tokensBefore"), int):
+                    trigger["tokens_before"] = entry["tokensBefore"]
+            else:
+                summary = data
+        self.done[key] = record_compaction(
+            self.store,
+            self.run.run_id,
+            trigger_inputs=trigger,
+            summary=summary,
+            replaced_refs=[],
+            boundary=None,
+        )
+
+    def on_mismatch(self, line: ReplayMismatchLine) -> None:
+        self.emit(
+            f"mismatch:{line.seq}",
+            "pi.replay-mismatch",
+            payload={
+                "request_index": line.request_index,
+                "expected": line.expected,
+                "actual": line.actual,
+            },
+        )
+
+    def flush(self) -> None:
+        """Receipts for what the spool left unanswered, then archives no result cited."""
+        for req in self.a.unanswered:
+            self.decision(req, None)
+        for call in self.a.calls.values():
+            if call.line.decision == "allowed" and call.visible is None:
+                raw = self.raw_content.get(call.line.tool_call_id)
+                self.tool_receipt(call, None, None, raw, True)
+        for obs_id in sorted(self.archive.objects):
+            self.archived(obs_id)
+        if self.archive.ledger is not None:
+            ledger = self.store.put_bytes(
+                self.archive.ledger,
+                media_type="application/x-ndjson",
+                labels=["observation-pack-ledger"],
+            ).digest
+            self.emit("obs-ledger", "pi.observation-ledger", refs={"ledger": ledger})
+
+
+# ------------------------------------------------------------------- public
+
+
+def _run_config(config: dict[str, Any]) -> dict[str, Any]:
+    if config.get("mode") not in RUN_MODES:
+        raise OnodaError(f"config mode must be one of {RUN_MODES}, not {config.get('mode')!r}")
+    if not isinstance(config.get("variant"), str):
+        raise OnodaError("config must name the variant")
+    if "spool" in config:
+        raise OnodaError("config key 'spool' is set by ingest")
+    return json.loads(canonical_bytes(config))  # rejects floats; normalizes tuples
+
+
+def _sol_pi_config(config: dict[str, Any]) -> dict[str, Any] | None:
+    variant = VARIANTS[config["variant"]]
+    scripted = config["mode"] == "pi-scripted"
+    try:
+        cfg = variant.sol_pi_config(
+            reducer_provider=config.get("reducer_provider")
+            or (SCRIPTED_PROVIDER if scripted else None),
+            reducer_model=config.get("reducer_model")
+            or (SCRIPTED_REDUCER_MODEL if scripted else None),
+        )
+    except ValueError as exc:
+        raise OnodaError(str(exc)) from exc
+    return _decimalize(cfg)
+
+
+def ingest_spool(
+    store: Store,
+    spool_dir: str | Path,
+    *,
+    run_id: str,
+    task: TaskManifest,
+    config: dict[str, Any],
+    labels: tuple[str, ...] | list[str] = (),
+) -> IngestResult:
+    """Turn one Pi spool into a run record; see the module docstring for the mapping.
+
+    `config` needs `mode` (one of `RUN_MODES`) and `variant`; optional
+    `reducer_provider`/`reducer_model` name a live reducer, and `unfusable`
+    adds then_run tokens to the contract's. The task's input objects must
+    already be committed; the task record is written if absent. A task input
+    named `output` pins the acquisition: any other acquired bytes are refused.
+    """
+    check_safe_id(run_id, "run id")
+    cfg = _run_config(config)
+    spool = _read_spool(Path(spool_dir))
+    if store.has_record("run", run_id):
+        run = store.run_record(run_id)
+        if (
+            run.config.get("spool") != spool.digest
+            or run.task != task.task_id
+            or {k: v for k, v in run.config.items() if k != "spool"} != cfg
+        ):
+            raise OnodaError(f"run {run_id} was ingested from a different spool or config")
+        if any(e.type == "pi.ingested" for e in store.events(run_id)):
+            return _result(store, run_id, noop=True)
+    else:
+        run = None
+    archive = _read_archive(spool.start)
+    analysis = _analyze(spool, archive, task, cfg)
+    sol_pi_config = _sol_pi_config(cfg)
+    for name, digest in task.inputs.items():
+        if not store.has_object(digest):
+            raise MissingObjectError(digest, f"task input {name!r} -> {digest} is not committed")
+    store.put_record(task)
+    if run is None:
+        scripted = cfg["mode"] == "pi-scripted"
+        run_labels = [cfg["mode"], cfg["variant"], *(["synthetic"] if scripted else []), *labels]
+        run = Run.new(
+            run_id=run_id,
+            experiment_id=PI_EXPERIMENT,
+            task=task.task_id,
+            config={**cfg, "spool": spool.digest},
+            quota_id=f"{PI_EXPERIMENT}-unbudgeted",
+            created_at=store.clock.now(),
+            labels=list(dict.fromkeys(run_labels)),
+        )
+        store.put_record(run)
+    _Writer(store, run, task, spool, archive, analysis, sol_pi_config).ingest()
+    return _result(store, run_id, noop=False)
+
+
+def _result(store: Store, run_id: str, *, noop: bool) -> IngestResult:
+    events = store.events(run_id)
+    checkpoints = store.checkpoints(run_id)
+    ends = [e for e in events if e.type == "pi.spool-end"]
+    claim = [e for e in events if e.type == "pi.claim"]
+    return IngestResult(
+        run_id=run_id,
+        spool=store.run_record(run_id).config["spool"],
+        complete=any(cp.boundary == "finalized" for _, _, cp in checkpoints),
+        status=ends[-1].payload["status"] if ends else None,
+        noop=noop,
+        invocations=tuple(
+            e.payload["invocation_id"] for e in events if e.type == "invocation.committed"
+        ),
+        checkpoints=tuple(digest for _, digest, _ in checkpoints),
+        claim=claim[-1].payload_refs["claim"] if claim else None,
+        observation_pack={
+            e.payload["obs_id"]: e.payload_refs["observation"]
+            for e in events
+            if e.type == "context.observation-archived"
+        },
+    )
+
+
+def run_claim(store: Store, run_id: str) -> Claim | None:
+    """The agent's last claim in an ingested run, or None if it never reported."""
+    claims = [e for e in store.events(run_id) if e.type == "pi.claim"]
+    if not claims:
+        return None
+    return Claim.model_validate_json(store.get_bytes(claims[-1].payload_refs["claim"]))
+
+
+def _turn(message: Any, replay_key: str | None) -> ScriptTurn:
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    blocks = []
+    for block in content or []:
+        if block.get("type") == "text":
+            blocks.append({"type": "text", "text": block["text"]})
+        elif block.get("type") == "toolCall":
+            blocks.append(
+                {
+                    "type": "toolCall",
+                    "id": block["id"],
+                    "name": block["name"],
+                    "arguments": block.get("arguments") or {},
+                }
+            )
+        # thinking blocks are provider-internal and not part of a scripted turn
+    return ScriptTurn.model_validate({"content": blocks, "expect_replay_key": replay_key})
+
+
+def recorded_script(store: Store, run_id: str) -> Script:
+    """Rebuild the scripted-provider input from an ingested run's responses.
+
+    One turn per answered agent request, in journal order, each expecting the
+    recorded request's replay key; reducer requests become `reducer_turns`.
+    Replaying it re-runs Pi under the recorded responses and fails closed on
+    any context drift (A34).
+    """
+    store.run_record(run_id)
+    turns: list[ScriptTurn] = []
+    reducer: list[ScriptTurn] = []
+    for event in store.events(run_id):
+        if event.type != "invocation.committed":
+            continue
+        receipt = store.receipt(event.payload["invocation_id"])
+        if receipt.invocation_kind != "decision" or "message" not in receipt.outputs:
+            continue
+        turn = _turn(store.get_json(receipt.outputs["message"]), receipt.metadata["replay_key"])
+        (reducer if receipt.metadata["role"] == "reducer" else turns).append(turn)
+    return Script.model_validate(
+        {"source": f"replay:{run_id}", "turns": turns, "reducer_turns": reducer}
+    )
