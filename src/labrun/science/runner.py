@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from labrun.canonical import canonical_bytes, sha256_digest
-from labrun.errors import CapabilityError, LabrunError, SubmissionUncertain
+from labrun.errors import CapabilityError, IntegrityError, LabrunError, SubmissionUncertain
 from labrun.records import (
     Checkpoint,
     Evaluation,
@@ -40,7 +40,7 @@ from labrun.records import (
     TaskManifest,
     Usage,
 )
-from labrun.science.contract import CaseManifest, LoadedCase, OrcaObservation
+from labrun.science.contract import LoadedCase, OrcaObservation
 from labrun.science.evaluator import evaluate_observation, publish_case_reference
 from labrun.science.orca_local import OrcaLocalScheduler
 from labrun.science.orca_parser import PARSER_ID, parse_orca_output
@@ -417,24 +417,42 @@ def evaluate_case_run(
     agent_store: Store,
     evaluator_store: Store,
     run_id: str,
+    case: LoadedCase,
     *,
     policy: str,
     reference: LoadedCase | None = None,
 ) -> Evaluation:
-    """Grade a finalized case run against the manifest pinned when it was recorded."""
+    """Grade a finalized case run against the trusted, pinned case.
+
+    The agent store may hold imported records, so nothing it says about the
+    case is taken on trust: the manifest pinned at ingest must equal `case`'s
+    (loaded from the repository by the caller), an acquired log must be the
+    pinned upstream bytes, and the stored observation must equal a fresh
+    parse of the stored log. Any mismatch refuses the evaluation.
+    """
     cp = _finalized(agent_store, run_id)
-    task = agent_store.get_record("task", agent_store.run_record(run_id).task)
-    manifest = CaseManifest.model_validate(agent_store.get_json(task.inputs["case"]))
+    run = agent_store.run_record(run_id)
+    task = agent_store.get_record("task", run.task)
+    pinned = sha256_digest(canonical_bytes(_manifest_json(case)))
+    if run.config.get("case_id") != case.manifest.case_id or task.inputs.get("case") != pinned:
+        raise IntegrityError(f"run {run_id} was not recorded from case {case.manifest.case_id}")
     produced = agent_store.receipt(cp.frontier[0])
+    log = cp.visible["log"]
+    if produced.invocation_kind == "read" and log != case.manifest.outputs["log"].sha256:
+        raise IntegrityError(f"run {run_id}: acquired log is not the pinned upstream output")
+    synthetic = produced.invocation_kind == "execution" and bool(produced.metadata.get("stand_in"))
+    fresh = parse_orca_output(agent_store.get_bytes(log), synthetic=synthetic)
+    if agent_store.get_json(cp.visible["final"]) != fresh.to_json():
+        raise IntegrityError(f"run {run_id}: stored observation differs from a fresh parse")
     ref = publish_reference_case(evaluator_store, reference) if reference else None
     return evaluate_observation(
         agent_store,
         evaluator_store,
         run_id=run_id,
         observation_digest=cp.visible["final"],
-        case=manifest,
+        case=case.manifest,
         policy=policy,
         reference=ref,
         receipt_status=produced.status,
-        case_digest=task.inputs["case"],
+        case_digest=pinned,
     )

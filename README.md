@@ -154,6 +154,10 @@ and have not been run.
   and `inspect --capabilities` reports those as unsupported by the record. An
   interrupted case run is continued by rerunning `labrun case ingest` with the
   same run id.
+- `case evaluate` re-checks an acquired run against the pinned case (manifest
+  digest, log sha256, a fresh parse). A live run's log has no pinned digest,
+  so its execution receipt and stand-in flag are trusted as recorded; do not
+  grade live runs from imported bundles you did not produce.
 - A live run's timeout kills the ORCA process group, but ORCA itself has only
   been simulated by a stand-in executable here.
 

@@ -280,12 +280,14 @@ def cmd_case_evaluate(a) -> Any:
     from labrun.science.runner import evaluate_case_run
 
     store = _store(a.store)
-    if store.run_record(a.run_id).config.get("case_id") is None:
+    case_id = store.run_record(a.run_id).config.get("case_id")
+    if case_id is None:
         raise LabrunError(f"run {a.run_id} is not a case run")
     ev = evaluate_case_run(
         store,
         _store(a.evaluator_store, evaluator=True),
         a.run_id,
+        _case(case_id, a.cases_root),
         policy=a.policy,
         reference=_case(a.reference_case, a.cases_root) if a.reference_case else None,
     )
