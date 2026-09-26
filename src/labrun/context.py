@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from labrun.canonical import canonical_bytes, digest_of, sha256_digest
 from labrun.clock import Clock
@@ -31,6 +31,15 @@ from labrun.records import Event, InvocationReceipt, StepSpec, Usage
 from labrun.store import Store
 
 _EXCERPT_BYTES = 256
+
+
+class _Observation(TypedDict):
+    handle: str
+    size: int
+    media_type: str
+    arrival_request: int
+    archived: bool
+
 
 # --------------------------------------------------------------------- packs
 
@@ -62,7 +71,7 @@ class ObservationPack:
         self.threshold_bytes = threshold_bytes
         self.full_requests = full_requests
         self._current_request = 0
-        self._observations: dict[str, dict[str, Any]] = {}
+        self._observations: dict[str, _Observation] = {}
 
     def observe(self, name: str, data: bytes, media_type: str) -> str:
         """Archive `data` and return its handle (the store digest)."""
@@ -102,12 +111,12 @@ class ObservationPack:
                 "arrival_request": obs["arrival_request"],
                 "age": age,
             }
+            data = self.store.get_bytes(obs["handle"])
             if not obs["archived"] or age < self.full_requests:
                 entry["full"] = True
-                entry["data"] = self.store.get_bytes(obs["handle"])
+                entry["data"] = data
             else:
                 entry["full"] = False
-                data = self.store.get_bytes(obs["handle"])
                 entry["head"] = data[:_EXCERPT_BYTES]
                 entry["tail"] = data[-_EXCERPT_BYTES:] if len(data) > _EXCERPT_BYTES else b""
             out.append(entry)

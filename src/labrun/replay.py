@@ -29,23 +29,15 @@ from labrun.store import Store, record_ref
 
 def _checkpoints(store: Store, run_id: str) -> list[tuple[int, str, Checkpoint]]:
     """Checkpoint events in commit order, with their (chain-verified) records."""
-    out = []
-    for e in store.events(run_id):
-        if e.type == "checkpoint":
-            digest = e.payload_refs["checkpoint"].split("/", 1)[1]
-            cp = store.get_record("checkpoint", digest)
-            assert isinstance(cp, Checkpoint)
-            if cp.run_id != run_id:
-                raise IntegrityError(
-                    f"checkpoint {digest} belongs to {cp.run_id!r}, not {run_id!r}"
-                )
-            out.append((e.seq, digest, cp))
+    out = store.checkpoints(run_id)
+    for _, digest, cp in out:
+        if cp.run_id != run_id:
+            raise IntegrityError(f"checkpoint {digest} belongs to {cp.run_id!r}, not {run_id!r}")
     return out
 
 
 def _verify_receipt(store: Store, run_id: str, inv_id: str) -> InvocationReceipt:
-    receipt = store.get_record("invocation", inv_id)
-    assert isinstance(receipt, InvocationReceipt)
+    receipt = store.receipt(inv_id)
     if receipt.run_id != run_id:
         raise IntegrityError(f"invocation {inv_id} belongs to {receipt.run_id!r}, not {run_id!r}")
     store.get_record("step", receipt.spec_digest)
@@ -124,8 +116,7 @@ def replay_state_at(store: Store, run_id: str, checkpoint_digest: str) -> dict[s
     JSON artifacts are decoded; other (raw) artifacts come back as
     {"digest", "size", "media_type"} rather than raw bytes.
     """
-    cp = store.get_record("checkpoint", checkpoint_digest)
-    assert isinstance(cp, Checkpoint)
+    cp = store.checkpoint(checkpoint_digest)
     if cp.run_id != run_id:
         raise LabrunError(
             f"checkpoint {checkpoint_digest} belongs to {cp.run_id!r}, not {run_id!r}"
@@ -231,8 +222,7 @@ def reanalyze(
     for e in store.events(run_id):
         if e.type != "invocation.committed":
             continue
-        receipt = store.get_record("invocation", e.payload["invocation_id"])
-        assert isinstance(receipt, InvocationReceipt)
+        receipt = store.receipt(e.payload["invocation_id"])
         if receipt.invocation_kind != "derivation" or "parser" not in receipt.metadata:
             continue
         chosen = transform or receipt.metadata["parser"]

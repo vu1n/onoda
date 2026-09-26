@@ -198,10 +198,7 @@ class _StoreView:
     def checkpoints(self) -> list[Checkpoint]:
         if self._checkpoints is None:
             self._checkpoints = [
-                rec
-                for s in self.stores
-                for cid in s.list_record_ids("checkpoint")
-                if isinstance(rec := s.get_record("checkpoint", cid), Checkpoint)
+                s.checkpoint(cid) for s in self.stores for cid in s.list_record_ids("checkpoint")
             ]
         return self._checkpoints
 
@@ -222,7 +219,7 @@ class _BundleView:
         return self.journals.get(run_id, [])
 
     def checkpoints(self) -> list[Checkpoint]:
-        return [r for (k, _), r in self.records.items() if isinstance(r, Checkpoint)]
+        return [r for r in self.records.values() if isinstance(r, Checkpoint)]
 
 
 @dataclass
@@ -307,6 +304,7 @@ def _closure(view: _View, run_ids: Iterable[str], extra_roots: Iterable[str] = (
                 add(record_ref(kind, ref), None)
                 continue
             c.missing.add(ref)
+            # An omitted object's descriptor still travels, so the bundle says what is absent.
             if view.record("artifact", ref) is not None:
                 add(record_ref("artifact", ref), None)
             continue
@@ -461,6 +459,7 @@ def _object_file(digest: str) -> str:
 
 
 def _json_file(value: Any) -> bytes:
+    # Indented, human-readable metadata; records and journals use canonical_bytes instead.
     return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
 
 
@@ -799,7 +798,7 @@ def _read_dir(root: Path, max_files: int, max_bytes: int) -> dict[str, bytes]:
 class _Limited:
     """Counts decompressed bytes; raises once the expansion budget is spent."""
 
-    def __init__(self, fh: Any, limit: int):
+    def __init__(self, fh: gzip.GzipFile, limit: int):
         self.fh = fh
         self.limit = limit
         self.count = 0
@@ -968,6 +967,8 @@ def _parse_omissions(files: dict[str, bytes]) -> dict[str, dict[str, Any]]:
 
 
 def _write_journal(store: Store, run_id: str, raw: bytes) -> None:
+    # A bundle may carry only an ancestor's prefix (visibility cut); a longer local
+    # journal already contains it. Conflicts were rejected before any write.
     path = store._journal_path(run_id)
     if path.exists() and path.read_bytes().startswith(raw):
         return
@@ -1001,13 +1002,11 @@ def import_bundle(
         for p in files
         if p.startswith("objects/")
     }
-    journals = {
-        p[len("events/") : -len(".jsonl")]: _parse_journal(
-            p[len("events/") : -len(".jsonl")], files[p]
-        )
-        for p in files
-        if p.startswith("events/")
-    }
+    journals: dict[str, list[Event]] = {}
+    for p in files:
+        if p.startswith("events/"):
+            run_id = p[len("events/") : -len(".jsonl")]
+            journals[run_id] = _parse_journal(run_id, files[p])
     omissions = _parse_omissions(files)
 
     for digest in sorted(objects):
@@ -1057,7 +1056,7 @@ def import_bundle(
             store.put_record(rec)
     for run_id in sorted(journals):
         _write_journal(store, run_id, files[f"events/{run_id}.jsonl"])
-        store.events(run_id)
+        store.events(run_id)  # re-verify the chain through the store's own reader
 
     bundle_digest = sha256_digest(files["manifest.json"])
     omission_list = [omissions[k] for k in sorted(omissions)]

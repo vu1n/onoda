@@ -21,15 +21,16 @@ which refuses to mix evaluator, evaluator_version, or reference_version.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from labrun.canonical import digest_of
 from labrun.errors import CapabilityError
-from labrun.records import Checkpoint, Evaluation, Usage
+from labrun.records import Evaluation, Usage
 from labrun.store import Store
 
 GraderResult = tuple[dict[str, str], list[str], dict[str, str]]
-GraderFn = "callable[[dict[str, Any], dict[str, Any]], GraderResult]"
+GraderFn = Callable[[dict[str, Any], dict[str, Any]], GraderResult]
 
 
 def _reference_min_point(params: dict[str, Any]) -> str:
@@ -81,9 +82,7 @@ def _final_output_digest(agent_store: Store, run_id: str) -> str:
     for event in reversed(agent_store.events(run_id)):
         if event.type != "checkpoint":
             continue
-        digest = event.payload_refs["checkpoint"].split("/", 1)[1]
-        cp = agent_store.get_record("checkpoint", digest)
-        assert isinstance(cp, Checkpoint)
+        cp = agent_store.checkpoint(event.payload_refs["checkpoint"].split("/", 1)[1])
         if cp.boundary == "finalized":
             return cp.visible["final"]
     raise CapabilityError(f"run {run_id} has no finalized checkpoint to evaluate")
@@ -130,7 +129,7 @@ def _grade_v2(obs: dict[str, Any], reference: dict[str, Any]) -> GraderResult:
     return assignments, unresolved, metrics
 
 
-GRADERS: dict[str, Any] = {"fixture-grader@1": _grade_v1, "fixture-grader@2": _grade_v2}
+GRADERS: dict[str, GraderFn] = {"fixture-grader@1": _grade_v1, "fixture-grader@2": _grade_v2}
 
 
 def _next_evaluation_id(evaluator_store: Store, run_id: str, evaluator: str, version: str) -> str:

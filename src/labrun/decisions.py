@@ -123,8 +123,7 @@ class RecordedDecisionProvider:
         self.store = store
         self._by_request: dict[str, list[InvocationReceipt]] = {}
         for inv_id in store.list_record_ids("invocation"):
-            rec = store.get_record("invocation", inv_id)
-            assert isinstance(rec, InvocationReceipt)
+            rec = store.receipt(inv_id)
             if rec.invocation_kind != "decision" or rec.derived_from is not None:
                 continue
             if run_ids is not None and rec.run_id not in run_ids:

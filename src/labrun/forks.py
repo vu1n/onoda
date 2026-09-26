@@ -27,7 +27,6 @@ from labrun.controller import Controller, RunState
 from labrun.errors import ForkError, LabrunError, MissingObjectError, VisibilityError
 from labrun.fixture import PARSERS, POLICIES
 from labrun.records import (
-    ArtifactDescriptor,
     Boundary,
     Checkpoint,
     Evaluation,
@@ -93,7 +92,7 @@ def fork_run(
             declaration, parent, checkpoint_digest, cp, new_run_id, intervention, budget_treatment
         )
 
-    receipts = [_receipt(store, i) for i in cp.frontier]
+    receipts = [store.receipt(i) for i in cp.frontier]
     steps = _step_keys(store, receipts)
     invalid = _invalidated(kind, intervention, receipts, steps)
     config = {**parent.config, "budget_treatment": budget_treatment}
@@ -231,7 +230,7 @@ def _check_calc_change(store: Store, cp: Checkpoint, iv: dict[str, Any]) -> None
     level, rnd = iv["level"], iv.get("round", 1)
     if level not in LEVELS:
         raise ForkError(f"unknown calc level {level!r}")
-    receipts = [_receipt(store, i) for i in cp.frontier]
+    receipts = [store.receipt(i) for i in cp.frontier]
     steps = _step_keys(store, receipts)
     calc = [r for r in receipts if steps[r.invocation_id] == f"calc:r{rnd}"]
     if not calc:
@@ -285,12 +284,6 @@ def _check_declaration(
 
 
 # ---------------------------------------------------------- invalidation
-
-
-def _receipt(store: Store, inv_id: str) -> InvocationReceipt:
-    rec = store.get_record("invocation", inv_id)
-    assert isinstance(rec, InvocationReceipt)
-    return rec
 
 
 def _step_keys(store: Store, receipts: list[InvocationReceipt]) -> dict[str, str]:
@@ -396,11 +389,11 @@ class RunView:
         own = store.events(run_id)
         if not own:
             raise LabrunError(f"run {run_id} has no journal")
+        # The first checkpoint fixes the cut; later ones carry the same map forward.
         self.cut: dict[str, int] = {}
         for e in own:
             if e.type == "checkpoint":
-                cp = store.get_record("checkpoint", e.payload_refs["checkpoint"].split("/", 1)[1])
-                assert isinstance(cp, Checkpoint)
+                cp = store.checkpoint(e.payload_refs["checkpoint"].split("/", 1)[1])
                 self.cut = dict(cp.ancestry_cut)
                 break
         seeds = [ref for e in own for ref in e.payload_refs.values()]
@@ -453,11 +446,8 @@ class RunView:
 
     def search(self, label: str) -> list[str]:
         """Visible artifact digests carrying `label`, sorted."""
-        out = []
-        for digest in self.store.list_record_ids("artifact"):
-            if digest in self.refs:
-                desc = self.store.get_record("artifact", digest)
-                assert isinstance(desc, ArtifactDescriptor)
-                if label in desc.labels:
-                    out.append(digest)
-        return out
+        return [
+            digest
+            for digest in self.store.list_record_ids("artifact")
+            if digest in self.refs and label in self.store.descriptor(digest).labels
+        ]

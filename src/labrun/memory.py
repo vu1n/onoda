@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
 
 from labrun.canonical import is_digest
 from labrun.errors import LabrunError
@@ -136,7 +135,7 @@ def retrieve(view: RunView, release_digest: str, query: str) -> list[Lesson]:
         key=lambda t: (-t[2], t[0]),
     )
     candidates = [lesson for _, lesson, score in ranked if score > 0 or not query.strip()]
-    rejected: dict[str, Any] = {}
+    rejected: dict[str, str] = {}
     selected: list[Lesson] = []
     for lesson in candidates:
         reason = rejection(view, lesson)
