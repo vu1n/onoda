@@ -389,3 +389,27 @@ def test_cclib_final_energy_cross_check(case_id):
     hartree = cclib.parser.utils.convertor(total, "eV", "hartree")
     # printed to 1e-12 Eh; cclib's eV round trip costs ~1e-10 Eh of float precision
     assert abs(hartree - float(obs.final_energy.value)) < 1e-9
+
+
+def test_numeric_garbage_in_a_unit_slot_is_an_error_not_a_skipped_row():
+    data = mutate(
+        output("orca6-dvb-steom-ccsd"),
+        "IROOT=  1:  0.172381 au     4.691 eV",
+        "IROOT=  1:  0.172381 1.0     4.691 eV",
+    )
+    obs = parse_orca_output(data, synthetic=True)
+    assert obs.excited_states_status == "error"
+    assert "excited_states" in fields(obs, "error")
+    assert [s.root for s in obs.excited_states] == [2]
+
+
+def test_corruption_in_the_discarded_steom_cis_guess_leaves_steom_roots_reported():
+    data = mutate(
+        output("orca6-dvb-steom-ccsd"),
+        "IROOT=  1:  0.241150 au",
+        "IROOT=  1:  0.241150 xx",
+    )
+    obs = parse_orca_output(data, synthetic=True)
+    assert obs.excited_states_status == "present"
+    assert [s.energy_au.value for s in obs.excited_states] == ["0.172381", "0.281090"]
+    assert "excited_states" in fields(obs, "error")  # the corrupt line is still reported

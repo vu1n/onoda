@@ -286,3 +286,15 @@ def test_crash_mid_run_reports_submission_uncertain(tmp_path):
     with pytest.raises(SubmissionUncertain):
         sched.submit("crash-key", "orca", base_inputs(), {})
     assert sched.executions == 0
+
+
+def test_unlaunchable_binary_fails_instead_of_sticking_at_submitted(tmp_path):
+    binary = tmp_path / "no-shebang"
+    binary.write_text("this is not a program\n")
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+    sched = _enabled_scheduler(tmp_path, binary)
+    job = sched.submit("k", "orca", base_inputs(), {})
+    assert sched.status(job) == "failed"
+    assert sched.job_metadata(job)["reason"].startswith("launch_error")
+    assert sched.executions == 0
+    assert sched.lookup("k") == job

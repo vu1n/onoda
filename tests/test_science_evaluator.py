@@ -245,7 +245,8 @@ def test_units_mismatch_is_unresolved_not_pass(stores, case):
 
 def test_well_formed_synthetic_observation(stores, case):
     e = run(stores, case, obs())
-    assert e.assignments["execution_status"] == "pass"
+    # a synthetic observation is not a solver run, so execution never passes either.
+    assert e.assignments["execution_status"] == "unresolved"
     assert e.assignments["state_identification"] == "pass"
     # synthetic never passes parse integrity, and the record says it is synthetic.
     assert e.assignments["parse_integrity"] == "unresolved"
@@ -364,3 +365,25 @@ def test_reevaluation_creates_new_record_and_never_touches_agent_store(stores, c
     assert len(after) == len(first_bytes) + 1
     assert _tree(agent.root) == before
     assert not agent.list_record_ids("evaluation")
+
+
+def test_policy_must_compare_something():
+    with pytest.raises(ValidationError):
+        ComparisonPolicy(policy_id="x@1", kind="reexecution", quantities=())
+
+
+def test_failed_execution_receipt_fails_execution_status(stores, case):
+    agent, evaluator = stores
+    digest = agent.put_json(obs(synthetic=False).to_json()).digest
+    e = evaluate_observation(
+        agent,
+        evaluator,
+        run_id="r1",
+        observation_digest=digest,
+        case=case,
+        policy="orca-reexecution@1",
+        reference=None,
+        receipt_status="failed",
+    )
+    assert e.assignments["execution_status"] == "fail"
+    assert e.metrics["execution.receipt_status"] == "failed"

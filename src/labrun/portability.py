@@ -73,6 +73,9 @@ SUPPORTED = "supported"
 MISSING_INPUT = "blocked-by-missing-input"
 ENVIRONMENT = "blocked-by-environment"
 PROVIDER_STATE = "unavailable-provider-state"
+UNSUPPORTED = "unsupported-by-record"
+# Checkpoint-declared capability keys that can veto what the records imply.
+DECLARED = {"resume": "semantic_restart", "fork": "fork", "reanalyze": "reanalyze"}
 
 # What a reference's role in a record means for each capability if its bytes are absent.
 _ROLE_CAPS: dict[str, tuple[str, ...]] = {
@@ -417,6 +420,12 @@ def _capabilities(
         if quiescent
         else _entry(MISSING_INPUT, "no quiescent checkpoint is recorded for this run")
     )
+
+    declared = checkpoints[-1].capabilities if checkpoints else {}
+    for cap, key in DECLARED.items():
+        status = declared.get(key)
+        if status is not None and not status.startswith("supported"):
+            out[cap] = _entry(UNSUPPORTED, f"checkpoint declares {key}: {status}")
 
     for cap, refs in blocked.items():
         if refs:

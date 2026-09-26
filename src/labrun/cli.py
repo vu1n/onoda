@@ -32,6 +32,15 @@ def _controller(store_path: str):
     return Controller(store, scheduler)
 
 
+def _fixture_only(store: Store, run_id: str, command: str) -> None:
+    """Fixture commands read fixture-shaped records; a case run has none."""
+    if store.run_record(run_id).config.get("case_id") is not None:
+        raise LabrunError(
+            f"run {run_id} is an ORCA case run; `labrun {command}` handles fixture runs only "
+            "(see `labrun case --help`)"
+        )
+
+
 def _state_json(st) -> dict[str, Any]:
     return {
         "run_id": st.run_id,
@@ -117,12 +126,15 @@ def cmd_replay(a) -> Any:
 def cmd_reanalyze(a) -> Any:
     from labrun.replay import reanalyze
 
-    return reanalyze(_store(a.store), a.run_id, step=a.step, transform=a.transform)
+    store = _store(a.store)
+    _fixture_only(store, a.run_id, "reanalyze")
+    return reanalyze(store, a.run_id, step=a.step, transform=a.transform)
 
 
 def cmd_fork(a) -> Any:
     from labrun.forks import INTERVENTIONS, fork_run
 
+    _fixture_only(_store(a.store), a.run_id, "fork")
     declaration = yaml.safe_load(Path(a.declaration).read_text())
     iv = declaration.get("intervention") or {}
     kind = iv.get("kind")
@@ -144,6 +156,7 @@ def cmd_fork(a) -> Any:
 def cmd_resume(a) -> Any:
     if a.mode != "fixture":
         raise LabrunError(f"resume mode {a.mode!r} unavailable: only fixture mode runs offline")
+    _fixture_only(_store(a.store), a.run_id, "resume")
     return _state_json(_controller(a.store).resume(a.run_id))
 
 
@@ -153,6 +166,7 @@ def cmd_compare(a) -> Any:
     store = _store(a.store)
     runs = []
     for run_id in a.run_ids:
+        _fixture_only(store, run_id, "compare")
         run = store.run_record(run_id)
         final = None
         for e in reversed(store.events(run_id)):
@@ -186,6 +200,7 @@ def cmd_evaluate(a) -> Any:
     from labrun.evaluation import evaluate_run, publish_reference
 
     store = _store(a.store)
+    _fixture_only(store, a.run_id, "evaluate")
     evaluator = _store(a.evaluator_store, evaluator=True)
     task = store.get_record("task", store.run_record(a.run_id).task)
     params = store.get_json(task.inputs["params"])
@@ -243,6 +258,7 @@ def cmd_case_ingest(a) -> Any:
                 binary=a.orca_binary,
                 work_root=a.work_root,
                 max_wall_seconds=a.max_wall_seconds,
+                stand_in=a.stand_in,
             )
         )
     cr = record_case_run(_store(a.store), case, a.run_id, scheduler=scheduler)
@@ -264,14 +280,12 @@ def cmd_case_evaluate(a) -> Any:
     from labrun.science.runner import evaluate_case_run
 
     store = _store(a.store)
-    case_id = store.run_record(a.run_id).config.get("case_id")
-    if case_id is None:
+    if store.run_record(a.run_id).config.get("case_id") is None:
         raise LabrunError(f"run {a.run_id} is not a case run")
     ev = evaluate_case_run(
         store,
         _store(a.evaluator_store, evaluator=True),
         a.run_id,
-        _case(case_id, a.cases_root),
         policy=a.policy,
         reference=_case(a.reference_case, a.cases_root) if a.reference_case else None,
     )
@@ -380,6 +394,9 @@ def build_parser() -> argparse.ArgumentParser:
     ci.add_argument("--orca-binary")
     ci.add_argument("--work-root")
     ci.add_argument("--max-wall-seconds", type=int)
+    ci.add_argument(
+        "--stand-in", action="store_true", help="the binary is a test stand-in, not ORCA"
+    )
     ci.set_defaults(func=cmd_case_ingest)
     ce = cs.add_parser("evaluate", help="grade a case run in a separate evaluator store")
     ce.add_argument("run_id")
