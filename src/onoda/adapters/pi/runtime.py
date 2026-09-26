@@ -1,0 +1,410 @@
+"""Runtime: `doctor` checks the pinned install, `build_launch`/`launch` run Pi.
+
+`doctor()` never runs `npm` or touches the network; it only reads files
+already on disk (`node_modules/**/package.json`, `package-lock.json`) and
+runs the system `node` binary to read its version.
+
+`build_launch()` stages one run under `work_dir` (subdirs `workspace/`,
+`spool/`, `sessions/`, `agent/`) and returns argv/env plus the paths the
+recorder and the caller need; it never launches anything. `launch()` runs a
+`Launch` synchronously with stdin closed (Pi hangs on an open stdin) and a
+wall-clock timeout, and never raises for a non-zero exit or a timeout --
+both come back as data on `LaunchResult`.
+
+Extension load order is part of the contract (`contract.py`): the task
+extension first, SoL-Pi next when the variant has mechanisms, the scripted
+provider next when running scripted, the recorder last. Scripted mode also
+strips provider API-key environment variables from the child process so a
+scripted run can never reach a real provider by accident.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from onoda.adapters.pi.contract import (
+    DECIMAL_RE,
+    ENV_POLICY,
+    ENV_RUN_INFO,
+    ENV_SCRIPT,
+    ENV_SPOOL,
+    ENV_TASK,
+    EXTENSIONS_DIR,
+    PI_PACKAGE,
+    PI_VERSION,
+    RECORDER_EXTENSION,
+    RUNTIME_DIR,
+    SCRIPTED_EXTENSION,
+    SCRIPTED_MODEL,
+    SCRIPTED_PROVIDER,
+    SCRIPTED_REDUCER_MODEL,
+    SOL_PI_COMMIT,
+    SOL_PI_ENTRY,
+    SOL_PI_PACKAGE,
+    SPOOL_SCHEMA,
+    TASK_EXTENSION,
+    VARIANTS,
+    GatewayPolicy,
+    Script,
+    TaskBundle,
+)
+from onoda.errors import CapabilityError, OnodaError
+
+_MIN_NODE = (22, 19, 0)
+
+# Env var name prefixes/suffixes that carry provider credentials; scripted
+# mode strips these so a scripted run cannot reach a real provider even if
+# the operator's shell exports them.
+_PROVIDER_KEY_PREFIXES = ("ANTHROPIC_", "OPENAI_", "GEMINI_", "GOOGLE_")
+
+
+def _strip_provider_credentials(env: dict[str, str]) -> dict[str, str]:
+    return {
+        k: v
+        for k, v in env.items()
+        if not k.endswith("_API_KEY") and not k.startswith(_PROVIDER_KEY_PREFIXES)
+    }
+
+
+def _node_version() -> str | None:
+    exe = shutil.which("node")
+    if exe is None:
+        return None
+    try:
+        result = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=5, check=True
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip()
+
+
+def _parse_node_version(raw: str) -> tuple[int, ...] | None:
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", raw)
+    return tuple(int(g) for g in m.groups()) if m else None
+
+
+def _read_pi_version(runtime_dir: Path) -> str | None:
+    path = runtime_dir / "node_modules" / PI_PACKAGE / "package.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    version = data.get("version")
+    return version if isinstance(version, str) else None
+
+
+def _read_sol_pi_commit(runtime_dir: Path) -> str | None:
+    path = runtime_dir / "package-lock.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    entry = data.get("packages", {}).get(f"node_modules/{SOL_PI_PACKAGE}")
+    resolved = entry.get("resolved") if isinstance(entry, dict) else None
+    if not isinstance(resolved, str) or "#" not in resolved:
+        return None
+    return resolved.rsplit("#", 1)[1]
+
+
+def doctor(runtime_dir: Path = RUNTIME_DIR) -> dict[str, Any]:
+    """Compare the installed runtime under `runtime_dir` against the contract pins.
+
+    Reads only `package.json`/`package-lock.json` files and runs `node
+    --version`; never `npm`, never the network. Returns
+    `{ok, node, pi_version, sol_pi_commit, problems}`.
+    """
+    problems: list[str] = []
+
+    node_raw = _node_version()
+    if node_raw is None:
+        problems.append("node executable not found on PATH")
+    else:
+        parsed = _parse_node_version(node_raw)
+        if parsed is None or parsed < _MIN_NODE:
+            problems.append(
+                f"node {node_raw} is older than the required v{'.'.join(map(str, _MIN_NODE))}"
+            )
+
+    pi_version = _read_pi_version(runtime_dir)
+    if pi_version is None:
+        problems.append(f"{PI_PACKAGE} not found under {runtime_dir}")
+    elif pi_version != PI_VERSION:
+        problems.append(f"{PI_PACKAGE} {pi_version} does not match the pinned {PI_VERSION}")
+
+    sol_pi_commit = _read_sol_pi_commit(runtime_dir)
+    if sol_pi_commit is None:
+        problems.append(f"{SOL_PI_PACKAGE} not found in {runtime_dir / 'package-lock.json'}")
+    elif sol_pi_commit != SOL_PI_COMMIT:
+        problems.append(
+            f"{SOL_PI_PACKAGE} commit {sol_pi_commit} does not match the pinned {SOL_PI_COMMIT}"
+        )
+
+    return {
+        "ok": not problems,
+        "node": node_raw,
+        "pi_version": pi_version,
+        "sol_pi_commit": sol_pi_commit,
+        "problems": problems,
+    }
+
+
+@dataclass(frozen=True)
+class LiveSettings:
+    """A real-provider run. Every field must be explicitly given; there are no
+    defaults and nothing is inferred from a present API key (A35).
+    """
+
+    provider: str | None = None
+    model: str | None = None
+    credential_env: str | None = None
+    max_requests: int | None = None
+    max_cost_usd: str | None = None
+
+    def validate(self) -> None:
+        """Raise `CapabilityError` naming every missing/invalid setting, then check
+        that `credential_env` actually names a variable present in this process's
+        environment.
+        """
+        problems = []
+        if not self.provider:
+            problems.append("provider")
+        if not self.model:
+            problems.append("model")
+        if not self.credential_env:
+            problems.append("credential_env")
+        if not self.max_requests or self.max_requests <= 0:
+            problems.append("max_requests")
+        if not self.max_cost_usd or not DECIMAL_RE.match(self.max_cost_usd):
+            problems.append("max_cost_usd")
+        if problems:
+            raise CapabilityError(f"live Pi run missing/invalid settings: {', '.join(problems)}")
+        if self.credential_env not in os.environ:
+            raise CapabilityError(
+                f"live Pi run credential env var {self.credential_env!r} is not set"
+            )
+
+
+@dataclass(frozen=True)
+class Launch:
+    """One prepared Pi invocation: argv/env plus the paths a caller or the
+    recorder needs afterward. Nothing has run yet.
+    """
+
+    argv: tuple[str, ...]
+    env: dict[str, str]
+    cwd: Path
+    spool_dir: Path
+    session_dir: Path
+    agent_dir: Path
+    policy_path: Path
+    run_info_path: Path
+
+
+def _write_json(path: Path, data: Any) -> None:
+    path.write_text(json.dumps(data, sort_keys=True))
+
+
+def build_launch(
+    *,
+    variant_id: str,
+    bundle_dir: Path,
+    work_dir: Path,
+    script: Script | None = None,
+    live: LiveSettings | None = None,
+    max_requests: int,
+    max_acquisitions: int,
+    reducer: tuple[str, str] | None = None,
+) -> Launch:
+    """Stage one run of `variant_id` against the bundle at `bundle_dir` under
+    `work_dir`. Exactly one of `script` (offline, deterministic) or `live` (a
+    real provider) must be given.
+    """
+    if (script is None) == (live is None):
+        raise OnodaError("build_launch requires exactly one of script or live")
+
+    variant = VARIANTS[variant_id]
+    if variant.rlm:
+        raise CapabilityError(f"variant {variant_id} needs the RLM extension, not built in M3")
+
+    bundle_dir = Path(bundle_dir)
+    task_bundle = TaskBundle.model_validate_json((bundle_dir / "task.json").read_text())
+    if variant.ladder:
+        if task_bundle.ladder_sha256 is None or not (bundle_dir / "ladder.md").is_file():
+            raise CapabilityError(f"variant {variant_id} requires an advisory ladder")
+
+    if live is not None:
+        live.validate()
+        provider, model = live.provider, live.model
+    else:
+        provider, model = SCRIPTED_PROVIDER, SCRIPTED_MODEL
+
+    if reducer is not None:
+        reducer_provider, reducer_model = reducer
+    elif script is not None:
+        reducer_provider, reducer_model = SCRIPTED_PROVIDER, SCRIPTED_REDUCER_MODEL
+    else:
+        reducer_provider = reducer_model = None
+    try:
+        sol_pi_cfg = variant.sol_pi_config(
+            reducer_provider=reducer_provider, reducer_model=reducer_model
+        )
+    except ValueError as exc:
+        raise CapabilityError(str(exc)) from exc
+
+    work_dir = Path(work_dir)
+    workspace_dir = work_dir / "workspace"
+    spool_dir = work_dir / "spool"
+    sessions_dir = work_dir / "sessions"
+    agent_dir = work_dir / "agent"
+    for d in (workspace_dir, spool_dir, sessions_dir, agent_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    if sol_pi_cfg is not None:
+        _write_json(agent_dir / "sol-pi.json", sol_pi_cfg)
+
+    policy_path = work_dir / "policy.json"
+    policy = GatewayPolicy(
+        allowed_tools=variant.tools(),
+        max_requests=max_requests,
+        max_acquisitions=max_acquisitions,
+        path_aliases={
+            str(workspace_dir): "$WORKSPACE",
+            str(RUNTIME_DIR): "$PI_RUNTIME",
+            str(bundle_dir): "$BUNDLE",
+            str(spool_dir): "$SPOOL",
+        },
+    )
+    policy_path.write_text(policy.model_dump_json(by_alias=True))
+
+    run_info_path = work_dir / "run_info.json"
+    run_info: dict[str, Any] = {
+        "schema": SPOOL_SCHEMA,
+        "pi_version": PI_VERSION,
+        "sol_pi_commit": SOL_PI_COMMIT if sol_pi_cfg is not None else None,
+        "variant": variant_id,
+        "mechanisms": list(variant.mechanisms),
+        "provider": provider,
+        "model": model,
+        "scripted": script is not None,
+    }
+    if live is not None:
+        run_info["max_cost_usd"] = live.max_cost_usd
+    _write_json(run_info_path, run_info)
+
+    extensions = [str(EXTENSIONS_DIR / TASK_EXTENSION)]
+    if sol_pi_cfg is not None:
+        extensions.append(str(RUNTIME_DIR / SOL_PI_ENTRY))
+    if script is not None:
+        extensions.append(str(EXTENSIONS_DIR / SCRIPTED_EXTENSION))
+    extensions.append(str(EXTENSIONS_DIR / RECORDER_EXTENSION))
+
+    env = dict(os.environ)
+    if script is not None:
+        env = _strip_provider_credentials(env)
+        script_path = work_dir / "script.json"
+        script_path.write_text(script.model_dump_json(by_alias=True))
+        env[ENV_SCRIPT] = str(script_path)
+    env.update(
+        {
+            "PI_CODING_AGENT_DIR": str(agent_dir),
+            "PI_TELEMETRY": "0",
+            "PI_SKIP_VERSION_CHECK": "1",
+            ENV_SPOOL: str(spool_dir),
+            ENV_TASK: str(bundle_dir),
+            ENV_POLICY: str(policy_path),
+            ENV_RUN_INFO: str(run_info_path),
+        }
+    )
+    if live is None:
+        # Scripted runs never reach a real provider; PI_OFFLINE keeps Pi from
+        # making any of its own background network calls too. A live run
+        # needs the network to reach its provider, so it is left unset.
+        env["PI_OFFLINE"] = "1"
+
+    argv = [
+        str(RUNTIME_DIR / "node_modules/.bin/pi"),
+        "--no-extensions",
+    ]
+    for ext in extensions:
+        argv += ["-e", ext]
+    argv += [
+        "--session-dir",
+        str(sessions_dir),
+        "--no-context-files",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--provider",
+        provider,
+        "--model",
+        model,
+        "--tools",
+        ",".join(variant.tools()),
+        "--mode",
+        "json",
+        "-p",
+        task_bundle.instruction,
+    ]
+
+    return Launch(
+        argv=tuple(argv),
+        env=env,
+        cwd=workspace_dir,
+        spool_dir=spool_dir,
+        session_dir=sessions_dir,
+        agent_dir=agent_dir,
+        policy_path=policy_path,
+        run_info_path=run_info_path,
+    )
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+    spool_dir: Path
+    session_dir: Path
+    timed_out: bool
+
+
+def launch(launch: Launch, *, timeout_s: float) -> LaunchResult:
+    """Run a prepared `Launch` synchronously with stdin closed (Pi hangs on an
+    open stdin). A timeout or non-zero exit is returned as data, never raised.
+    """
+    try:
+        proc = subprocess.run(
+            launch.argv,
+            cwd=launch.cwd,
+            env=launch.env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = (
+            exc.stdout
+            if isinstance(exc.stdout, str)
+            else (exc.stdout or b"").decode(errors="replace")
+        )
+        stderr = (
+            exc.stderr
+            if isinstance(exc.stderr, str)
+            else (exc.stderr or b"").decode(errors="replace")
+        )
+        return LaunchResult(-1, stdout, stderr, launch.spool_dir, launch.session_dir, True)
+    return LaunchResult(
+        proc.returncode, proc.stdout, proc.stderr, launch.spool_dir, launch.session_dir, False
+    )
