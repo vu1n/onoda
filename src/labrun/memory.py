@@ -25,7 +25,7 @@ from labrun.store import Store, record_ref
 
 LESSON_LABEL = "memory-lesson"
 RELEASE_LABEL = "memory-release"
-FILTERS = ("provenance-visible", "authored-before-cut")
+FILTERS = ("provenance-visible", "authored-before-cut", "author-cut-within-view")
 
 
 @dataclass(frozen=True)
@@ -117,7 +117,18 @@ def rejection(view: RunView, lesson: Lesson, _seen: frozenset[str] = frozenset()
             return f"derived-from-ineligible:{d}"
     if lesson.run_id in view.lineage and not view.can_see(lesson.digest):
         return "authored-after-cut"
+    if lesson.run_id not in view.lineage and _saw_beyond_cut(view, lesson.run_id):
+        return "author-saw-beyond-cut"
     return None
+
+
+def _saw_beyond_cut(view: RunView, author: str) -> bool:
+    """A sibling branch forked later from a shared ancestor knows that ancestor's future."""
+    checkpoints = view.store.checkpoints(author)
+    if not checkpoints:
+        return True  # unknown knowledge is treated as unrestricted
+    author_cut = checkpoints[0][2].ancestry_cut
+    return any(run in view.cut and seq > view.cut[run] for run, seq in author_cut.items())
 
 
 def _score(text: str, query: str) -> int:

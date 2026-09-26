@@ -638,3 +638,41 @@ def test_identical_bytes_in_another_round_survive_invalidation(fixture_run):
     overrides = env.controller.run_record("c4").config["calc_overrides"]
     assert overrides == {"r1": "fine", "r2": "coarse"}
     assert st4.phase == "calc"
+
+
+def test_dropped_final_is_hidden_from_a_finalized_fork(fixture_run):
+    env, done = fixture_run
+    fork_run(
+        env.controller,
+        "demo",
+        cp_at(env, "demo", "finalized"),
+        new_run_id="kid",
+        intervention={"kind": "decision-policy-change", "to_policy": "mock-policy-v2"},
+        reason="policy after the fact",
+    )
+    assert not RunView(env.store, "kid").can_see(done.visible["final"])
+
+
+def test_sibling_that_saw_further_cannot_brief_an_earlier_fork(fixture_run):
+    env, done = fixture_run
+    late = fork_run(
+        env.controller,
+        "demo",
+        cp_at(env, "demo", "finalized"),
+        new_run_id="late",
+        intervention={"kind": "decision-policy-change", "to_policy": "mock-policy-v2"},
+        reason="late sibling",
+    )
+    lesson = write_lesson(
+        env.store, "late", "final actions were refine then accept", sources=[late.visible["params"]]
+    )
+    release = freeze_release(env.store, [lesson]).digest
+    fork_run(
+        env.controller,
+        "demo",
+        cp_at(env, "demo", "diagnostics-committed"),
+        new_run_id="early",
+        intervention={"kind": "memory-change", "to_release": release},
+        reason="early sibling",
+    )
+    assert retrieve(RunView(env.store, "early"), release, "final actions") == []
