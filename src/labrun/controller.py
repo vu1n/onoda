@@ -143,7 +143,7 @@ class Controller:
                 "task": record_ref("task", task.task_id),
             },
         )
-        return self._checkpoint(
+        return self.write_checkpoint(
             run,
             "initialized",
             phase="calc",
@@ -227,7 +227,7 @@ class Controller:
                 f"log.r{r}": rec.outputs["log"],
                 f"wavefunction.r{r}": rec.outputs["wavefunction"],
             }
-            return self._checkpoint(
+            return self.write_checkpoint(
                 run,
                 "job-collected",
                 "parse",
@@ -243,7 +243,7 @@ class Controller:
                 f"observation.r{r}": rec.outputs["observation"],
                 f"mapping.r{r}": rec.outputs["mapping"],
             }
-            return self._checkpoint(
+            return self.write_checkpoint(
                 run,
                 "diagnostics-committed",
                 "decide",
@@ -257,7 +257,7 @@ class Controller:
             decision = self.store.get_json(rec.outputs["decision"])
             refine = decision["action"] == "refine" and r < run.config["max_rounds"]
             visible = {**st.visible, f"decision.r{r}": rec.outputs["decision"]}
-            return self._checkpoint(
+            return self.write_checkpoint(
                 run,
                 "decision-committed-before-submission",
                 "calc" if refine else "finalize",
@@ -269,7 +269,7 @@ class Controller:
         if st.phase == "finalize":
             final = self.store.put_json(self._final_state(run, st), labels=["synthetic", "final"])
             visible = {**st.visible, "final": final.digest}
-            return self._checkpoint(
+            return self.write_checkpoint(
                 run, "finalized", "done", r, visible, st.frontier, st.ancestry_cut
             )
         raise LabrunError(f"run {st.run_id} is in unknown phase {st.phase!r}")
@@ -569,7 +569,7 @@ class Controller:
         }
         return f"{prefix}{len(used) + 1:03d}"
 
-    def _checkpoint(
+    def write_checkpoint(
         self,
         run: Run,
         boundary: Boundary,
