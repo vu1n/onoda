@@ -1,0 +1,200 @@
+{
+  "format": "labrun.sources/1",
+  "retrieved": "2026-09-26",
+  "sources": [
+    {
+      "id": "S1",
+      "name": "Can Autonomous LLM Agents Execute Multireference Quantum Chemistry Calculations?",
+      "url": "https://arxiv.org/abs/2609.13357",
+      "kind": "paper",
+      "revision": "arXiv:2609.13357v1",
+      "integrity": null,
+      "status": "pinned",
+      "license": null
+    },
+    {
+      "id": "S2",
+      "name": "QUESTDB",
+      "url": "https://github.com/pfloos/QUESTDB",
+      "kind": "repo",
+      "revision": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+      "integrity": null,
+      "status": "pinned",
+      "license": null,
+      "reason": "revision resolved via `git ls-remote HEAD` on 2026-09-26; license not yet inspected in the repository tree"
+    },
+    {
+      "id": "S3",
+      "name": "Prime Agent",
+      "url": "https://github.com/PrimeIntellect-ai/prime-agent",
+      "kind": "repo",
+      "revision": "cd1f215cffd09223316c54dddae5e1b654718c31",
+      "integrity": null,
+      "status": "pinned",
+      "license": null,
+      "reason": "revision resolved via `git ls-remote HEAD` on 2026-09-26; license not yet inspected"
+    },
+    {
+      "id": "S4",
+      "name": "Prime RLM programming model (packages/coding-agent/docs/rlm.md)",
+      "url": "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/packages/coding-agent/docs/rlm.md",
+      "kind": "repo",
+      "revision": "cd1f215cffd09223316c54dddae5e1b654718c31",
+      "integrity": null,
+      "status": "pinned",
+      "license": null,
+      "reason": "same repository and revision as S3; this is one doc path within it"
+    },
+    {
+      "id": "S5",
+      "name": "Prime skills (packages/coding-agent/docs/skills.md)",
+      "url": "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/packages/coding-agent/docs/skills.md",
+      "kind": "repo",
+      "revision": "cd1f215cffd09223316c54dddae5e1b654718c31",
+      "integrity": null,
+      "status": "pinned",
+      "license": null,
+      "reason": "same repository and revision as S3; this is one doc path within it"
+    },
+    {
+      "id": "S6",
+      "name": "Jev / TypeSafe System One",
+      "url": "https://docs.typesafe.ai/concepts/system-one",
+      "kind": "standard",
+      "revision": null,
+      "integrity": null,
+      "status": "unresolved",
+      "license": null,
+      "reason": "hosted docs site, not a version-controlled repository; no revision or SDK version identifier is published on the page, and this session's egress to docs.typesafe.ai is blocked by proxy policy (CONNECT rejected). Resolve at Jev integration time (M4) per BUILD_SPEC §4."
+    },
+    {
+      "id": "S7",
+      "name": "Jev confidence field",
+      "url": "https://docs.typesafe.ai/confidence",
+      "kind": "standard",
+      "revision": null,
+      "integrity": null,
+      "status": "unresolved",
+      "license": null,
+      "reason": "same hosted docs site as S6; no revision identifier available; egress blocked this session"
+    },
+    {
+      "id": "S8",
+      "name": "GEPA",
+      "url": "https://github.com/gepa-ai/gepa",
+      "kind": "repo",
+      "revision": "d771eb21b5dd3228bc3f567293d2ccfc423fc900",
+      "integrity": null,
+      "status": "pinned",
+      "license": null,
+      "reason": "revision resolved via `git ls-remote HEAD` on 2026-09-26; license not yet inspected"
+    },
+    {
+      "id": "S9",
+      "name": "Verifiers",
+      "url": "https://github.com/PrimeIntellect-ai/verifiers",
+      "kind": "repo",
+      "revision": "e1fdcd475666370f7b1b7215079a70d5f6cc7e95",
+      "integrity": null,
+      "status": "pinned",
+      "license": null,
+      "reason": "revision resolved via `git ls-remote HEAD` on 2026-09-26; license not yet inspected"
+    },
+    {
+      "id": "S10",
+      "name": "RFC 8785 (JSON Canonicalization Scheme)",
+      "url": "https://www.rfc-editor.org/rfc/rfc8785",
+      "kind": "standard",
+      "revision": "RFC 8785 (June 2020, Internet Standards Track, immutable once published)",
+      "integrity": null,
+      "status": "pinned",
+      "license": null
+    },
+    {
+      "id": "S10-lib",
+      "name": "rfc8785 (Python library implementing RFC 8785, used by labrun.canonical)",
+      "url": "https://pypi.org/project/rfc8785/",
+      "kind": "pypi",
+      "revision": "0.1.4",
+      "integrity": "sha256:520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48",
+      "status": "pinned",
+      "license": null,
+      "reason": "pinned in uv.lock; integrity is the wheel's sha256 from uv.lock/PyPI"
+    },
+    {
+      "id": "S11",
+      "name": "RO-Crate specification",
+      "url": "https://www.researchobject.org/ro-crate/specification/1.2/",
+      "kind": "standard",
+      "revision": "1.2",
+      "integrity": null,
+      "status": "pinned",
+      "license": null
+    },
+    {
+      "id": "S12",
+      "name": "Codex repository instructions (AGENTS.md convention)",
+      "url": "https://developers.openai.com/codex/guides/agents-md/",
+      "kind": "standard",
+      "revision": null,
+      "integrity": null,
+      "status": "unresolved",
+      "license": null,
+      "reason": "hosted documentation page with no published version/revision identifier; egress to developers.openai.com is blocked by proxy policy this session. Convention is cited for its content, not as a dependency needing lock."
+    },
+    {
+      "id": "S13",
+      "name": "SoL-Pi (Recursively Scaling Auto-Research Loops for Efficient Agent Harness)",
+      "url": "https://github.com/NVlabs/SoL-Pi",
+      "kind": "repo",
+      "revision": "1559b5cb12c72da4a485bc50fe326586b216fb19",
+      "integrity": null,
+      "status": "pinned",
+      "license": "MIT",
+      "reason": "revision resolved via `git ls-remote HEAD` on 2026-09-26; MIT per SOL_PI_DELTA.md and NVlabs project page"
+    },
+    {
+      "id": "S13-paper",
+      "name": "SoL-Pi paper (Liu et al., arXiv:2609.20519)",
+      "url": "https://arxiv.org/abs/2609.20519",
+      "kind": "paper",
+      "revision": "arXiv:2609.20519",
+      "integrity": null,
+      "status": "pinned",
+      "license": null
+    },
+    {
+      "id": "S14",
+      "name": "Pi coding agent (npm @earendil-works/pi-coding-agent)",
+      "url": "https://www.npmjs.com/package/@earendil-works/pi-coding-agent",
+      "kind": "npm",
+      "revision": "0.85.1",
+      "integrity": "sha512-FGRN+OHbWaefBPGaTggAdLjrIHW+s2PzLyglz/5dfLzb9of7uuXMXYC0fJIeZTw+shS32o2cuQ9jF7YSDuL/oQ==",
+      "status": "pinned",
+      "license": "MIT",
+      "reason": "SoL-Pi targets this exact version (S13); integrity verified via npm registry dist.integrity on 2026-09-26; source repository git+https://github.com/earendil-works/pi.git, directory packages/coding-agent; npm dist-tags latest is 0.87.1 but 0.85.1 is the version this harness pins and SoL-Pi was built against"
+    },
+    {
+      "id": "S15",
+      "name": "pydantic (record schema base classes, src/labrun/records.py)",
+      "url": "https://pypi.org/project/pydantic/",
+      "kind": "pypi",
+      "revision": "2.13.5",
+      "integrity": "sha256:51a9c5f7b2f8e636f04c6cada605d9b6a3bf1348fdf945a3d8869b19bba0ee08",
+      "status": "pinned",
+      "license": null,
+      "reason": "pinned in uv.lock; integrity is the sdist's sha256 from uv.lock/PyPI"
+    },
+    {
+      "id": "S16",
+      "name": "PyYAML (config/example loading)",
+      "url": "https://pypi.org/project/PyYAML/",
+      "kind": "pypi",
+      "revision": "6.0.3",
+      "integrity": "sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f",
+      "status": "pinned",
+      "license": null,
+      "reason": "pinned in uv.lock; integrity is the sdist's sha256 from uv.lock/PyPI"
+    }
+  ]
+}
