@@ -55,7 +55,7 @@ def test_every_pinned_case_records_parses_and_evaluates(tmp_path, case_id):
     assert acquire.usage.cost_usd is None  # unknown, never zero
     assert agent.descriptor(cr.log).license == "BSD-3-Clause"
 
-    ev = evaluate_case_run(agent, evaluator, "run", policy="orca-reexecution@1")
+    ev = evaluate_case_run(agent, evaluator, "run", c, policy="orca-reexecution@1")
     assert ev.assignments["execution_status"] == "pass"
     assert ev.assignments["parse_integrity"] == "pass"
     assert ev.metrics["case.review"] == "pending-human-review"
@@ -68,6 +68,7 @@ def test_cross_version_discrepancy_is_reported_and_left_unresolved(tmp_path):
         agent,
         evaluator,
         "td6",
+        case("orca6-dvb-tddft"),
         policy="orca-reexecution@1",
         reference=case("orca5-dvb-tddft"),
     )
@@ -89,6 +90,7 @@ def test_reference_stays_out_of_the_agent_store(tmp_path):
         agent,
         evaluator,
         "td6",
+        case("orca6-dvb-tddft"),
         policy="orca-reexecution@1",
         reference=case("orca5-dvb-tddft"),
     )
@@ -104,7 +106,7 @@ def test_eom_states_without_printed_multiplicity_stay_unresolved(tmp_path):
     record_case_run(agent, c, "eom")
     _, obs = final_observation(agent, "eom")
     assert [s.multiplicity for s in obs.excited_states] == [None, None]
-    ev = evaluate_case_run(agent, evaluator, "eom", policy="orca-reexecution@1")
+    ev = evaluate_case_run(agent, evaluator, "eom", c, policy="orca-reexecution@1")
     assert ev.assignments["state_identification"] == "unresolved"
 
 
@@ -170,7 +172,7 @@ def test_stand_in_execution_is_recorded_as_synthetic_and_never_passes(tmp_path):
     assert obs.final_energy is None
     assert {p.field for p in obs.problems} >= {"termination", "final_energy"}
 
-    ev = evaluate_case_run(agent, evaluator, "live", policy="orca-reexecution@1")
+    ev = evaluate_case_run(agent, evaluator, "live", c, policy="orca-reexecution@1")
     assert "pass" not in (ev.assignments["execution_status"], ev.assignments["parse_integrity"])
     assert ev.metrics["observation.synthetic"] == "true"
 
@@ -297,7 +299,9 @@ def test_evaluation_uses_the_manifest_pinned_at_ingest(tmp_path):
     agent, evaluator = stores(tmp_path)
     record_case_run(agent, case("orca6-dvb-tddft"), "td6")
     task = agent.get_record("task", agent.run_record("td6").task)
-    ev = evaluate_case_run(agent, evaluator, "td6", policy="orca-reexecution@1")
+    ev = evaluate_case_run(
+        agent, evaluator, "td6", case("orca6-dvb-tddft"), policy="orca-reexecution@1"
+    )
     assert ev.metrics["case.manifest"] == task.inputs["case"]
     assert agent.get_json(task.inputs["case"])["case_id"] == "orca6-dvb-tddft"
 
@@ -319,3 +323,34 @@ def test_fixture_commands_refuse_case_runs_and_inspect_says_why(tmp_path):
     caps = inspect_capabilities(agent, "run")
     for cap in ("resume", "fork", "reanalyze"):
         assert caps[cap]["status"] == "unsupported-by-record", cap
+
+
+def test_forged_runs_are_refused_by_evaluation(tmp_path, monkeypatch):
+    """Records in the agent store may be imported, so evaluation re-checks them."""
+    from labrun.science import runner
+
+    _, evaluator = stores(tmp_path)
+    c = case("orca6-dvb-tddft")
+
+    # An "acquired" log that is not the pinned upstream output.
+    forged = Store(tmp_path / "forged-log", clock=LogicalClock())
+    fake = c.model_copy(update={"output_bytes": {"log": b"this is not an ORCA output\n"}})
+    record_case_run(forged, fake, "td6")
+    with pytest.raises(IntegrityError, match="pinned upstream"):
+        evaluate_case_run(forged, evaluator, "td6", c, policy="orca-reexecution@1")
+
+    # The pinned log, but a stored observation that is not its parse.
+    honest = parse_orca_output(c.output_bytes["log"])
+    lying = honest.model_copy(update={"scf_cycles": 1})
+    monkeypatch.setattr(runner, "parse_orca_output", lambda data, synthetic: lying)
+    forged = Store(tmp_path / "forged-observation", clock=LogicalClock())
+    record_case_run(forged, c, "td6")
+    monkeypatch.undo()
+    with pytest.raises(IntegrityError, match="fresh parse"):
+        evaluate_case_run(forged, evaluator, "td6", c, policy="orca-reexecution@1")
+
+    # A run recorded from one case cannot be graded as another.
+    with pytest.raises(IntegrityError, match="not recorded from case"):
+        evaluate_case_run(
+            forged, evaluator, "td6", case("orca5-dvb-tddft"), policy="orca-reexecution@1"
+        )
