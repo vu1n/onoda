@@ -286,9 +286,10 @@ class Controller:
     def _parse(self, run: Run, st: RunState) -> InvocationReceipt:
         r = st.round
         step_key = f"parse:r{r}"
-        done = self._committed(run.run_id, step_key)
+        done = self._committed(run.run_id, step_key) or self._recover_orphan(run, step_key)
         if done:
             return done
+        inv_id = self._begin_step(run, step_key)
         parser = run.config["parser"]
         inputs = {"log": st.visible[f"log.r{r}"], "wavefunction": st.visible[f"wavefunction.r{r}"]}
         spec = StepSpec.new(
@@ -312,6 +313,7 @@ class Controller:
             outputs,
             parents=[self._producer(st, inputs["log"])],
             metadata={"parser": parser},
+            invocation_id=inv_id,
             usage=Usage(
                 units={"fixture_steps": 1},
                 cost_usd=FIXTURE_PRICES["parse"],
@@ -322,9 +324,10 @@ class Controller:
     def _decide(self, run: Run, st: RunState) -> InvocationReceipt:
         r = st.round
         step_key = f"decide:r{r}"
-        done = self._committed(run.run_id, step_key)
+        done = self._committed(run.run_id, step_key) or self._recover_orphan(run, step_key)
         if done:
             return done
+        inv_id = self._begin_step(run, step_key)
         mapping = self.store.get_json(st.visible[f"mapping.r{r}"])
         check_mapping(mapping, st.visible[f"wavefunction.r{r}"])
         evidence_refs = {
@@ -354,11 +357,13 @@ class Controller:
             code_ref=f"labrun.decisions:{provider.name}",
             determinism="pure",
         )
+        # A replayed answer is reuse of the original receipt, not a new decision.
+        kind = "reuse" if result.replayed_from else "decision"
         return self._commit_invocation(
             run,
             step_key,
             spec,
-            "decision",
+            kind,
             {"request": req.digest, **evidence_refs},
             {"decision": decision.digest, "raw_response": raw.digest},
             parents=[self._producer(st, evidence_refs["observation"])],
@@ -370,7 +375,10 @@ class Controller:
                 if result.provider.get("kind") in KNOWN_PROVIDER_KINDS
                 else "unknown",
             },
-            usage=result.usage,
+            usage=result.usage.model_copy(
+                update={"units": {**result.usage.units, "fixture_steps": 1}}
+            ),
+            invocation_id=inv_id,
             reservation=reservation,
         )
 
@@ -530,6 +538,10 @@ class Controller:
                 labels=["synthetic", "fixture"],
             )
             self.store.put_record(receipt)
+        self._journal_commit(run, step_key, inv_id, reservation)
+        return receipt
+
+    def _journal_commit(self, run: Run, step_key: str, inv_id: str, reservation: str) -> None:
         self.store.append_event(
             run.run_id,
             actor="controller",
@@ -537,8 +549,32 @@ class Controller:
             payload={"invocation_id": inv_id, "step_key": step_key},
             payload_refs={"receipt": record_ref("invocation", inv_id)},
         )
-        ledger.settle(reservation, {"fixture_steps": 1})
-        return receipt
+        Ledger(self.store, run).settle(reservation, {"fixture_steps": 1})
+
+    def _begin_step(self, run: Run, step_key: str) -> str:
+        """Allocate a step's invocation id durably before any work, once per step."""
+        intent = _find(self.store.events(run.run_id), "step.intent", step_key=step_key)
+        if intent is not None:
+            return intent.payload["invocation_id"]
+        inv_id = self._next_invocation_id(run.run_id)
+        self.store.append_event(
+            run.run_id,
+            actor="controller",
+            type="step.intent",
+            payload={"step_key": step_key, "invocation_id": inv_id},
+        )
+        return inv_id
+
+    def _recover_orphan(self, run: Run, step_key: str) -> InvocationReceipt | None:
+        """A receipt committed just before a crash is journaled, not recomputed."""
+        intent = _find(self.store.events(run.run_id), "step.intent", step_key=step_key)
+        if intent is None or not self.store.has_record(
+            "invocation", intent.payload["invocation_id"]
+        ):
+            return None
+        inv_id = intent.payload["invocation_id"]
+        self._journal_commit(run, step_key, inv_id, f"{run.run_id}:{step_key}")
+        return self.store.receipt(inv_id)
 
     def _committed(self, run_id: str, step_key: str) -> InvocationReceipt | None:
         ev = _find(self.store.events(run_id), "invocation.committed", step_key=step_key)
@@ -556,9 +592,12 @@ class Controller:
         prefix = f"{run_id}.i"
         used = {i for i in self.store.list_record_ids("invocation") if i.startswith(prefix)}
         used |= {
-            e.payload["invocation_id"] for e in self.store.events(run_id) if e.type == "job.intent"
+            e.payload["invocation_id"]
+            for e in self.store.events(run_id)
+            if e.type in ("job.intent", "step.intent")
         }
-        return f"{prefix}{len(used) + 1:03d}"
+        numbers = [int(i[len(prefix) :]) for i in used if i[len(prefix) :].isdigit()]
+        return f"{prefix}{max(numbers, default=0) + 1:03d}"
 
     def write_checkpoint(
         self,

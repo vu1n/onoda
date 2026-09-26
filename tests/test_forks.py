@@ -546,3 +546,95 @@ def test_t11_unknown_branch_cost_is_not_zero(fixture_run):
     assert views["full_path"]["known_cost_usd"] == "0.40"
     assert views["inherited_prefix"]["cost_usd"] == "0.40"
     assert physical_cost(env.store, ["demo", "s"])["cost_usd"] is None
+
+
+# ------------------------------------------------ review regressions
+
+
+def test_invalidated_parent_outputs_are_hidden_from_view(fixture_run):
+    env, done = fixture_run
+    cp = cp_at(env, "demo", "decision-committed-before-submission")
+    fork_run(
+        env.controller,
+        "demo",
+        cp,
+        new_run_id="pv",
+        intervention={"kind": "decision-policy-change", "to_policy": "mock-policy-v2"},
+        reason="policy",
+    )
+    view = RunView(env.store, "pv")
+    assert not view.can_see(done.visible["decision.r1"])
+    assert view.can_see(done.visible["observation.r1"])
+    with pytest.raises(VisibilityError):
+        view.resolve(done.visible["decision.r1"])
+
+
+def test_forked_run_replays_offline(fixture_run):
+    from labrun.replay import replay_run
+
+    env, _ = fixture_run
+    cp = cp_at(env, "demo", "diagnostics-committed")
+    fork_run(
+        env.controller,
+        "demo",
+        cp,
+        new_run_id="rb",
+        intervention={"kind": "decision-policy-change", "to_policy": "mock-policy-v2"},
+        reason="replay a branch",
+    )
+    env.controller.advance("rb")
+    report = replay_run(env.store, "rb")
+    assert report["final"] is not None and report["external_calls"] == 0
+
+
+def test_inherited_units_match_what_the_parent_was_charged(fixture_run):
+    from labrun.budgets import Ledger
+
+    env, _ = fixture_run
+    cp = cp_at(env, "demo", "finalized")
+    fork_run(
+        env.controller,
+        "demo",
+        cp,
+        new_run_id="c2",
+        intervention={"kind": "calc-config-change", "round": 2, "level": "coarse"},
+        reason="coarse r2",
+    )
+    inherited = Ledger(env.store, env.controller.run_record("c2")).inherited_units()
+    assert inherited["fixture_steps"] == 3  # calc, parse, decide of round 1
+
+
+def test_identical_bytes_in_another_round_survive_invalidation(fixture_run):
+    env, _ = fixture_run
+    fork_run(
+        env.controller,
+        "demo",
+        cp_at(env, "demo", "finalized"),
+        new_run_id="c2",
+        intervention={"kind": "calc-config-change", "round": 2, "level": "coarse"},
+        reason="coarse r2",
+    )
+    c2 = env.controller.advance("c2")
+    assert c2.visible["log.r2"] == c2.visible["log.r1"]  # same level, same bytes
+    st = fork_run(
+        env.controller,
+        "c2",
+        c2.checkpoint,
+        new_run_id="c3",
+        intervention={"kind": "calc-config-change", "round": 2, "level": "fine"},
+        reason="fine r2",
+    )
+    assert "log.r1" in st.visible and "decision.r1" in st.visible
+    assert "log.r2" not in st.visible
+
+    st4 = fork_run(
+        env.controller,
+        "c2",
+        c2.checkpoint,
+        new_run_id="c4",
+        intervention={"kind": "calc-config-change", "round": 1, "level": "fine"},
+        reason="fine r1",
+    )
+    overrides = env.controller.run_record("c4").config["calc_overrides"]
+    assert overrides == {"r1": "fine", "r2": "coarse"}
+    assert st4.phase == "calc"

@@ -52,9 +52,12 @@ def test_recorded_run_replays_offline(fixture_run):
     decisions = [
         env.store.get_record("invocation", i)
         for i in replay.frontier
-        if env.store.get_record("invocation", i).invocation_kind == "decision"
+        if env.store.get_record("invocation", i).invocation_kind == "reuse"
     ]
     assert [d.metadata["replayed_from"] for d in decisions] == ["demo.i003", "demo.i006"]
+    # replays are reuse, not new recordings, so a second replay is not ambiguous
+    again = env.controller.run_fixture("again2", decision_provider="recorded")
+    assert env.store.get_json(again.visible["final"])["actions"] == ["refine", "accept"]
 
 
 def test_changed_parser_cannot_reuse_recording(fixture_run):

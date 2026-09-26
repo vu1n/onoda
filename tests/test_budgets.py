@@ -32,7 +32,7 @@ def test_cost_views_unforked(fixture_run):
     views = cost_views(env.store, "demo")
     assert views["inherited_prefix"]["invocations"] == 0
     assert views["marginal"] == views["full_path"]
-    assert views["marginal"]["units"] == {"decision_calls": 2, "fixture_steps": 4}
+    assert views["marginal"]["units"] == {"decision_calls": 2, "fixture_steps": 6}
     assert views["marginal"]["cost_usd"] == "0.80"
     assert views["marginal"]["simulated"] is True
     assert physical_cost(env.store, ["demo"]) == views["marginal"]

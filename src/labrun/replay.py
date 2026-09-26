@@ -36,10 +36,11 @@ def _checkpoints(store: Store, run_id: str) -> list[tuple[int, str, Checkpoint]]
     return out
 
 
-def _verify_receipt(store: Store, run_id: str, inv_id: str) -> InvocationReceipt:
+def _verify_receipt(store: Store, owners: set[str], inv_id: str) -> InvocationReceipt:
+    """`owners` is the run plus any ancestors whose receipts a fork inherited."""
     receipt = store.receipt(inv_id)
-    if receipt.run_id != run_id:
-        raise IntegrityError(f"invocation {inv_id} belongs to {receipt.run_id!r}, not {run_id!r}")
+    if receipt.run_id not in owners:
+        raise IntegrityError(f"invocation {inv_id} belongs to {receipt.run_id!r}, not {owners}")
     store.get_record("step", receipt.spec_digest)
     for digest in (*receipt.inputs.values(), *receipt.outputs.values()):
         store.get_bytes(digest)  # verifies checksum; raises MissingObjectError/IntegrityError
@@ -50,7 +51,7 @@ def _verify_checkpoint(store: Store, run_id: str, cp: Checkpoint) -> None:
     for digest in cp.visible.values():
         store.get_bytes(digest)
     for inv_id in cp.frontier:
-        _verify_receipt(store, run_id, inv_id)
+        _verify_receipt(store, {run_id, *cp.ancestry_cut}, inv_id)
 
 
 def _normalized_final_state(store: Store, final_digest: str) -> dict[str, Any]:
@@ -86,7 +87,7 @@ def replay_run(store: Store, run_id: str) -> dict[str, Any]:
 
     invocations = [e.payload["invocation_id"] for e in events if e.type == "invocation.committed"]
     for inv_id in invocations:
-        _verify_receipt(store, run_id, inv_id)
+        _verify_receipt(store, {run_id}, inv_id)
 
     final = None
     final_digest = None

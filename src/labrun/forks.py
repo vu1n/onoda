@@ -30,6 +30,7 @@ from labrun.records import (
     Boundary,
     Checkpoint,
     Evaluation,
+    Event,
     ForkDeclaration,
     InvocationReceipt,
     ParentRef,
@@ -113,13 +114,16 @@ def fork_run(
         frontier: list[str] = []
         phase, rnd = "calc", 1
     else:
-        invalid_out = {
-            d for r in receipts if r.invocation_id in invalid for d in r.outputs.values()
-        }
+        # Drop by visible key, not digest: another round may hold identical bytes.
+        invalid_keys = set()
+        for r in receipts:
+            if r.invocation_id in invalid:
+                _, r_round = _parse_step(steps[r.invocation_id])
+                invalid_keys |= {f"{name}.r{r_round}" for name in r.outputs}
         visible = {
             n: d
             for n, d in cp.visible.items()
-            if d not in invalid_out and not (n == "final" and invalid)
+            if n not in invalid_keys and not (n == "final" and invalid)
         }
         frontier = [i for i in cp.frontier if i not in invalid]
         if invalid:
@@ -135,7 +139,10 @@ def fork_run(
         elif kind == "memory-change":
             config["memory_release"] = intervention["to_release"]
         elif kind == "calc-config-change":
-            config["calc_overrides"] = {f"r{rnd}": intervention["level"]}
+            config["calc_overrides"] = {
+                **parent.config.get("calc_overrides", {}),
+                f"r{rnd}": intervention["level"],
+            }
 
     labels = {"synthetic", "forked", INTERVENTIONS[kind][2]}
     labels |= set(((declaration or {}).get("report") or {}).get("required_labels") or [])
@@ -330,11 +337,18 @@ def _invalidated(
     grew = bool(invalid)
     while grew:
         grew = False
-        outs = {d for r in receipts if r.invocation_id in invalid for d in r.outputs.values()}
         decisions = [order(i) for i in invalid if steps[i].startswith("decide:")]
         for r in receipts:
             if r.invocation_id in invalid:
                 continue
+            # Only an earlier node can feed a later one; identical bytes produced by a
+            # later round are not a dependency of an earlier consumer.
+            outs = {
+                d
+                for p in receipts
+                if p.invocation_id in invalid and order(p.invocation_id) < order(r.invocation_id)
+                for d in p.outputs.values()
+            }
             if (
                 outs & set(r.inputs.values())
                 or invalid & set(r.parents)
@@ -401,7 +415,36 @@ class RunView:
             seeds += [
                 ref for e in store.events(anc) if e.seq <= seq for ref in e.payload_refs.values()
             ]
-        self.refs = self._closure(seeds)
+        # Seeding from the parent checkpoint reaches outputs the fork invalidated;
+        # those stay hidden unless this run re-derived the same bytes itself.
+        self.refs = self._closure(seeds) - (self._invalidated_refs() - self._own_outputs(own))
+
+    def _invalidated_refs(self) -> set[str]:
+        hidden: set[str] = set()
+        for run_id in (self.run_id, *self.cut):
+            fork = self.store.run_record(run_id).fork
+            if fork is None:
+                continue
+            decl = self.store.get_record("fork", fork)
+            assert isinstance(decl, ForkDeclaration)
+            for inv_id in decl.invalidated:
+                hidden.add(record_ref("invocation", inv_id))
+                for digest in self.store.receipt(inv_id).outputs.values():
+                    hidden |= {digest, record_ref("artifact", digest)}
+        return hidden
+
+    def _own_outputs(self, own: list[Event]) -> set[str]:
+        produced: set[str] = set()
+        for e in own:
+            if e.type == "invocation.committed":
+                for digest in self.store.receipt(e.payload["invocation_id"]).outputs.values():
+                    produced |= {digest, record_ref("artifact", digest)}
+            elif e.type == "checkpoint":
+                cp = self.store.checkpoint(e.payload_refs["checkpoint"].split("/", 1)[1])
+                if cp.run_id == self.run_id:
+                    for digest in cp.visible.values():
+                        produced |= {digest, record_ref("artifact", digest)}
+        return produced
 
     @property
     def lineage(self) -> set[str]:
