@@ -186,6 +186,22 @@ def test_argv_load_order_s3_scripted(tmp_path):
     assert launch_obj.argv[-2:] == ("-p", "do the thing")
 
 
+def test_relative_paths_reach_pi_as_absolute(tmp_path, monkeypatch):
+    # Pi runs with the workspace as cwd; a relative path would resolve there instead.
+    make_bundle(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    launch_obj = build_launch(
+        variant_id="S0",
+        bundle_dir=Path("bundle"),
+        work_dir=Path("work"),
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    for name in (ENV_SPOOL, ENV_TASK, ENV_POLICY, ENV_RUN_INFO, ENV_SCRIPT):
+        assert Path(launch_obj.env[name]).is_absolute(), name
+
+
 def test_s0_omits_sol_pi_and_scripted_extension_in_live_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("MY_KEY", "x")
     bundle_dir = make_bundle(tmp_path, ladder=False)

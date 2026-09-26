@@ -238,7 +238,9 @@ def build_launch(
     if variant.rlm:
         raise CapabilityError(f"variant {variant_id} needs the RLM extension, not built in M3")
 
-    bundle_dir = Path(bundle_dir)
+    # Pi runs with the workspace as cwd, so every path handed to it must be absolute.
+    bundle_dir = Path(bundle_dir).resolve()
+    work_dir = Path(work_dir).resolve()
     task_bundle = TaskBundle.model_validate_json((bundle_dir / "task.json").read_text())
     if variant.ladder:
         if task_bundle.ladder_sha256 is None or not (bundle_dir / "ladder.md").is_file():

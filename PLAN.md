@@ -279,4 +279,18 @@ flowchart TD
 
 ## Deviations
 
-(none yet)
+- **Rename (after M3-001):** the package and CLI were renamed `labrun` →
+  `onoda` on main before M3 landed; this plan's paths and names were rewritten
+  to match (`src/onoda/...`, `onoda-*.ts`, `ONODA_PI_*`).
+- **M3-002:** `before_provider_request` does fire for a custom provider that
+  calls `options.onPayload` (Pi requires it), contrary to this plan's
+  assumption; the recorder skips it for the scripted provider so each request
+  is spooled once. SoL-Pi's reducer only rewrites build/test-log output, so S2b
+  is inert on the task tools. Reducer calls go through `complete()` with no
+  hooks: the scripted provider spools them itself; a live reducer's calls are
+  not spooled yet.
+- **M3-004:** `ingest_spool` takes the `TaskManifest` (not a task id). The
+  integration changed its checkpoint `visible` map to exclude the case
+  manifest, which the agent never sees.
+- **M3-006:** `build_launch` resolves `bundle_dir`/`work_dir` to absolute
+  paths (Pi runs with the workspace as cwd; the demo passed relative paths).

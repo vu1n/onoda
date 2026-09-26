@@ -6,13 +6,16 @@ a run can be exported, imported on another machine, inspected offline,
 partially recomputed from raw bytes, and branched from an explicit checkpoint
 without losing lineage or cost accounting.
 
-This is milestones **M0–M2** of the handoff in [`docs/handoff/`](docs/handoff/)
+This is milestones **M0–M3** of the handoff in [`docs/handoff/`](docs/handoff/)
 (v0.2; [`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
 text, so Pi is the first agent adapter). M0–M1 run on a **completely synthetic
 fixture**. M2 adds scientific smoke tests over **authentic ORCA outputs** that
 were produced elsewhere (cclib's public regression data) and are recorded as
 acquired, not executed here. No ORCA has been run by this harness, and no
-chemistry experiment has been reproduced.
+chemistry experiment has been reproduced. M3 runs the real pinned **Pi coding
+agent** (0.85.1, optionally with **SoL-Pi** at a pinned commit) on those cases
+and records each run portably; with no model credentials authorized, every
+Pi run so far was driven by a **scripted provider** and is labelled synthetic.
 
 ## Quick start
 
@@ -60,6 +63,22 @@ onoda case ingest orca6-water-mp2 --run-id live --store ./store-a --execute \
   --enable-live-execution --orca-binary /opt/orca/orca --work-root ./orca-jobs --max-wall-seconds 600
 ```
 
+M3 Pi runs (after `scripts/pi-setup.sh`, which installs the pinned Pi and
+SoL-Pi once from `pi/package-lock.json`):
+
+```sh
+onoda pi doctor                     # installed Pi / SoL-Pi / node match the pins
+onoda pi variants                   # S0, S1, S1r, S2a-d, S3
+onoda pi run orca6-water-mp2 --variant S0 --run-id s0 --store ./store-a \
+  --work-dir ./pi-work --script script.json          # offline; outputs synthetic
+onoda pi run orca6-water-mp2 --variant S3 --ladder ladder.md ...  # S1 onward need a ladder
+onoda pi evaluate s0 --store ./store-a --evaluator-store ./evaluator
+onoda pi replay s0 --store ./store-a --work-dir ./replay   # fails closed on any drift
+# A live run needs every setting stated (none is authorized yet, A35):
+onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
+  --max-requests 20 --max-cost-usd 5
+```
+
 ## Layout
 
 | Module | Responsibility |
@@ -83,6 +102,12 @@ onoda case ingest orca6-water-mp2 --run-id live --store ./store-a --execute \
 | `science.orca_parser` | Deterministic ORCA 5/6 output parser (`orca-parser@1`) |
 | `science.orca_local` | Local ORCA scheduler for an operator-supplied binary; disabled by default, idempotent by key |
 | `science.evaluator` | External evaluator skeleton: execution, parse integrity, state identification, reference comparison under a declared policy |
+| `adapters.pi.contract` | M3 contract: runtime pins, spool wire format, scripted-provider script, task bundle, claim, variants S0–S3 and their `sol-pi.json`, gateway policy |
+| `adapters.pi.runtime` | `doctor`, launch builder (isolated agent dir, extension load order, live-setting gate), process runner |
+| `adapters.pi.ingest` | Spool → run record: decision/tool/acquisition receipts, fused-call decomposition, ObservationPack handles as store digests, compactions, checkpoints |
+| `adapters.pi.task` | Task bundle staging and claim grading against the deterministic parser, in the evaluator store |
+| `adapters.pi.run` | One run end to end, and replay under recorded responses |
+| `pi/extensions/` | onoda's Pi extensions (TypeScript): task tools, scripted provider, recorder writing the fsynced spool |
 | `science.runner` | Records a case as a run (acquired or executed), parses it, and evaluates it in a separate store |
 
 ## Capability matrix
@@ -99,7 +124,9 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Evaluate against a reference | ORCA 6.0 vs 5.0 TD-DFT: exact differences reported, verdict `unresolved` (no justified tolerance, A6) | `tests/test_smoke_cases.py`, `scripts/demo.sh` |
 | Resume | Semantic restart from checkpoints; native session resume refused | T10, T14; `tests/test_jobs.py`, `tests/test_controller.py` |
 | Fork | Quiescent checkpoints; policy, parser, input, calc-config and memory interventions with invalidation | T03, T05, T07; `tests/test_forks.py` |
-| Repeat experiment | Not implemented in M1 | — |
+| Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. No model has been called | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
+| Replay an agent run | Re-runs Pi under the recorded responses and fails closed on any change to what the model was shown | `tests/test_pi_end_to_end.py` |
+| Repeat experiment | Not implemented | — |
 
 ## Acceptance tests
 
@@ -124,11 +151,13 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | SoL-Pi M1 fixtures (handles, compaction, reducer, fusion) | `test_context.py` |
 | T17 authentic fixed-input case (partial: acquired outputs, not executed here) | `test_orca_parser.py`, `test_smoke_cases.py` |
 | T18 honest partial outputs | `test_orca_parser.py` (truncation, missing diagnostics, malformed numbers, wrong units, conflicting listings), `test_smoke_cases.py` |
+| T19 controlled baseline (partial: Pi instead of Prime; isolated agent dir, no global extensions/skills/context files, pinned context, gateway budget; no network or filesystem sandbox yet) | `test_pi_runtime.py`, `test_pi_extensions.py`, `test_pi_end_to_end.py` |
 
 T17 is only partly met: its "execute a reviewed fixed input with authorized
 software" step needs an operator-enabled ORCA and a human case review
-(assumptions A7, A26). T19–T25 need a live Pi integration or later milestones
-and have not been run.
+(assumptions A7, A26). T19 is partial (above). T20 needs semantic restart of a
+Pi run, which M3 records the state for but does not implement (A36); T21–T25
+belong to later milestones.
 
 ## Limitations
 
@@ -136,9 +165,16 @@ and have not been run.
   spend. Unknown costs are reported as unknown, never zero.
 - One authoritative writer per run; no locking for concurrent writers.
 - Forks require quiescent checkpoints. In-flight forks are not supported.
-- The Pi adapter is a typed seam and a mock. No Pi, SoL-Pi, or Prime code is
-  installed or called; every Pi extension point in
-  [`docs/ADAPTER_SEAM.md`](docs/ADAPTER_SEAM.md) is marked unverified.
+- Pi runs have only used the scripted provider: scripts, claims and ladders
+  in the tests are synthetic, and no model result exists. Live runs are built
+  and refuse to start without every live setting (A35).
+- The advisory ladder and allowed documentation are unresolved (A33): S1
+  onward refuse to run without an operator-supplied ladder. S1r (RLM) always
+  refuses in M3.
+- The Pi agent's `bash` tool is not sandboxed; the gateway policy limits which
+  tools run, not what a shell command can reach.
+- Fork and resume of Pi runs are not implemented (A36). A real reducer
+  provider's calls would not be spooled (see `docs/ADAPTER_SEAM.md` §2).
 - Scientific tolerances, task membership, and the expert convergence check are
   unresolved; see [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). Upstream
   revisions are pinned in [`provenance/sources.json`](provenance/sources.json).
@@ -161,8 +197,10 @@ and have not been run.
 - A live run's timeout kills the ORCA process group, but ORCA itself has only
   been simulated by a stand-in executable here.
 
-## Next: M3
+## Next: M3b and the RLM extension
 
-Pi baseline and Pi + RLM extension on a frozen development set (SOL_PI_DELTA
-§6). Before comparisons: a human review of the M2 cases, an ORCA run of at
-least one pinned input on licensed hardware, and justified tolerances (A6, A18).
+SoL-Pi add-one ablation (S2a–d vs S1 vs S3) once a model and budget are
+authorized, with capability-gate tolerances predeclared (A18); the RLM Pi
+extension (S1r); semantic restart of Pi runs (A36). Before comparisons: a human
+review of the M2 cases, an ORCA run on licensed hardware, and justified
+tolerances (A6, A18).

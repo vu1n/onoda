@@ -12,6 +12,10 @@ first agent adapter; Prime is an optional comparison arm).
 - Lint: `uv run ruff check .`
 - Format: `uv run ruff format .` (check with `--check`)
 - Demo: `scripts/demo.sh` runs the full clean-workspace sequence
+- Pi runtime (M3): `scripts/pi-setup.sh` installs the pinned Pi + SoL-Pi from
+  `pi/package-lock.json` once (network). Suites marked `requires_pi` launch
+  that real Pi offline under a scripted provider and skip without it.
+  TypeScript check: `cd pi && npx tsc -p .`
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
   `onoda case list` shows them. Vendored bytes under `cases/` are never edited.
 
@@ -44,6 +48,11 @@ VCS is plain git. No project board; work items come from issues or goals.
   comparison `unresolved`, not `pass`.
 - Every live-execution setting defaults off and unresolved live settings fail
   closed.
+- Pi runs: every byte the model sees is spooled (fsynced) before Pi hands it
+  over, the store is written only by ingest, the recorder loads last, fused
+  `then_run` never reaches a solver, scripted runs are labelled synthetic, and
+  the evaluator grades claims from the deterministic parser, never from
+  reducer receipts.
 
 Read `docs/ASSUMPTIONS.md` before changing scientific behavior, and record
 new assumptions there instead of inventing thresholds or API methods.

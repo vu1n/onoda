@@ -5,6 +5,7 @@
 # -> compare lineage and costs -> grade in a protected evaluator store.
 # M2 then records authentic ORCA outputs, exports and imports them, and grades
 # the ORCA 6.0 TD-DFT case against ORCA 5.0 with the discrepancy left unresolved.
+# M3 runs the pinned Pi agent on a case under a scripted provider (synthetic).
 # Every command runs with networking disabled when `unshare -rn` is available.
 set -euo pipefail
 
@@ -75,5 +76,37 @@ onoda case evaluate td6 --store ./orca-b --evaluator-store ./orca-evaluator \
 say "live ORCA execution is off unless an operator enables it"
 onoda case ingest orca6-water-mp2 --run-id live --store ./orca-a --execute --cases-root "$ROOT/cases" \
   || echo "(refused as expected)"
+
+say "M3: the pinned Pi agent on a case, offline under a scripted provider (synthetic)"
+if onoda pi doctor >/dev/null 2>&1; then
+  onoda pi variants | jq -c '.[] | {id, ladder, mechanisms, runnable_in_m3}'
+  "$PY" - <<'PYEOF' > script.json
+import json
+from onoda.science.contract import case_manifests, load_case
+from onoda.science.orca_parser import parse_orca_output
+case = load_case(case_manifests()["orca6-water-mp2"])
+((_, out),) = case.output_bytes.items()
+e = parse_orca_output(out).final_energy
+call = lambda i, name, **a: {"type": "toolCall", "id": f"c{i}", "name": name, "arguments": a}
+turns = [[call(1, "case_input")], [call(2, "orca_run")],
+         [call(3, "report_states", final_energy={"text": e.value, "unit": e.units}, states=[])],
+         [{"type": "text", "text": "reported"}]]
+print(json.dumps({"schema": "onoda.pi-script/1", "source": "scripts/demo.sh",
+                  "turns": [{"content": t} for t in turns]}))
+PYEOF
+  printf '# Synthetic advisory ladder (demo fixture, no scientific content)\n' > ladder.md
+  onoda pi run orca6-water-mp2 --variant S3 --run-id pi-s3 --store ./pi-store --work-dir ./pi-work \
+    --script script.json --ladder ladder.md --synthetic-ladder \
+    | jq -c '{status, complete, invocations, observation_pack}'
+  onoda replay pi-s3 --store ./pi-store --offline | jq -c '{checkpoints, external_calls}'
+  onoda pi evaluate pi-s3 --store ./pi-store --evaluator-store ./pi-evaluator \
+    | jq -c '{false_success_claims: .metrics.false_success_claims, synthetic_run}'
+  onoda pi replay pi-s3 --store ./pi-store --work-dir ./pi-replay | jq -c '{status, requests}'
+  say "a live Pi run needs every live setting"
+  onoda pi run orca6-water-mp2 --variant S0 --run-id live --store ./pi-store --work-dir ./pi-live \
+    --live --provider anthropic || echo "(refused as expected)"
+else
+  echo "(skipped: run scripts/pi-setup.sh once to install the pinned Pi runtime)"
+fi
 
 say "done (workspace $WORK is removed on exit)"

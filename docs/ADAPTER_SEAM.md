@@ -1,12 +1,12 @@
 # Adapter seam: Pi-first, harness-neutral
 
-Status: design sketch for M0 (BUILD_SPEC §4, SOL_PI_DELTA §0/§3/§7). Nothing
-in this document has been installed or executed. Pi is pinned at
-`@earendil-works/pi-coding-agent@0.85.1` (provenance/sources.json, S14);
-SoL-Pi is pinned at commit `1559b5cb12c72da4a485bc50fe326586b216fb19` (S13).
-Every specific extension point named below is marked **unverified** and must
-be checked against that pinned Pi version before any real adapter is built
-against it (AGENTS.md rule 10: do not invent SDK methods).
+Status: M0 design sketch, verified in M3 against the installed pins. Pi is
+pinned at `@earendil-works/pi-coding-agent@0.85.1` (provenance/sources.json,
+S14) and SoL-Pi at commit `1559b5cb12c72da4a485bc50fe326586b216fb19` (S13),
+both locked in `pi/package-lock.json` and installed by `scripts/pi-setup.sh`.
+§2 records which extension points were verified by running that Pi process
+(offline, under the scripted provider) and how onoda's extensions use them.
+Nothing here has run against a real model provider.
 
 ## 0. Why Pi is first (Route A)
 
@@ -60,20 +60,34 @@ class: Pi, Prime, and the test mock all satisfy it structurally, which is
 the harness-neutrality test SOL_PI_DELTA §3 asks for ("the `adapters/agents`
 contract should still fit [Prime], as the harness-neutrality test").
 
-## 2. Where Pi's real extension points would attach — unverified list
+## 2. Where Pi's extension points attach — verified against 0.85.1 (M3)
 
-Everything below is **to verify against pinned Pi 0.85.1** before
-implementation. None of it is assumed to exist with this shape; it is
-where SOL_PI_DELTA §3 says the RLM extension and the gateway boundary must
-sit, phrased against Pi's documented extension surface in general terms.
+Verified by launching the pinned `pi` binary with onoda's extensions
+(`pi/extensions/`) and asserting on what they spooled
+(`tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py`). The spool
+format is fixed in `src/onoda/adapters/pi/contract.py`.
 
-| Seam method | Where it would attach in Pi (unverified) | What must be checked |
+| Seam method | Pi 0.85.1 extension point (verified) | How onoda uses it |
 |---|---|---|
-| `render_context` | Pi's context-construction step, before a request is sent to the provider (the same point SoL-Pi's ObservationPack and Online Context Compact operate on, per SOL_PI_DELTA §2). | Whether Pi exposes a stable hook at this point in 0.85.1, or whether it must be observed by wrapping the outbound request instead. |
-| `propose_action` | Pi's tool-call boundary, before a tool actually executes (the point Action Fusion collapses two calls into one, per SOL_PI_DELTA §2). | The exact shape of a Pi tool-call event and whether it can be intercepted before execution vs. only logged after. |
-| `capture` | Pi's provider-call boundary (request/response, token usage, request id). | Which fields Pi's SDK actually surfaces for `@earendil-works/pi-coding-agent@0.85.1`; do not assume parity with any other version, including npm `latest` (currently `0.87.1`). |
-| RLM kernel externalization | `adapters/agents/pi/rlm`, per SOL_PI_DELTA §3: "must externalize kernel state: anything a later step depends on is committed through the gateway, so a checkpoint never relies on live kernel memory." | Prime's RLM docs (S4, S5) describe the *programming model* we are reconstructing for Pi, not an API Pi itself exposes. Pi has no persistent kernel today; ours is new code, not a Pi feature. |
-| SoL-Pi mechanism toggles | Four mechanisms (ObservationPack, Evidence-Preserving Reducer, Online Context Compact, Action Fusion) installed via SoL-Pi on top of Pi 0.85.1. | SoL-Pi "uses public Pi APIs and does not vendor Pi" (SOL_PI_DELTA §1) — which public APIs, exactly, is unverified until the pinned commit is inspected. |
+| `render_context` | `context` event (messages after every extension's transform) and `before_provider_request` (the provider payload). A custom provider's `streamSimple(model, context)` receives `{systemPrompt, messages, tools}` directly. | The recorder loads last, so it spools exactly what the model is shown. The scripted provider spools its own request with a replay key (timestamps dropped, absolute paths aliased; A34). |
+| `propose_action` | `tool_call` event, fired before the tool executes; returning `{block: true, reason}` stops it and `event.input` is the call's arguments. | The recorder spools every call (allowed or blocked) before it runs and enforces the gateway policy there: tool allowlist, request and acquisition budgets, and no fused `then_run` that could reach a solver. |
+| `capture` | Assistant `message_end` carries the final message with `usage` (input, output, cacheRead, cacheWrite, totalTokens, cost). No request id is surfaced to extensions. | Spooled as `provider.response`; tokens as integers, Pi's cost estimate as decimal text. |
+| RLM kernel externalization | Not a Pi feature. | Not built in M3; variant S1r refuses to run. |
+| SoL-Pi mechanism toggles | SoL-Pi reads `$PI_CODING_AGENT_DIR/sol-pi.json` at `session_start` and registers only enabled mechanisms. It uses `context`, `before_provider_request`, `tool_result`, `turn_end`, `agent_settled`, `session_before_tree`, the compaction events, `registerTool`, and `ExtensionContext.compact()` (per its `docs/compatibility.md`, and exercised here). | The runtime writes one `sol-pi.json` per variant into an isolated agent dir. ObservationPack archives under the session dir; ingest imports each archived object into the store and maps `obs_id` to its digest. |
+
+Findings that differ from the M0 sketch:
+
+- `before_provider_request` fires for a custom provider only if it calls
+  `options.onPayload`, which Pi's provider guide requires; the scripted
+  provider does.
+- Pi exits 0 even when a run ends because the script ran out or a replay key
+  differed; the outcome is read from `spool.end`, never the exit code.
+- SoL-Pi's reducer calls its model through `modelRegistry.complete()`, which
+  fires no hooks. The scripted provider spools reducer calls itself; a real
+  reducer provider's calls would not be spooled (open before any live S2b/S3
+  run).
+- SoL-Pi's reducer only rewrites output of commands it recognizes as build or
+  test logs, so on the task tools (`case_input`, `orca_run`) S2b is inert.
 
 ## 3. How RLM kernel state is externalized through the gateway
 
@@ -149,26 +163,17 @@ contract should still fit [Prime], as the harness-neutrality test." Building
 shape (without implementing a `PrimeAdapter` yet) is how M0 keeps that test
 live without installing either harness.
 
-## 6. Explicit "unverified" list
+## 6. Still unverified
 
-Everything in this list is a named gap, not a decision:
-
-- Pi's actual hook/callback names for context construction, tool-call
-  interception, and provider-call observation at `0.85.1` (§2 table).
-- Whether SoL-Pi's public-API usage (§1, SOL_PI_DELTA §1) is stable between
-  Pi `0.85.1` (pinned) and Pi `0.87.1` (current npm `latest`).
-- ObservationPack's thresholds (10 KiB archive, 2-request resend window)
-  applied to ORCA-sized logs — tuned on coding benchmarks, not chemistry
-  (assumptions register A14).
-- Reducer completeness on scientific logs (assumptions register A15).
-- Mechanism activation-rate transfer across models (assumptions register
-  A16).
-- Prime's own base Pi version and its compatibility with the SoL-Pi
-  extension API, needed only if Route B is ever attempted (assumptions
-  register A17).
-- The auto-research loop that produced SoL-Pi's four mechanisms: the paper
-  describes it, the repository does not ship it (assumptions register A19).
-
-None of these block `AgentAdapter` or `DeterministicMockAdapter` — both are
-harness-independent and fully offline — but they block writing a real `Pi`
-or `SoL-Pi` adapter class, which is out of scope for M0.
+- Any real provider: live runs are built but no credentials are authorized
+  (A11, A35), so provider-specific payloads, request ids, and cost fields are
+  unobserved.
+- Online Context Compact triggering a compaction inside a Pi run: the
+  recorder spools compaction events, but no test has made SoL-Pi compact.
+- Stability of SoL-Pi's extension use between Pi 0.85.1 and later releases
+  (A13).
+- ObservationPack thresholds on ORCA-sized logs (A14), reducer completeness on
+  scientific logs (A15), and mechanism activation across models (A16).
+- Prime's base Pi version and SoL-Pi compatibility (A17), needed only for
+  Route B.
+- The auto-research loop behind SoL-Pi (A19).
