@@ -364,3 +364,22 @@ def test_activation_counts_across_all_mechanisms(tmp_path):
         "context.fused-step": 1,
         "context.reducer-fallback": 1,
     }
+
+
+def test_reducer_exception_falls_back_to_raw_log(tmp_path):
+    store = Store(tmp_path / "s", clock=LogicalClock())
+
+    def broken(log: bytes) -> dict:
+        raise ValueError("cannot parse")
+
+    result = reduce_log(
+        store,
+        "r",
+        b"x" * 5000,
+        broken,
+        exit_status=0,
+        invocation_id="r.red1",
+        clock=LogicalClock(),
+    )
+    assert not result.success and "ValueError" in result.reason
+    assert [e.type for e in store.events("r")] == ["context.reducer-fallback"]

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from labrun.canonical import sha256_digest
+from labrun.canonical import canonical_bytes, sha256_digest
 from labrun.clock import LogicalClock
 from labrun.errors import ImportRejected, IntegrityError, SchemaVersionError, VisibilityError
 from labrun.portability import export_bundle, import_bundle, inspect_capabilities
@@ -440,6 +440,51 @@ def test_unknown_record_schema_rejected(tmp_path):
 
     rewrite_manifest(b, fix)
     with pytest.raises(SchemaVersionError):
+        import_bundle(b, Store(tmp_path / "dst"))
+
+
+def _add_file(bundle: Path, rel: str, data: bytes) -> None:
+    (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+    (bundle / rel).write_bytes(data)
+    rewrite_manifest(
+        bundle,
+        lambda m: m["inventory"].append(
+            {"path": rel, "size": len(data), "digest": sha256_digest(data)}
+        ),
+    )
+
+
+def test_journal_outside_closure_rejected(tmp_path):
+
+    src = build_run(tmp_path / "s")
+    b = tmp_path / "b"
+    export_bundle(src["store"], ["r1"], b)
+    scratch = Store(tmp_path / "scratch", clock=LogicalClock())
+    scratch.put_bytes(b"x", media_type="text/plain")
+    ghost = scratch.append_event(
+        "evil", actor="x", type="x", payload_refs={"o": sha256_digest(b"x")}
+    )
+    line = canonical_bytes(ghost.to_json()) + b"\n"
+    _add_file(b, "events/evil.jsonl", line)
+    with pytest.raises(ImportRejected, match="outside"):
+        import_bundle(b, Store(tmp_path / "dst"))
+    assert not (tmp_path / "dst" / "events" / "evil.jsonl").exists()
+
+
+def test_non_object_journal_line_rejected(tmp_path):
+    src = build_run(tmp_path / "s")
+    b = tmp_path / "b"
+    export_bundle(src["store"], ["r1"], b)
+    data = b"[]\n"
+    (b / "events" / "r1.jsonl").write_bytes(data)
+
+    def fix(m):
+        for e in m["inventory"]:
+            if e["path"] == "events/r1.jsonl":
+                e["digest"], e["size"] = sha256_digest(data), len(data)
+
+    rewrite_manifest(b, fix)
+    with pytest.raises(IntegrityError):
         import_bundle(b, Store(tmp_path / "dst"))
 
 

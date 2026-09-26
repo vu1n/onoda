@@ -28,7 +28,7 @@ from labrun.canonical import canonical_bytes, digest_of, sha256_digest
 from labrun.clock import Clock
 from labrun.errors import CanonicalizationError, CapabilityError
 from labrun.records import Event, InvocationReceipt, StepSpec, Usage
-from labrun.store import Store
+from labrun.store import Store, record_ref
 
 _EXCERPT_BYTES = 256
 
@@ -299,8 +299,12 @@ def reduce_log(
     `required_diagnostics_present`).
     """
     log_desc = store.put_bytes(log, media_type="text/plain", labels=["log"])
-    receipt = reducer(log)
-    failure = _verify_receipt(receipt, log, exit_status)
+    try:
+        receipt = reducer(log)
+    except Exception as exc:  # a failing reducer must fall back, not lose the log
+        receipt, failure = {}, f"reducer raised {type(exc).__name__}: {exc}"
+    else:
+        failure = _verify_receipt(receipt, log, exit_status)
     if failure is not None:
         store.append_event(
             run_id,
@@ -344,6 +348,14 @@ def reduce_log(
         labels=["reducer-receipt"],
     )
     store.put_record(invocation)
+    # Journaled like any other invocation so exports, cost views and replay see it.
+    store.append_event(
+        run_id,
+        actor="context.reducer",
+        type="invocation.committed",
+        payload={"invocation_id": invocation_id, "step_key": f"context.reduce:{invocation_id}"},
+        payload_refs={"receipt": record_ref("invocation", invocation_id)},
+    )
     return ReducerResult(
         success=True, digest=receipt_desc.digest, receipt=receipt, invocation=invocation
     )
