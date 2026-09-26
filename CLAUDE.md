@@ -12,6 +12,8 @@ first agent adapter; Prime is an optional comparison arm).
 - Lint: `uv run ruff check .`
 - Format: `uv run ruff format .` (check with `--check`)
 - Demo: `scripts/demo.sh` runs the full clean-workspace sequence
+- Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
+  `labrun case list` shows them. Vendored bytes under `cases/` are never edited.
 
 VCS is plain git. No project board; work items come from issues or goals.
 
@@ -33,6 +35,13 @@ VCS is plain git. No project board; work items come from issues or goals.
 - Import is data-only: no code execution, pickle, network, or installs.
 - Synthetic fixture output is labelled synthetic and never described as a
   solver or chemistry result.
+- Acquired solver outputs are recorded as acquired (`executed_here: false`),
+  never as executions; stand-in executables are labelled and their
+  observations are synthetic.
+- Parsed values are the printed decimal text with units and line evidence;
+  anything unreadable is an explicit problem, never a default. Evaluation
+  never matches states by nearest energy, and a missing tolerance makes a
+  comparison `unresolved`, not `pass`.
 - Every live-execution setting defaults off and unresolved live settings fail
   closed.
 
