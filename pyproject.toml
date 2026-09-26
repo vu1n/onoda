@@ -1,0 +1,38 @@
+[project]
+name = "onoda"
+version = "0.1.0"
+description = "Portable, forkable run records for scientific-agent experiments (labrun CLI)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.9,<3",
+    "pyyaml>=6",
+    "rfc8785==0.1.4",
+]
+
+[project.scripts]
+labrun = "labrun.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
+
+[tool.uv.build-backend]
+module-name = "labrun"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

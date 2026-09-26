@@ -1,0 +1,50 @@
+# Proposed fork declaration. Replace null refs with actual committed digests.
+# This fixture changes a policy, not a real model or scientific method.
+spec_version: "0.1-design"
+new_run_id: "fixture-policy-branch"
+parent:
+  run_id: null
+  manifest_digest: null
+  checkpoint_digest: null
+  required_boundary: "diagnostics-committed"
+
+intervention:
+  kind: "decision-policy-change"
+  from_policy: "mock-policy-v1"
+  to_policy: "mock-policy-v2"
+  from_digest: null
+  to_digest: null
+  changed_task: false
+  changed_memory: false
+  changed_evaluator: false
+  context_translation: null
+
+inheritance:
+  scope: "checkpoint-visible-ancestor-closure"
+  require_quiescent_checkpoint: true
+  copy_original_future: false
+  reuse_changed_node_outputs: false
+  memory_scope: "same-frozen-release"
+
+execution:
+  record_type: "new-invocations"
+  reevaluate_decision: true
+  execute_changed_action_and_suffix: true
+  mode: "fixture"
+  allow_live_execution: false
+
+budgets:
+  allowance: "inherit-remaining"
+  retain_parent_quota: true
+  record_inherited_prefix_cost: true
+  record_marginal_cost: true
+  record_full_path_attributed_cost: true
+  aggregate_physical_cost_by_unique_invocation: true
+
+report:
+  comparison_kind: "conditional-branch-not-independent-full-run"
+  preserve_parent_unchanged: true
+  required_labels:
+    - "synthetic"
+    - "forked"
+    - "policy-intervention"

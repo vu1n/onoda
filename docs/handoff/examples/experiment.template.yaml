@@ -1,0 +1,77 @@
+# Proposed configuration shape for Codex to implement and validate.
+# Not an installed tool's configuration or a runnable benchmark manifest.
+# Offline defaults are intentional. Null live settings must fail closed.
+spec_version: "0.1-design"
+experiment_id: "portable-fixture-demo"
+claim: "synthetic-infrastructure-test"
+mode: "fixture"
+allow_live_execution: false
+
+sources:
+  scientific_paper: "arxiv:2609.13357v1"
+  dataset_revision: null
+  upstream_lock_manifest: null
+
+tasks:
+  source: "synthetic-fixture-to-implement"
+  manifest_digest: null
+  split: "development"
+  real_scientific_data: false
+
+agent:
+  adapter: "deterministic-mock"
+  provider: null
+  requested_model: null
+  observed_model_version: null
+  inherited_global_state: false
+  uncontrolled_network: false
+  refinement: "disabled"
+
+policy:
+  version: "mock-policy-v1"
+  digest: null
+  execution_mode: "advisory"
+  decision_provider: "deterministic-mock"
+
+memory:
+  mode: "disabled"
+  release_digest: null
+  allow_descendant_evidence: false
+  allow_test_outcomes: false
+
+evaluator:
+  profile: "synthetic-only"
+  version: "fixture-evaluator-v1"
+  protected_view: true
+  scientific_tolerances: null
+
+budgets:
+  max_live_model_calls: 0
+  max_live_solver_submissions: 0
+  max_authorized_external_spend_usd: "0.00"
+  max_fixture_steps: 24
+  parent_quota_required: true
+  fixture_costs_are_simulated: true
+
+portability:
+  format_version: "0.1"
+  canonical_artifacts: "local-content-addressed-files"
+  digest_algorithm: "sha256"
+  structured_canonicalization: "rfc8785"
+  index_is_rebuildable: true
+  checkpoint_boundaries:
+    - "initialized"
+    - "job-collected"
+    - "diagnostics-committed"
+    - "decision-committed-before-submission"
+    - "finalized"
+  require_quiescent_forks: true
+  imported_code_execution: "deny"
+  replay_network: "deny"
+  live_request_mismatch: "error-not-fallback"
+
+export:
+  profile: "agent-visible"
+  require_declared_capability_closure: true
+  exclude_credentials: true
+  include_evaluator_answers: false
