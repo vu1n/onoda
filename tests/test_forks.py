@@ -421,8 +421,11 @@ def test_t07_wavefunction_change_invalidates_mapping(fixture_run):
     )
     decl = env.store.get_record("fork", env.controller.run_record("wf").fork)
     assert decl.invalidated == parent_cp.frontier
-    assert st.phase == "parse" and st.visible["wavefunction.r1"] != done.visible["wavefunction.r1"]
+    assert st.phase == "calc" and "wavefunction.r1" not in st.visible
     assert "mapping.r1" not in st.visible and "observation.r1" not in st.visible
+    # the override lives in the run config, so a crash here resumes at the fine level
+    st = env.reopen().controller.advance("wf", until="job-collected")
+    assert st.visible["wavefunction.r1"] != done.visible["wavefunction.r1"]
 
     # pairing the old mapping with the new wavefunction is refused at decide
     run = env.controller.run_record("wf")

@@ -215,7 +215,8 @@ class Controller:
         run = self.run_record(st.run_id)
         r = st.round
         if st.phase == "calc":
-            level = "coarse" if r == 1 else "fine"
+            default = "coarse" if r == 1 else "fine"
+            level = run.config.get("calc_overrides", {}).get(f"r{r}", default)
             rec = self.run_job(
                 run.run_id,
                 f"calc:r{r}",

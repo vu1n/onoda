@@ -179,10 +179,7 @@ def fork_run(
         payload_refs=refs,
     )
     boundary = cp.boundary if not invalid else _boundary_before(phase, rnd)
-    st = controller.write_checkpoint(run, boundary, phase, rnd, visible, frontier, cut)
-    if kind == "calc-config-change":
-        st = _run_overridden_calc(controller, run, st, intervention["level"])
-    return st
+    return controller.write_checkpoint(run, boundary, phase, rnd, visible, frontier, cut)
 
 
 def _boundary_before(phase: str, rnd: int) -> Boundary:
@@ -190,28 +187,6 @@ def _boundary_before(phase: str, rnd: int) -> Boundary:
     if phase == "calc":
         return "initialized" if rnd == 1 else "decision-committed-before-submission"
     return {"parse": "job-collected", "decide": "diagnostics-committed"}[phase]
-
-
-def _run_overridden_calc(controller: Controller, run: Run, st: RunState, level: str) -> RunState:
-    """Execute the changed calc node (the controller's calc phase only knows default levels)."""
-    r = st.round
-    rec = controller.run_job(
-        run.run_id, f"calc:r{r}", "fixture-calc", {"params": st.visible["params"]}, {"level": level}
-    )
-    visible = {
-        **st.visible,
-        f"log.r{r}": rec.outputs["log"],
-        f"wavefunction.r{r}": rec.outputs["wavefunction"],
-    }
-    return controller.write_checkpoint(
-        run,
-        "job-collected",
-        "parse",
-        r,
-        visible,
-        [*st.frontier, rec.invocation_id],
-        st.ancestry_cut,
-    )
 
 
 # ------------------------------------------------------------ validation
