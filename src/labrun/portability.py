@@ -435,6 +435,16 @@ def _stored_omissions(store: Store) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _imported_prefixes(store: Store) -> dict[str, int]:
+    """Runs this store holds only as an ancestor prefix cut by an earlier import."""
+    out: dict[str, int] = {}
+    base = store.root / "imports"
+    if base.is_dir():
+        for path in sorted(base.glob("*.json")):
+            out.update(json.loads(path.read_bytes()).get("ancestors", {}))
+    return out
+
+
 def inspect_capabilities(
     store: Store, run_id: str, *, available_environment: dict[str, Any] | None = None
 ) -> dict[str, dict[str, Any]]:
@@ -1054,8 +1064,16 @@ def import_bundle(
         existing = store._journal_path(run_id)
         if existing.exists():
             have, raw = existing.read_bytes(), files[f"events/{run_id}.jsonl"]
-            if not (have.startswith(raw) or raw.startswith(have)):
-                raise IntegrityError(f"journal {run_id} conflicts with the store's journal")
+            # A bundle may carry a prefix of local history but never extend it:
+            # appending to an existing run would let untrusted input write its future.
+            prefix_cut = _imported_prefixes(store).get(run_id)
+            completes_prefix = (
+                run_id in manifest["roots"]
+                and prefix_cut == have.count(b"\n")
+                and raw.startswith(have)
+            )
+            if not (have.startswith(raw) or completes_prefix):
+                raise ImportRejected(f"journal {run_id} would change or extend the local journal")
 
     for digest in sorted(objects):
         desc = records[("artifact", digest)]

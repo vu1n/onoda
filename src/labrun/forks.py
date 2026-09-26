@@ -427,6 +427,12 @@ class RunView:
                 continue
             decl = self.store.get_record("fork", fork)
             assert isinstance(decl, ForkDeclaration)
+            parent_cp = self.store.checkpoint(decl.parent.checkpoint)
+            first = self.store.checkpoints(run_id)[0][2]
+            # Keys the fork dropped without a receipt behind them (e.g. "final").
+            for key, digest in parent_cp.visible.items():
+                if key not in first.visible:
+                    hidden |= {digest, record_ref("artifact", digest)}
             for inv_id in decl.invalidated:
                 hidden.add(record_ref("invocation", inv_id))
                 for digest in self.store.receipt(inv_id).outputs.values():

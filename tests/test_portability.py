@@ -667,3 +667,18 @@ def test_capability_statuses_for_live_steps(tmp_path):
     caps = inspect_capabilities(store, "live", available_environment={"solver": "orca@6.0.1"})
     assert caps["reexecute"]["status"] == "unavailable-provider-state"
     assert caps["inspect"]["status"] == "supported"
+
+
+def test_bundle_cannot_extend_a_local_journal(tmp_path):
+    import shutil
+
+    src = build_run(tmp_path / "s")
+    shutil.copytree(tmp_path / "s", tmp_path / "evil")
+    evil = Store(tmp_path / "evil", clock=LogicalClock())
+    evil.append_event("r1", actor="attacker", type="note")
+    out = tmp_path / "b"
+    export_bundle(evil, ["r1"], out)
+    before = (src["store"].root / "events" / "r1.jsonl").read_bytes()
+    with pytest.raises(ImportRejected, match="extend"):
+        import_bundle(out, src["store"])
+    assert (src["store"].root / "events" / "r1.jsonl").read_bytes() == before
