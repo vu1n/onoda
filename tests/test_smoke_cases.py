@@ -45,6 +45,7 @@ def test_every_pinned_case_records_parses_and_evaluates(tmp_path, case_id):
     assert digest == cr.observation
     assert obs.synthetic is False
     assert obs.termination == "normal"
+    assert obs.program_version == c.manifest.program_version
     assert agent.get_bytes(cr.log) == c.output_bytes["log"]
 
     acquire = agent.receipt("run.i001")

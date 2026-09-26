@@ -1,7 +1,7 @@
 case_id: orca6-dvb-eom-ccsd
 title: Divinylbenzene EOM-CCSD/STO-3G, 2 singlet roots
 program: ORCA
-program_version: 6.0.0
+program_version: 6.0.1
 method: EOM-CCSD/STO-3G
 split: development
 input:

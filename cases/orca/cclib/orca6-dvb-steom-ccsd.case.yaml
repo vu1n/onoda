@@ -1,7 +1,7 @@
 case_id: orca6-dvb-steom-ccsd
 title: Divinylbenzene STEOM-CCSD/STO-3G, 2 singlet roots
 program: ORCA
-program_version: 6.0.0
+program_version: 6.0.1
 method: STEOM-CCSD/STO-3G
 split: development
 input:
@@ -21,8 +21,9 @@ provenance:
   license_file: LICENSE
   retrieved: '2026-09-26'
   executed_here: false
-  notes: The log prints CIS root energies before the STEOM roots; a parser that cannot
-    tell them apart must report the states as ambiguous.
+  notes: ORCA 6.0.1 build. The log prints a CIS guess listing and IP/EA-EOM listings
+    before the STEOM roots; orca-parser@1 attributes each listing to its section header
+    and reports only the STEOM roots.
 request:
   roots_by_multiplicity:
     1: 2

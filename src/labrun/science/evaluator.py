@@ -396,7 +396,7 @@ def evaluate_observation(
         assignments=assignments,
         unresolved=[name for name, v in assignments.items() if v == "unresolved"],
         metrics=metrics,
-        usage=Usage(units={}, measured=False, simulated=True, cost_usd="0.00"),
+        usage=Usage(units={}, measured=False, simulated=False, cost_usd="0.00"),
         created_at=evaluator_store.clock.now(),
     )
     evaluator_store.put_record(evaluation)

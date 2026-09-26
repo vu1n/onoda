@@ -1,7 +1,7 @@
 case_id: orca6-water-mp2
 title: Water MP2/STO-3G single point
 program: ORCA
-program_version: 6.0.0
+program_version: 6.0.1
 method: MP2/STO-3G
 split: development
 input:
