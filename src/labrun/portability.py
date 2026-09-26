@@ -372,8 +372,12 @@ def _capabilities(
     for inv, step in steps:
         if not isinstance(step, StepSpec):
             continue
-        live = step.determinism == "external" or bool({"external", "live"} & set(inv.labels))
-        fixture = "fixture" in inv.labels or step.code_ref.startswith("fixture")
+        fixture = "fixture" in inv.labels or step.code_ref.startswith(
+            ("fixture", "labrun.fixture:")
+        )
+        live = "live" in inv.labels or (
+            not fixture and (step.determinism == "external" or "external" in inv.labels)
+        )
         if fixture and not live:
             offline.append(step.operation)
             continue
