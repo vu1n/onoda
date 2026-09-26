@@ -121,12 +121,14 @@ def cmd_reanalyze(a) -> Any:
 
 
 def cmd_fork(a) -> Any:
-    from labrun.forks import fork_run
+    from labrun.forks import INTERVENTIONS, fork_run
 
     declaration = yaml.safe_load(Path(a.declaration).read_text())
-    iv = dict(declaration.get("intervention") or {})
-    kind = iv.pop("kind", None)
-    intervention = {"kind": kind, **{k: v for k, v in iv.items() if v is not None}}
+    iv = declaration.get("intervention") or {}
+    kind = iv.get("kind")
+    required, optional, _ = INTERVENTIONS.get(kind, ("", (), ""))
+    intervention = {"kind": kind}
+    intervention |= {k: iv[k] for k in (required, *optional) if iv.get(k) is not None}
     st = fork_run(
         _controller(a.store),
         a.run_id,
