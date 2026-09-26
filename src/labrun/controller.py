@@ -46,6 +46,7 @@ CAPABILITIES = {
     "native_resume": "unsupported",
     "reexecute": "supported-fixture-only",
 }
+KNOWN_PROVIDER_KINDS = ("deterministic-mock", "offline-replay")
 FIXTURE_PRICES = {"fixture-calc": "0.40", "fixture-sample": None, "parse": "0.00"}
 
 
@@ -373,6 +374,9 @@ class Controller:
                 "request_digest": request.digest(),
                 "provider": result.provider,
                 "replayed_from": result.replayed_from,
+                "provider_state": "known"
+                if result.provider.get("kind") in KNOWN_PROVIDER_KINDS
+                else "unknown",
             },
             usage=result.usage,
             reservation=reservation,
@@ -531,7 +535,7 @@ class Controller:
                 usage=usage,
                 started_at=now,
                 finished_at=now,
-                labels=["synthetic"],
+                labels=["synthetic", "fixture"],
             )
             self.store.put_record(receipt)
         assert isinstance(receipt, InvocationReceipt)
