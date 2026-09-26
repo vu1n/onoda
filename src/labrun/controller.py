@@ -178,19 +178,10 @@ class Controller:
     # ---------------------------------------------------------------- state
 
     def run_record(self, run_id: str) -> Run:
-        run = self.store.get_record("run", run_id)
-        assert isinstance(run, Run)
-        return run
+        return self.store.run_record(run_id)
 
     def checkpoints(self, run_id: str) -> list[tuple[int, str, Checkpoint]]:
-        out = []
-        for e in self.store.events(run_id):
-            if e.type == "checkpoint":
-                digest = e.payload_refs["checkpoint"].split("/", 1)[1]
-                cp = self.store.get_record("checkpoint", digest)
-                assert isinstance(cp, Checkpoint)
-                out.append((e.seq, digest, cp))
-        return out
+        return self.store.checkpoints(run_id)
 
     def state(self, run_id: str) -> RunState:
         cps = self.checkpoints(run_id)
@@ -277,12 +268,12 @@ class Controller:
         raise LabrunError(f"run {st.run_id} is in unknown phase {st.phase!r}")
 
     def _final_state(self, run: Run, st: RunState) -> dict[str, Any]:
-        actions = [
-            self.store.get_json(st.visible[f"decision.r{i}"])["action"]
-            or self.store.get_json(st.visible[f"decision.r{i}"])["abstention"]
+        decisions = [
+            self.store.get_json(st.visible[f"decision.r{i}"])
             for i in range(1, st.round + 1)
             if f"decision.r{i}" in st.visible
         ]
+        actions = [d["action"] or d["abstention"] for d in decisions]
         obs = self.store.get_json(st.visible[f"observation.r{st.round}"])
         return {
             "synthetic": True,
@@ -520,7 +511,7 @@ class Controller:
                 ledger.reserve(reservation, {"fixture_steps": 1})
         inv_id = invocation_id or self._next_invocation_id(run.run_id)
         if self.store.has_record("invocation", inv_id):
-            receipt = self.store.get_record("invocation", inv_id)  # committed before a crash
+            receipt = self.store.receipt(inv_id)  # committed before a crash
         else:
             now = self.store.clock.now()
             receipt = InvocationReceipt.new(
@@ -539,7 +530,6 @@ class Controller:
                 labels=["synthetic", "fixture"],
             )
             self.store.put_record(receipt)
-        assert isinstance(receipt, InvocationReceipt)
         self.store.append_event(
             run.run_id,
             actor="controller",
@@ -554,15 +544,11 @@ class Controller:
         ev = _find(self.store.events(run_id), "invocation.committed", step_key=step_key)
         if ev is None:
             return None
-        rec = self.store.get_record("invocation", ev.payload["invocation_id"])
-        assert isinstance(rec, InvocationReceipt)
-        return rec
+        return self.store.receipt(ev.payload["invocation_id"])
 
     def _producer(self, st: RunState, digest: str) -> str | None:
         for inv_id in reversed(st.frontier):
-            rec = self.store.get_record("invocation", inv_id)
-            assert isinstance(rec, InvocationReceipt)
-            if digest in rec.outputs.values():
+            if digest in self.store.receipt(inv_id).outputs.values():
                 return inv_id
         return None
 

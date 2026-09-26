@@ -22,17 +22,12 @@ from decimal import Decimal
 from typing import Any
 
 from labrun.errors import BudgetExceeded
-from labrun.records import Checkpoint, InvocationReceipt, Run
+from labrun.records import Checkpoint, Event, InvocationReceipt, Run
 from labrun.store import Store
 
 
 def _receipts(store: Store, invocation_ids: Iterable[str]) -> list[InvocationReceipt]:
-    out = []
-    for inv_id in invocation_ids:
-        rec = store.get_record("invocation", inv_id)
-        assert isinstance(rec, InvocationReceipt)
-        out.append(rec)
-    return out
+    return [store.receipt(i) for i in invocation_ids]
 
 
 def summarize(receipts: Iterable[InvocationReceipt]) -> dict[str, Any]:
@@ -69,16 +64,12 @@ def starting_checkpoint(store: Store, run: Run) -> Checkpoint | None:
         return None
     for e in store.events(run.run_id):
         if e.type == "checkpoint":
-            cp = store.get_record("checkpoint", e.payload_refs["checkpoint"].split("/", 1)[1])
-            assert isinstance(cp, Checkpoint)
-            return cp
+            return store.checkpoint(e.payload_refs["checkpoint"].split("/", 1)[1])
     return None
 
 
 def inherited_invocation_ids(store: Store, run_id: str) -> list[str]:
-    run = store.get_record("run", run_id)
-    assert isinstance(run, Run)
-    cp = starting_checkpoint(store, run)
+    cp = starting_checkpoint(store, store.run_record(run_id))
     if cp is None:
         return []
     own = set(own_invocation_ids(store, run_id))
@@ -86,7 +77,7 @@ def inherited_invocation_ids(store: Store, run_id: str) -> list[str]:
 
 
 def cost_views(store: Store, run_id: str) -> dict[str, Any]:
-    own = [r for r in _receipts(store, own_invocation_ids(store, run_id))]
+    own = _receipts(store, own_invocation_ids(store, run_id))
     marginal = [r for r in own if r.invocation_kind != "reuse"]
     inherited = _receipts(store, inherited_invocation_ids(store, run_id))
     return {
@@ -121,12 +112,11 @@ class Ledger:
         self.run_caps: dict[str, int] = run.config.get("limits", {})
 
     def _quota_runs(self) -> list[str]:
-        runs = []
-        for run_id in self.store.list_record_ids("run"):
-            other = self.store.get_record("run", run_id)
-            assert isinstance(other, Run)
-            if other.quota_id == self.quota_id:
-                runs.append(run_id)
+        runs = [
+            run_id
+            for run_id in self.store.list_record_ids("run")
+            if self.store.run_record(run_id).quota_id == self.quota_id
+        ]
         if self.run.run_id not in runs:
             runs.append(self.run.run_id)
         return runs
@@ -165,9 +155,12 @@ class Ledger:
             "inherited": inherited,
         }
 
-    def reserve(self, reservation: str, units: dict[str, int], *, causes: Iterable[str] = ()):
+    def reserve(
+        self, reservation: str, units: dict[str, int], *, causes: Iterable[str] = ()
+    ) -> Event:
         snap = self.snapshot()
         charged_inherited = snap["inherited"] if snap["treatment"] == "inherit-remaining" else {}
+        quota_totals: list[dict[str, int]] | None = None
         for name, n in units.items():
             cap = self.run_caps.get(name)
             used = snap["own"].get(name, 0) + charged_inherited.get(name, 0)
@@ -175,7 +168,9 @@ class Ledger:
                 raise BudgetExceeded(f"run {self.run.run_id}: {name} {used}+{n} > {cap}")
             qcap = self.quota_caps.get(name)
             if qcap is not None:
-                qused = sum(self._run_totals(r).get(name, 0) for r in self._quota_runs())
+                if quota_totals is None:
+                    quota_totals = [self._run_totals(r) for r in self._quota_runs()]
+                qused = sum(t.get(name, 0) for t in quota_totals)
                 if qused + n > qcap:
                     raise BudgetExceeded(f"quota {self.quota_id}: {name} {qused}+{n} > {qcap}")
         return self.store.append_event(
@@ -186,7 +181,9 @@ class Ledger:
             causes=causes,
         )
 
-    def settle(self, reservation: str, units: dict[str, int], *, causes: Iterable[str] = ()):
+    def settle(
+        self, reservation: str, units: dict[str, int], *, causes: Iterable[str] = ()
+    ) -> Event:
         return self.store.append_event(
             self.run.run_id,
             actor="budget",

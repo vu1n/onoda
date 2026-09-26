@@ -153,11 +153,11 @@ def cmd_compare(a) -> Any:
     store = _store(a.store)
     runs = []
     for run_id in a.run_ids:
-        run = store.get_record("run", run_id)
+        run = store.run_record(run_id)
         final = None
         for e in reversed(store.events(run_id)):
             if e.type == "checkpoint" and e.payload.get("boundary") == "finalized":
-                cp = store.get_record("checkpoint", e.payload_refs["checkpoint"].split("/", 1)[1])
+                cp = store.checkpoint(e.payload_refs["checkpoint"].split("/", 1)[1])
                 final = store.get_json(cp.visible["final"])
                 break
         entry: dict[str, Any] = {
@@ -187,7 +187,7 @@ def cmd_evaluate(a) -> Any:
 
     store = _store(a.store)
     evaluator = _store(a.evaluator_store, evaluator=True)
-    task = store.get_record("task", store.get_record("run", a.run_id).task)
+    task = store.get_record("task", store.run_record(a.run_id).task)
     params = store.get_json(task.inputs["params"])
     reference = publish_reference(evaluator, params)
     ev = evaluate_run(store, evaluator, a.run_id, grader=a.grader, reference=reference)

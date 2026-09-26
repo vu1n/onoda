@@ -35,8 +35,11 @@ from labrun.errors import IntegrityError, LabrunError, MissingObjectError, Visib
 from labrun.records import (
     RECORD_TYPES,
     ArtifactDescriptor,
+    Checkpoint,
     Event,
+    InvocationReceipt,
     Record,
+    Run,
     Visibility,
     load_record,
 )
@@ -221,6 +224,32 @@ class Store:
         if record.content_addressed and record.record_digest() != record_id:
             raise IntegrityError(f"{kind} {record_id} failed digest verification")
         return record
+
+    # Typed getters: `get_record` returns the base `Record`; these narrow it.
+
+    def receipt(self, invocation_id: str) -> InvocationReceipt:
+        rec = self.get_record("invocation", invocation_id)
+        assert isinstance(rec, InvocationReceipt)
+        return rec
+
+    def checkpoint(self, digest: str) -> Checkpoint:
+        rec = self.get_record("checkpoint", digest)
+        assert isinstance(rec, Checkpoint)
+        return rec
+
+    def run_record(self, run_id: str) -> Run:
+        rec = self.get_record("run", run_id)
+        assert isinstance(rec, Run)
+        return rec
+
+    def checkpoints(self, run_id: str) -> list[tuple[int, str, Checkpoint]]:
+        """(event seq, digest, record) for each `checkpoint` event in journal order."""
+        out = []
+        for e in self.events(run_id):
+            if e.type == "checkpoint":
+                digest = e.payload_refs["checkpoint"].split("/", 1)[1]
+                out.append((e.seq, digest, self.checkpoint(digest)))
+        return out
 
     def list_record_ids(self, kind: str) -> list[str]:
         base = self.root / "records" / kind
