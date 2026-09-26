@@ -7,9 +7,9 @@ import warnings
 
 import pytest
 
-from labrun.canonical import canonical_bytes, sha256_digest
-from labrun.science.contract import OrcaObservation, case_manifests, load_case
-from labrun.science.orca_parser import PARSER_ID, parse_orca_output
+from onoda.canonical import canonical_bytes, sha256_digest
+from onoda.science.contract import OrcaObservation, case_manifests, load_case
+from onoda.science.orca_parser import PARSER_ID, parse_orca_output
 
 CASES = case_manifests()
 HARTREE_CM = 219474.6313705  # CODATA; used only for tolerance checks in this test

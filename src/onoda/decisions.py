@@ -14,10 +14,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from labrun.canonical import canonical_bytes, digest_of
-from labrun.errors import ReplayMismatch
-from labrun.records import InvocationReceipt, Usage
-from labrun.store import Store
+from onoda.canonical import canonical_bytes, digest_of
+from onoda.errors import ReplayMismatch
+from onoda.records import InvocationReceipt, Usage
+from onoda.store import Store
 
 Abstention = Literal["insufficient_evidence", "no_applicable_procedure", "escalate"]
 

@@ -1,4 +1,4 @@
-"""`labrun` command line (PORTABLE_RUN_SPEC §14). Every command prints JSON.
+"""`onoda` command line (PORTABLE_RUN_SPEC §14). Every command prints JSON.
 
 The mock scheduler stands in for an external system, so its state lives beside
 the store (`<store>.scheduler/`), never inside it, and is never exported.
@@ -14,8 +14,8 @@ from typing import Any
 
 import yaml
 
-from labrun.errors import LabrunError
-from labrun.store import Store
+from onoda.errors import OnodaError
+from onoda.store import Store
 
 
 def _store(path: str, *, evaluator: bool = False) -> Store:
@@ -23,9 +23,9 @@ def _store(path: str, *, evaluator: bool = False) -> Store:
 
 
 def _controller(store_path: str):
-    from labrun.controller import Controller
-    from labrun.fixture import PROGRAMS
-    from labrun.jobs import MockScheduler
+    from onoda.controller import Controller
+    from onoda.fixture import PROGRAMS
+    from onoda.jobs import MockScheduler
 
     store = _store(store_path)
     scheduler = MockScheduler(Path(f"{Path(store_path).resolve()}.scheduler"), PROGRAMS)
@@ -35,9 +35,9 @@ def _controller(store_path: str):
 def _fixture_only(store: Store, run_id: str, command: str) -> None:
     """Fixture commands read fixture-shaped records; a case run has none."""
     if store.run_record(run_id).config.get("case_id") is not None:
-        raise LabrunError(
-            f"run {run_id} is an ORCA case run; `labrun {command}` handles fixture runs only "
-            "(see `labrun case --help`)"
+        raise OnodaError(
+            f"run {run_id} is an ORCA case run; `onoda {command}` handles fixture runs only "
+            "(see `onoda case --help`)"
         )
 
 
@@ -73,7 +73,7 @@ def cmd_checkpoint_list(a) -> Any:
 
 
 def cmd_export(a) -> Any:
-    from labrun.portability import export_bundle
+    from onoda.portability import export_bundle
 
     evaluator = _store(a.evaluator_store, evaluator=True) if a.evaluator_store else None
     manifest = export_bundle(
@@ -88,7 +88,7 @@ def cmd_export(a) -> Any:
 
 
 def cmd_import(a) -> Any:
-    from labrun.portability import import_bundle
+    from onoda.portability import import_bundle
 
     report = import_bundle(Path(a.bundle), _store(a.store))
     return {
@@ -103,8 +103,8 @@ def cmd_import(a) -> Any:
 
 
 def cmd_inspect(a) -> Any:
-    from labrun.portability import inspect_capabilities
-    from labrun.replay import replay_run
+    from onoda.portability import inspect_capabilities
+    from onoda.replay import replay_run
 
     store = _store(a.store)
     out: dict[str, Any] = {"run_id": a.run_id}
@@ -116,15 +116,15 @@ def cmd_inspect(a) -> Any:
 
 
 def cmd_replay(a) -> Any:
-    from labrun.replay import replay_run
+    from onoda.replay import replay_run
 
     if not a.offline:
-        raise LabrunError("replay is offline-only; pass --offline to acknowledge")
+        raise OnodaError("replay is offline-only; pass --offline to acknowledge")
     return replay_run(_store(a.store), a.run_id)
 
 
 def cmd_reanalyze(a) -> Any:
-    from labrun.replay import reanalyze
+    from onoda.replay import reanalyze
 
     store = _store(a.store)
     _fixture_only(store, a.run_id, "reanalyze")
@@ -132,7 +132,7 @@ def cmd_reanalyze(a) -> Any:
 
 
 def cmd_fork(a) -> Any:
-    from labrun.forks import INTERVENTIONS, fork_run
+    from onoda.forks import INTERVENTIONS, fork_run
 
     _fixture_only(_store(a.store), a.run_id, "fork")
     declaration = yaml.safe_load(Path(a.declaration).read_text())
@@ -155,13 +155,13 @@ def cmd_fork(a) -> Any:
 
 def cmd_resume(a) -> Any:
     if a.mode != "fixture":
-        raise LabrunError(f"resume mode {a.mode!r} unavailable: only fixture mode runs offline")
+        raise OnodaError(f"resume mode {a.mode!r} unavailable: only fixture mode runs offline")
     _fixture_only(_store(a.store), a.run_id, "resume")
     return _state_json(_controller(a.store).resume(a.run_id))
 
 
 def cmd_compare(a) -> Any:
-    from labrun.budgets import cost_views, physical_cost
+    from onoda.budgets import cost_views, physical_cost
 
     store = _store(a.store)
     runs = []
@@ -197,7 +197,7 @@ def cmd_compare(a) -> Any:
 
 
 def cmd_evaluate(a) -> Any:
-    from labrun.evaluation import evaluate_run, publish_reference
+    from onoda.evaluation import evaluate_run, publish_reference
 
     store = _store(a.store)
     _fixture_only(store, a.run_id, "evaluate")
@@ -217,16 +217,16 @@ def cmd_evaluate(a) -> Any:
 
 
 def _case(case_id: str, cases_root: str | None):
-    from labrun.science.contract import CASES_ROOT, case_manifests, load_case
+    from onoda.science.contract import CASES_ROOT, case_manifests, load_case
 
     manifests = case_manifests(Path(cases_root) if cases_root else CASES_ROOT)
     if case_id not in manifests:
-        raise LabrunError(f"unknown case {case_id!r}; see `labrun case list`")
+        raise OnodaError(f"unknown case {case_id!r}; see `onoda case list`")
     return load_case(manifests[case_id])
 
 
 def cmd_case_list(a) -> Any:
-    from labrun.science.contract import CASES_ROOT, case_manifests, load_case
+    from onoda.science.contract import CASES_ROOT, case_manifests, load_case
 
     out = []
     for path in case_manifests(Path(a.cases_root) if a.cases_root else CASES_ROOT).values():
@@ -245,12 +245,12 @@ def cmd_case_list(a) -> Any:
 
 
 def cmd_case_ingest(a) -> Any:
-    from labrun.science.runner import record_case_run
+    from onoda.science.runner import record_case_run
 
     case = _case(a.case_id, a.cases_root)
     scheduler = None
     if a.execute:
-        from labrun.science.orca_local import OrcaLocalScheduler, OrcaSettings
+        from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
 
         scheduler = OrcaLocalScheduler(
             OrcaSettings(
@@ -277,12 +277,12 @@ def cmd_case_ingest(a) -> Any:
 
 
 def cmd_case_evaluate(a) -> Any:
-    from labrun.science.runner import evaluate_case_run
+    from onoda.science.runner import evaluate_case_run
 
     store = _store(a.store)
     case_id = store.run_record(a.run_id).config.get("case_id")
     if case_id is None:
-        raise LabrunError(f"run {a.run_id} is not a case run")
+        raise OnodaError(f"run {a.run_id} is not a case run")
     ev = evaluate_case_run(
         store,
         _store(a.evaluator_store, evaluator=True),
@@ -303,7 +303,7 @@ def cmd_case_evaluate(a) -> Any:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="labrun", description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(prog="onoda", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
 
     fx = sub.add_parser("fixture").add_subparsers(dest="fixture_command", required=True)
@@ -415,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         result = args.func(args)
-    except LabrunError as exc:
+    except OnodaError as exc:
         print(json.dumps({"error": type(exc).__name__, "message": str(exc)}), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))

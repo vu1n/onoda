@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from labrun.budgets import cost_views, own_invocation_ids, physical_cost, summarize
-from labrun.errors import BudgetExceeded, ForkError, IntegrityError, VisibilityError
-from labrun.forks import RunView, fork_run
-from labrun.memory import freeze_release, retrieve, write_lesson
-from labrun.records import Checkpoint, ForkDeclaration, InvocationReceipt, Run
+from onoda.budgets import cost_views, own_invocation_ids, physical_cost, summarize
+from onoda.errors import BudgetExceeded, ForkError, IntegrityError, VisibilityError
+from onoda.forks import RunView, fork_run
+from onoda.memory import freeze_release, retrieve, write_lesson
+from onoda.records import Checkpoint, ForkDeclaration, InvocationReceipt, Run
 
 TEMPLATE = Path(__file__).parents[1] / "docs/handoff/examples/fork.template.yaml"
 R1 = ["params", "log.r1", "wavefunction.r1", "observation.r1", "mapping.r1"]
@@ -570,7 +570,7 @@ def test_invalidated_parent_outputs_are_hidden_from_view(fixture_run):
 
 
 def test_forked_run_replays_offline(fixture_run):
-    from labrun.replay import replay_run
+    from onoda.replay import replay_run
 
     env, _ = fixture_run
     cp = cp_at(env, "demo", "diagnostics-committed")
@@ -588,7 +588,7 @@ def test_forked_run_replays_offline(fixture_run):
 
 
 def test_inherited_units_match_what_the_parent_was_charged(fixture_run):
-    from labrun.budgets import Ledger
+    from onoda.budgets import Ledger
 
     env, _ = fixture_run
     cp = cp_at(env, "demo", "finalized")

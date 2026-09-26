@@ -1,6 +1,6 @@
 """Versioned, immutable record schemas (PORTABLE_RUN_SPEC §2).
 
-Every record carries an explicit `schema` string ("labrun.<kind>/<n>"). Records
+Every record carries an explicit `schema` string ("onoda.<kind>/<n>"). Records
 are frozen pydantic models with no float fields; `to_json()` yields the plain
 dict that is canonicalized and hashed. A record's own digest is never part of
 its hash input: content-addressed kinds (steps, checkpoints, fork declarations)
@@ -17,8 +17,8 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from labrun.canonical import digest_of
-from labrun.errors import SchemaVersionError
+from onoda.canonical import digest_of
+from onoda.errors import SchemaVersionError
 
 Digest = str  # "sha256:<64 hex>"
 Visibility = Literal["agent", "evaluator"]
@@ -62,7 +62,7 @@ class Record(BaseModel):
 
     @classmethod
     def schema_id(cls) -> str:
-        return f"labrun.{cls.kind}/{cls.version}"
+        return f"onoda.{cls.kind}/{cls.version}"
 
     @classmethod
     def new(cls, **fields: Any):
@@ -279,13 +279,13 @@ Migration = Callable[[dict[str, Any]], dict[str, Any]]
 def _artifact_v0_to_v1(data: dict[str, Any]) -> dict[str, Any]:
     """v0 descriptors named the digest `sha256` and stored bare hex."""
     out = {k: v for k, v in data.items() if k != "sha256"}
-    out["schema"] = "labrun.artifact/1"
+    out["schema"] = "onoda.artifact/1"
     out["digest"] = "sha256:" + data["sha256"]
     return out
 
 
 # (source schema id) -> migration producing a dict of the next version.
-MIGRATIONS: dict[str, Migration] = {"labrun.artifact/0": _artifact_v0_to_v1}
+MIGRATIONS: dict[str, Migration] = {"onoda.artifact/0": _artifact_v0_to_v1}
 
 
 def load_record(kind: str, data: dict[str, Any], *, migrate: bool = False) -> Record:

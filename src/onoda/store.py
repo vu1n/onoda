@@ -29,10 +29,10 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from labrun.canonical import canonical_bytes, is_digest, sha256_digest
-from labrun.clock import Clock, SystemClock
-from labrun.errors import IntegrityError, LabrunError, MissingObjectError, VisibilityError
-from labrun.records import (
+from onoda.canonical import canonical_bytes, is_digest, sha256_digest
+from onoda.clock import Clock, SystemClock
+from onoda.errors import IntegrityError, MissingObjectError, OnodaError, VisibilityError
+from onoda.records import (
     RECORD_TYPES,
     ArtifactDescriptor,
     Checkpoint,
@@ -56,7 +56,7 @@ record.committed, event.before-append, event.appended.
 
 def check_safe_id(value: str, what: str = "id") -> str:
     if not _SAFE_ID.match(value):
-        raise LabrunError(f"unsafe {what} {value!r}: use [A-Za-z0-9._-], max 128 chars")
+        raise OnodaError(f"unsafe {what} {value!r}: use [A-Za-z0-9._-], max 128 chars")
     return value
 
 
@@ -107,7 +107,7 @@ class Store:
 
     def _record_path(self, kind: str, record_id: str) -> Path:
         if kind not in RECORD_TYPES:
-            raise LabrunError(f"unknown record kind {kind!r}")
+            raise OnodaError(f"unknown record kind {kind!r}")
         return self.root / "records" / kind / _id_to_filename(record_id)
 
     def _journal_path(self, run_id: str) -> Path:
@@ -323,7 +323,7 @@ class Store:
         for n, line in enumerate(raw.splitlines(), start=1):
             try:
                 event = load_record("event", json.loads(line))
-            except (ValueError, LabrunError) as exc:
+            except (ValueError, OnodaError) as exc:
                 raise IntegrityError(f"journal {run_id} line {n} is invalid: {exc}") from exc
             assert isinstance(event, Event)
             expected_prev = prev.record_digest() if prev else None

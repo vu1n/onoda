@@ -1,5 +1,5 @@
 {
-  "format": "labrun.sources/1",
+  "format": "onoda.sources/1",
   "retrieved": "2026-09-26",
   "sources": [
     {
@@ -112,7 +112,7 @@
     },
     {
       "id": "S10-lib",
-      "name": "rfc8785 (Python library implementing RFC 8785, used by labrun.canonical)",
+      "name": "rfc8785 (Python library implementing RFC 8785, used by onoda.canonical)",
       "url": "https://pypi.org/project/rfc8785/",
       "kind": "pypi",
       "revision": "0.1.4",
@@ -176,7 +176,7 @@
     },
     {
       "id": "S15",
-      "name": "pydantic (record schema base classes, src/labrun/records.py)",
+      "name": "pydantic (record schema base classes, src/onoda/records.py)",
       "url": "https://pypi.org/project/pydantic/",
       "kind": "pypi",
       "revision": "2.13.5",

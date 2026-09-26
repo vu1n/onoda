@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from labrun.budgets import cost_views, physical_cost
-from labrun.errors import BudgetExceeded
+from onoda.budgets import cost_views, physical_cost
+from onoda.errors import BudgetExceeded
 
 
 def test_run_limit_blocks_before_side_effect(make_env):

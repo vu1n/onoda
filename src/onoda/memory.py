@@ -18,10 +18,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from labrun.canonical import is_digest
-from labrun.errors import LabrunError
-from labrun.forks import RunView
-from labrun.store import Store, record_ref
+from onoda.canonical import is_digest
+from onoda.errors import OnodaError
+from onoda.forks import RunView
+from onoda.store import Store, record_ref
 
 LESSON_LABEL = "memory-lesson"
 RELEASE_LABEL = "memory-release"
@@ -49,7 +49,7 @@ def _source_ref(source: str) -> str:
 
 def load_lesson(store: Store, digest: str) -> Lesson:
     if LESSON_LABEL not in store.descriptor(digest).labels:
-        raise LabrunError(f"{digest} is not a memory lesson")
+        raise OnodaError(f"{digest} is not a memory lesson")
     data = store.get_json(digest)
     prov = data["provenance"]
     return Lesson(
@@ -98,7 +98,7 @@ def freeze_release(store: Store, lessons: Iterable[str]) -> MemoryRelease:
 
 def load_release(store: Store, digest: str) -> MemoryRelease:
     if RELEASE_LABEL not in store.descriptor(digest).labels:
-        raise LabrunError(f"{digest} is not a memory release")
+        raise OnodaError(f"{digest} is not a memory release")
     return MemoryRelease(digest, tuple(store.get_json(digest)["lessons"]))
 
 

@@ -6,11 +6,11 @@ import dataclasses
 
 import pytest
 
-from labrun.canonical import digest_of
-from labrun.decisions import RecordedDecisionProvider
-from labrun.errors import ReplayMismatch
-from labrun.fixture import decision_request
-from labrun.records import InvocationReceipt
+from onoda.canonical import digest_of
+from onoda.decisions import RecordedDecisionProvider
+from onoda.errors import ReplayMismatch
+from onoda.fixture import decision_request
+from onoda.records import InvocationReceipt
 
 
 def recorded_request(env, run_id="demo", round=1):

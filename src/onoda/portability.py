@@ -42,16 +42,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from labrun.canonical import canonical_bytes, is_digest, sha256_digest
-from labrun.errors import (
+from onoda.canonical import canonical_bytes, is_digest, sha256_digest
+from onoda.errors import (
     ImportRejected,
     IntegrityError,
-    LabrunError,
     MissingObjectError,
+    OnodaError,
     SchemaVersionError,
     VisibilityError,
 )
-from labrun.records import (
+from onoda.records import (
     RECORD_TYPES,
     ArtifactDescriptor,
     Checkpoint,
@@ -63,9 +63,9 @@ from labrun.records import (
     StepSpec,
     load_record,
 )
-from labrun.store import Store, check_safe_id, record_ref
+from onoda.store import Store, check_safe_id, record_ref
 
-BUNDLE_FORMAT = "labrun.bundle/1"
+BUNDLE_FORMAT = "onoda.bundle/1"
 Profile = Literal["agent-visible", "evaluator", "redacted"]
 PROFILES: tuple[str, ...] = ("agent-visible", "evaluator", "redacted")
 CAPABILITIES: tuple[str, ...] = ("inspect", "reanalyze", "reexecute", "resume", "fork")
@@ -183,7 +183,7 @@ class _StoreView:
         for s in self.stores:
             try:
                 present = s.has_record(kind, record_id)
-            except LabrunError:
+            except OnodaError:
                 return None
             if present:
                 return s.get_record(kind, record_id)
@@ -373,9 +373,7 @@ def _capabilities(
     for inv, step in steps:
         if not isinstance(step, StepSpec):
             continue
-        fixture = "fixture" in inv.labels or step.code_ref.startswith(
-            ("fixture", "labrun.fixture:")
-        )
+        fixture = "fixture" in inv.labels or step.code_ref.startswith(("fixture", "onoda.fixture:"))
         live = "live" in inv.labels or (
             not fixture and (step.determinism == "external" or "external" in inv.labels)
         )
@@ -528,7 +526,7 @@ def _environment() -> dict[str, bytes]:
 
 def _readme(manifest: dict[str, Any], omissions: list[dict[str, Any]]) -> bytes:
     lines = [
-        "# labrun bundle",
+        "# onoda bundle",
         "",
         f"- format: {manifest['format']}",
         f"- profile: {manifest['profile']}",
@@ -616,7 +614,7 @@ def export_bundle(
         raise ValueError("the evaluator profile needs evaluator_store")
     out = Path(out)
     if out.exists():
-        raise LabrunError(f"export target {out.name!r} already exists")
+        raise OnodaError(f"export target {out.name!r} already exists")
     if archive is None:
         archive = out.name.endswith((".tar.gz", ".tgz"))
     roots = sorted({check_safe_id(r, "run id") for r in run_ids})

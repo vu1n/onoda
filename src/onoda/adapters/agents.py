@@ -16,7 +16,7 @@ persistent kernel, host cache, or daemon; those stay inside a concrete
 adapter's implementation and must still be externalized at every checkpoint
 boundary (AGENTS.md rule 6).
 
-`CallRecord` deliberately mirrors `labrun.records.InvocationReceipt` /
+`CallRecord` deliberately mirrors `onoda.records.InvocationReceipt` /
 `Usage` field-for-field so a real gateway can commit one directly; this
 module never writes to the store itself.
 """
@@ -27,8 +27,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from labrun.canonical import digest_of
-from labrun.records import Digest, Usage
+from onoda.canonical import digest_of
+from onoda.records import Digest, Usage
 
 
 def _json_safe(value: Any) -> Any:
@@ -94,7 +94,7 @@ class ProposedAction:
 class CallRecord:
     """Observable record of one underlying provider call.
 
-    Field names match `labrun.records.InvocationReceipt` / `Usage` so a
+    Field names match `onoda.records.InvocationReceipt` / `Usage` so a
     gateway can commit this directly as evidence; nothing here depends on
     unobservable model-internal reasoning (AGENTS.md rule 13).
     """

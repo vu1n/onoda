@@ -13,11 +13,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from labrun.canonical import sha256_digest
-from labrun.clock import LogicalClock
-from labrun.errors import CapabilityError, VisibilityError
-from labrun.science import evaluator as ev
-from labrun.science.contract import (
+from onoda.canonical import sha256_digest
+from onoda.clock import LogicalClock
+from onoda.errors import CapabilityError, VisibilityError
+from onoda.science import evaluator as ev
+from onoda.science.contract import (
     CaseManifest,
     Evidence,
     ExcitedState,
@@ -27,13 +27,13 @@ from labrun.science.contract import (
     case_manifests,
     load_case,
 )
-from labrun.science.evaluator import (
+from onoda.science.evaluator import (
     POLICIES,
     ComparisonPolicy,
     evaluate_observation,
     publish_case_reference,
 )
-from labrun.store import Store
+from onoda.store import Store
 
 SOURCE = sha256_digest(b"test-constructed stand-in output, not an ORCA run")
 

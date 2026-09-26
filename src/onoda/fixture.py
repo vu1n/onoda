@@ -16,9 +16,9 @@ import json
 from decimal import Decimal
 from typing import Any
 
-from labrun.canonical import digest_of, sha256_digest
-from labrun.decisions import DecisionRequest, MockPolicyProvider
-from labrun.errors import IntegrityError
+from onoda.canonical import digest_of, sha256_digest
+from onoda.decisions import DecisionRequest, MockPolicyProvider
+from onoda.errors import IntegrityError
 
 SYNTHETIC_HEADER = "# SYNTHETIC FIXTURE OUTPUT - NOT A SOLVER RESULT"
 DEFAULT_PARAMS: dict[str, Any] = {"system": "fixture-A", "points": 5, "seed": 7}

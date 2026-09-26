@@ -39,8 +39,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from labrun.canonical import sha256_digest
-from labrun.science.contract import (
+from onoda.canonical import sha256_digest
+from onoda.science.contract import (
     Evidence,
     ExcitedState,
     OrcaObservation,

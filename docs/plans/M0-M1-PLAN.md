@@ -3,7 +3,7 @@
 Implements the handoff in `docs/handoff/` (v0.2; `SOL_PI_DELTA.md` overrides
 conflicting text, so the first agent adapter is Pi, not Prime). The critical
 path is contract → controller/fixture → fork → CLI + end-to-end demo. The
-shared contract (`labrun.canonical`, `labrun.records`, `labrun.store`) is
+shared contract (`onoda.canonical`, `onoda.records`, `onoda.store`) is
 HX-001 and already landed; everything else builds on its public surface.
 
 Test commands for every lane: `uv run pytest`, `uv run ruff check .`,
@@ -22,25 +22,25 @@ depends_on: []
 footprint:
   modifies:  # landed in commit 8b63d2e
     - "pyproject.toml::*"
-    - "src/labrun/__init__.py::*"
-    - "src/labrun/canonical.py::*"
-    - "src/labrun/errors.py::*"
-    - "src/labrun/records.py::*"
-    - "src/labrun/clock.py::*"
-    - "src/labrun/store.py::*"
+    - "src/onoda/__init__.py::*"
+    - "src/onoda/canonical.py::*"
+    - "src/onoda/errors.py::*"
+    - "src/onoda/records.py::*"
+    - "src/onoda/clock.py::*"
+    - "src/onoda/store.py::*"
     - "tests/test_core.py::*"
 produces:
-  - "src/labrun/canonical.py::canonical_bytes"
-  - "src/labrun/canonical.py::digest_of"
-  - "src/labrun/canonical.py::sha256_digest"
-  - "src/labrun/errors.py::LabrunError"
-  - "src/labrun/records.py::Record"
-  - "src/labrun/records.py::Checkpoint"
-  - "src/labrun/records.py::InvocationReceipt"
-  - "src/labrun/records.py::Run"
-  - "src/labrun/store.py::Store"
-  - "src/labrun/store.py::record_ref"
-  - "src/labrun/clock.py::LogicalClock"
+  - "src/onoda/canonical.py::canonical_bytes"
+  - "src/onoda/canonical.py::digest_of"
+  - "src/onoda/canonical.py::sha256_digest"
+  - "src/onoda/errors.py::OnodaError"
+  - "src/onoda/records.py::Record"
+  - "src/onoda/records.py::Checkpoint"
+  - "src/onoda/records.py::InvocationReceipt"
+  - "src/onoda/records.py::Run"
+  - "src/onoda/store.py::Store"
+  - "src/onoda/store.py::record_ref"
+  - "src/onoda/clock.py::LogicalClock"
 gate: "uv run pytest tests/test_core.py passes; ruff clean"
 ```
 
@@ -62,23 +62,23 @@ executor: orchestrator
 depends_on: ["HX-001"]
 footprint:
   creates:
-    - "src/labrun/jobs.py"
-    - "src/labrun/budgets.py"
-    - "src/labrun/decisions.py"
-    - "src/labrun/fixture.py"
-    - "src/labrun/controller.py"
+    - "src/onoda/jobs.py"
+    - "src/onoda/budgets.py"
+    - "src/onoda/decisions.py"
+    - "src/onoda/fixture.py"
+    - "src/onoda/controller.py"
     - "tests/conftest.py"
     - "tests/test_jobs.py"
     - "tests/test_budgets.py"
     - "tests/test_decisions.py"
     - "tests/test_controller.py"
 produces:
-  - "src/labrun/controller.py::Controller"
-  - "src/labrun/controller.py::RunState"
-  - "src/labrun/fixture.py::PARSERS"
-  - "src/labrun/fixture.py::POLICIES"
-  - "src/labrun/budgets.py::cost_views"
-  - "src/labrun/decisions.py::RecordedDecisionProvider"
+  - "src/onoda/controller.py::Controller"
+  - "src/onoda/controller.py::RunState"
+  - "src/onoda/fixture.py::PARSERS"
+  - "src/onoda/fixture.py::POLICIES"
+  - "src/onoda/budgets.py::cost_views"
+  - "src/onoda/decisions.py::RecordedDecisionProvider"
   - "tests/conftest.py::fixture_run"
 gate: "uv run pytest tests/test_jobs.py tests/test_budgets.py tests/test_decisions.py tests/test_controller.py passes (T04, T06, T10, T11 ledger, T14)"
 assumptions:
@@ -103,12 +103,12 @@ depth: deep
 depends_on: ["HX-001"]
 footprint:
   creates:
-    - "src/labrun/portability.py"
+    - "src/onoda/portability.py"
     - "tests/test_portability.py"
 produces:
-  - "src/labrun/portability.py::export_bundle"
-  - "src/labrun/portability.py::import_bundle"
-  - "src/labrun/portability.py::inspect_capabilities"
+  - "src/onoda/portability.py::export_bundle"
+  - "src/onoda/portability.py::import_bundle"
+  - "src/onoda/portability.py::inspect_capabilities"
 gate: "uv run pytest tests/test_portability.py passes (T08, T12, T13 export side, T09 path independence)"
 ```
 
@@ -126,10 +126,10 @@ depth: routine
 depends_on: ["HX-001"]
 footprint:
   creates:
-    - "src/labrun/context.py"
+    - "src/onoda/context.py"
     - "tests/test_context.py"
 produces:
-  - "src/labrun/context.py::ObservationPack"
+  - "src/onoda/context.py::ObservationPack"
 gate: "uv run pytest tests/test_context.py passes (SOL_PI_DELTA M1 fixture tests)"
 ```
 
@@ -149,11 +149,11 @@ footprint:
     - "provenance/sources.json"
     - "docs/ASSUMPTIONS.md"
     - "docs/ADAPTER_SEAM.md"
-    - "src/labrun/adapters/__init__.py"
-    - "src/labrun/adapters/agents.py"
+    - "src/onoda/adapters/__init__.py"
+    - "src/onoda/adapters/agents.py"
     - "tests/test_sources.py"
 produces:
-  - "src/labrun/adapters/agents.py::AgentAdapter"
+  - "src/onoda/adapters/agents.py::AgentAdapter"
 gate: "uv run pytest tests/test_sources.py passes (sources.json parses, every pin has a revision or an explicit unresolved marker)"
 ```
 
@@ -174,11 +174,11 @@ depth: deep
 depends_on: ["HX-002"]
 footprint:
   creates:
-    - "src/labrun/forks.py"
-    - "src/labrun/memory.py"
+    - "src/onoda/forks.py"
+    - "src/onoda/memory.py"
     - "tests/test_forks.py"
 produces:
-  - "src/labrun/forks.py::fork_run"
+  - "src/onoda/forks.py::fork_run"
 gate: "uv run pytest tests/test_forks.py passes (T03, T05, T07, T11 branch views)"
 ```
 
@@ -195,11 +195,11 @@ depth: routine
 depends_on: ["HX-002"]
 footprint:
   creates:
-    - "src/labrun/replay.py"
+    - "src/onoda/replay.py"
     - "tests/test_replay.py"
 produces:
-  - "src/labrun/replay.py::replay_run"
-  - "src/labrun/replay.py::reanalyze"
+  - "src/onoda/replay.py::replay_run"
+  - "src/onoda/replay.py::reanalyze"
 gate: "uv run pytest tests/test_replay.py passes (T02, replay half of T01)"
 ```
 
@@ -215,16 +215,16 @@ depth: routine
 depends_on: ["HX-002"]
 footprint:
   creates:
-    - "src/labrun/evaluation.py"
+    - "src/onoda/evaluation.py"
     - "tests/test_evaluation.py"
 produces:
-  - "src/labrun/evaluation.py::evaluate_run"
+  - "src/onoda/evaluation.py::evaluate_run"
 gate: "uv run pytest tests/test_evaluation.py passes (T16, T13 evaluator side)"
 ```
 
 ## HX-009 — CLI, clean-workspace demo, docs
 
-`labrun` CLI matching PORTABLE_RUN_SPEC §14, the end-to-end sequence in a
+`onoda` CLI matching PORTABLE_RUN_SPEC §14, the end-to-end sequence in a
 fresh temp directory with network disabled (T01, T09), README with capability
 matrix and limitations, repo agent instructions.
 
@@ -235,7 +235,7 @@ executor: orchestrator
 depends_on: ["HX-003", "HX-004", "HX-005", "HX-006", "HX-007", "HX-008"]
 footprint:
   creates:
-    - "src/labrun/cli.py"
+    - "src/onoda/cli.py"
     - "tests/test_end_to_end.py"
     - "scripts/demo.sh"
     - "CLAUDE.md"

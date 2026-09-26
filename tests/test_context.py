@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from labrun.clock import LogicalClock
-from labrun.context import (
+from onoda.clock import LogicalClock
+from onoda.context import (
     FUSABLE_OPERATIONS,
     ObservationPack,
     activation_counts,
@@ -15,8 +15,8 @@ from labrun.context import (
     reduce_log,
     required_diagnostics_present,
 )
-from labrun.errors import CapabilityError, MissingObjectError
-from labrun.store import Store
+from onoda.errors import CapabilityError, MissingObjectError
+from onoda.store import Store
 
 BIG = b"x" * 20000  # over the default 10 KiB threshold
 SMALL = b"tiny output"
@@ -160,7 +160,7 @@ def test_compaction_records_trigger_and_replays_in_order(tmp_path):
 
 
 def _good_reducer(log: bytes) -> dict:
-    from labrun.canonical import sha256_digest
+    from onoda.canonical import sha256_digest
 
     return {
         "source_digest": sha256_digest(log),
@@ -227,7 +227,7 @@ def test_reducer_falls_back_on_unquoted_text(tmp_path):
     log = b"line one\nline two\n"
 
     def bogus_quote_reducer(log_bytes: bytes) -> dict:
-        from labrun.canonical import sha256_digest
+        from onoda.canonical import sha256_digest
 
         return {
             "source_digest": sha256_digest(log_bytes),
@@ -262,7 +262,7 @@ def test_reducer_verification_proves_fidelity_not_completeness(tmp_path):
     )
 
     def drops_warning_reducer(log_bytes: bytes) -> dict:
-        from labrun.canonical import sha256_digest
+        from onoda.canonical import sha256_digest
 
         return {
             "source_digest": sha256_digest(log_bytes),

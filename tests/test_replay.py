@@ -8,11 +8,11 @@ import socket
 
 import pytest
 
-from labrun.clock import LogicalClock
-from labrun.controller import normalized_final_state
-from labrun.errors import CapabilityError, IntegrityError, MissingObjectError
-from labrun.replay import reanalyze, replay_run, replay_state_at
-from labrun.store import Store
+from onoda.clock import LogicalClock
+from onoda.controller import normalized_final_state
+from onoda.errors import CapabilityError, IntegrityError, MissingObjectError
+from onoda.replay import reanalyze, replay_run, replay_state_at
+from onoda.store import Store
 
 FULL_V1 = [
     "initialized",

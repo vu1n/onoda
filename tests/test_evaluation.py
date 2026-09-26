@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from labrun.clock import LogicalClock
-from labrun.errors import CapabilityError, VisibilityError
-from labrun.evaluation import compare_evaluations, evaluate_run, publish_reference
-from labrun.fixture import DEFAULT_PARAMS
-from labrun.store import Store
+from onoda.clock import LogicalClock
+from onoda.errors import CapabilityError, VisibilityError
+from onoda.evaluation import compare_evaluations, evaluate_run, publish_reference
+from onoda.fixture import DEFAULT_PARAMS
+from onoda.store import Store
 
 
 def evaluator_store(env, name: str = "evaluator") -> Store:
@@ -129,7 +129,7 @@ def test_agent_store_refuses_evaluator_visibility_artifacts(make_env):
 
 
 def test_reference_never_appears_in_agent_store(make_env):
-    from labrun.canonical import canonical_bytes
+    from onoda.canonical import canonical_bytes
 
     env = make_env()
     env.controller.run_fixture("demo")

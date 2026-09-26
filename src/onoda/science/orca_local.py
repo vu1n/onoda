@@ -1,6 +1,6 @@
 """Local ORCA solver adapter (BUILD_SPEC §6 M2-003).
 
-Same surface as `labrun.jobs.MockScheduler` (`submit/lookup/status/collect/
+Same surface as `onoda.jobs.MockScheduler` (`submit/lookup/status/collect/
 cancel/executions`), but backed by a user-provided ORCA binary invoked as a
 real subprocess, in a job directory outside the run store. Every setting
 (`enabled`, `binary`, `work_root`, `max_wall_seconds`) defaults to a value
@@ -36,7 +36,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from labrun.errors import CapabilityError, LabrunError, SubmissionUncertain
+from onoda.errors import CapabilityError, OnodaError, SubmissionUncertain
 
 _STAND_IN_LABELS = ["stand-in", "not-orca"]
 _ORCA_LABELS = ["orca-local"]
@@ -128,9 +128,9 @@ class OrcaLocalScheduler:
     ) -> str:
         """Accept a job once per idempotency key; a repeated key never re-runs."""
         if program != "orca":
-            raise LabrunError(f"unknown program {program!r}")
+            raise OnodaError(f"unknown program {program!r}")
         if "input" not in inputs:
-            raise LabrunError("ORCA submission requires an 'input' entry (.inp bytes)")
+            raise OnodaError("ORCA submission requires an 'input' entry (.inp bytes)")
 
         state = self._load()
         if key in state["by_key"]:
@@ -243,7 +243,7 @@ class OrcaLocalScheduler:
         if job["status"] == "submitted":
             raise SubmissionUncertain(f"job {job_id!r} has no terminal marker")
         if job["status"] not in ("completed", "failed"):
-            raise LabrunError(f"job {job_id} is {job['status']}, not collectable")
+            raise OnodaError(f"job {job_id} is {job['status']}, not collectable")
         job_dir = self.root / job_id
         out = (job_dir / "job.out").read_bytes() if (job_dir / "job.out").exists() else b""
         err = (job_dir / "job.err").read_bytes() if (job_dir / "job.err").exists() else b""

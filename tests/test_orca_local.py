@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from labrun.errors import CapabilityError, LabrunError, SubmissionUncertain
-from labrun.science.orca_local import OrcaLocalScheduler, OrcaSettings
+from onoda.errors import CapabilityError, OnodaError, SubmissionUncertain
+from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
 
 STAND_IN_MARKER = "STAND-IN EXECUTABLE - NOT ORCA"
 
@@ -176,7 +176,7 @@ def test_happy_path_completes_and_collects(tmp_path):
 def test_wrong_program_name_raises(tmp_path):
     stand_in = make_stand_in(tmp_path)
     sched = _enabled_scheduler(tmp_path, stand_in)
-    with pytest.raises(LabrunError):
+    with pytest.raises(OnodaError):
         sched.submit("key-x", "not-orca", base_inputs(), {})
 
 
@@ -231,7 +231,7 @@ def test_timeout_produces_failed_status_with_timeout_reason(tmp_path):
 def test_missing_input_key_raises(tmp_path):
     stand_in = make_stand_in(tmp_path)
     sched = _enabled_scheduler(tmp_path, stand_in)
-    with pytest.raises(LabrunError):
+    with pytest.raises(OnodaError):
         sched.submit("key-noinput", "orca", {}, {})
 
 

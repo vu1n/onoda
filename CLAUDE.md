@@ -1,7 +1,7 @@
 # onoda — agent instructions
 
 Portable, forkable run records for scientific-agent experiments. Python
-package `labrun` (CLI `labrun`). The design contract is `docs/handoff/`;
+package `onoda` (CLI `onoda`). The design contract is `docs/handoff/`;
 `docs/handoff/SOL_PI_DELTA.md` overrides conflicting text there (Pi is the
 first agent adapter; Prime is an optional comparison arm).
 
@@ -13,7 +13,7 @@ first agent adapter; Prime is an optional comparison arm).
 - Format: `uv run ruff format .` (check with `--check`)
 - Demo: `scripts/demo.sh` runs the full clean-workspace sequence
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
-  `labrun case list` shows them. Vendored bytes under `cases/` are never edited.
+  `onoda case list` shows them. Vendored bytes under `cases/` are never edited.
 
 VCS is plain git. No project board; work items come from issues or goals.
 

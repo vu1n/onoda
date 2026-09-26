@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from labrun.adapters.agents import (
+from onoda.adapters.agents import (
     AgentAdapter,
     DeterministicMockAdapter,
     ProposedAction,
@@ -28,7 +28,7 @@ def _load_sources() -> dict:
 
 def test_sources_file_parses_and_has_expected_shape():
     data = _load_sources()
-    assert data["format"] == "labrun.sources/1"
+    assert data["format"] == "onoda.sources/1"
     assert isinstance(data["retrieved"], str) and data["retrieved"]
     assert isinstance(data["sources"], list) and data["sources"]
 

@@ -22,11 +22,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from labrun.canonical import digest_of, is_digest
-from labrun.controller import Controller, RunState
-from labrun.errors import ForkError, LabrunError, MissingObjectError, VisibilityError
-from labrun.fixture import PARSERS, POLICIES
-from labrun.records import (
+from onoda.canonical import digest_of, is_digest
+from onoda.controller import Controller, RunState
+from onoda.errors import ForkError, MissingObjectError, OnodaError, VisibilityError
+from onoda.fixture import PARSERS, POLICIES
+from onoda.records import (
     Boundary,
     Checkpoint,
     Evaluation,
@@ -39,7 +39,7 @@ from labrun.records import (
     StepSpec,
     TaskManifest,
 )
-from labrun.store import Store, check_safe_id, record_ref
+from onoda.store import Store, check_safe_id, record_ref
 
 TREATMENTS = ("inherit-remaining", "fresh-allowance")
 PHASE_ORDER = {"calc": 0, "parse": 1, "decide": 2}
@@ -402,7 +402,7 @@ class RunView:
         self.run_id = run_id
         own = store.events(run_id)
         if not own:
-            raise LabrunError(f"run {run_id} has no journal")
+            raise OnodaError(f"run {run_id} has no journal")
         # The first checkpoint fixes the cut; later ones carry the same map forward.
         self.cut: dict[str, int] = {}
         for e in own:

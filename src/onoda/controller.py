@@ -22,13 +22,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from labrun.budgets import Ledger
-from labrun.canonical import digest_of
-from labrun.decisions import DecisionProvider, RecordedDecisionProvider
-from labrun.errors import CapabilityError, LabrunError, SubmissionUncertain
-from labrun.fixture import DEFAULT_PARAMS, PARSERS, POLICIES, check_mapping, decision_request
-from labrun.jobs import MockScheduler
-from labrun.records import (
+from onoda.budgets import Ledger
+from onoda.canonical import digest_of
+from onoda.decisions import DecisionProvider, RecordedDecisionProvider
+from onoda.errors import CapabilityError, OnodaError, SubmissionUncertain
+from onoda.fixture import DEFAULT_PARAMS, PARSERS, POLICIES, check_mapping, decision_request
+from onoda.jobs import MockScheduler
+from onoda.records import (
     Boundary,
     Checkpoint,
     Event,
@@ -38,7 +38,7 @@ from labrun.records import (
     TaskManifest,
     Usage,
 )
-from labrun.store import Store, check_safe_id, record_ref
+from onoda.store import Store, check_safe_id, record_ref
 
 CAPABILITIES = {
     "inspect": "supported",
@@ -101,7 +101,7 @@ class Controller:
         if allow_live_execution:
             raise CapabilityError("live execution is not implemented; only fixture mode runs")
         if self.store.has_record("run", run_id):
-            raise LabrunError(f"run {run_id} already exists")
+            raise OnodaError(f"run {run_id} already exists")
         params = params if params is not None else DEFAULT_PARAMS
         pdesc = self.store.put_json(params, labels=["synthetic", "task-input"])
         task = TaskManifest.new(
@@ -189,7 +189,7 @@ class Controller:
     def state(self, run_id: str) -> RunState:
         cps = self.checkpoints(run_id)
         if not cps:
-            raise LabrunError(f"run {run_id} has no checkpoint")
+            raise OnodaError(f"run {run_id} has no checkpoint")
         _, digest, cp = cps[-1]
         return RunState(
             run_id=run_id,
@@ -268,7 +268,7 @@ class Controller:
             return self.write_checkpoint(
                 run, "finalized", "done", r, visible, st.frontier, st.ancestry_cut
             )
-        raise LabrunError(f"run {st.run_id} is in unknown phase {st.phase!r}")
+        raise OnodaError(f"run {st.run_id} is in unknown phase {st.phase!r}")
 
     def _final_state(self, run: Run, st: RunState) -> dict[str, Any]:
         decisions = [
@@ -299,7 +299,7 @@ class Controller:
             operation="parse",
             inputs=inputs,
             config={"parser": parser},
-            code_ref=f"labrun.fixture:PARSERS[{parser}]",
+            code_ref=f"onoda.fixture:PARSERS[{parser}]",
             determinism="pure",
         )
         out = PARSERS[parser]({k: self.store.get_bytes(d) for k, d in inputs.items()})
@@ -357,7 +357,7 @@ class Controller:
             operation="decide",
             inputs={"request": req.digest, **evidence_refs},
             config={"policy": run.config["policy"], "provider": provider.name},
-            code_ref=f"labrun.decisions:{provider.name}",
+            code_ref=f"onoda.decisions:{provider.name}",
             determinism="pure",
         )
         # A replayed answer is reuse of the original receipt, not a new decision.
@@ -419,7 +419,7 @@ class Controller:
                 operation=f"job:{program}",
                 inputs=inputs,
                 config=config,
-                code_ref=f"labrun.fixture:PROGRAMS[{program}]",
+                code_ref=f"onoda.fixture:PROGRAMS[{program}]",
                 determinism="external",
             )
             spec_id = self.store.put_record(spec)

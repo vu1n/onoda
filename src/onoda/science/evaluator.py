@@ -28,7 +28,7 @@ discrepancies (unpaired states, symmetry disagreement) → "fail"; anything that
 prevents a numeric judgement (unit mismatch, missing value, unattributable
 state, tolerance unresolved) → "unresolved"; otherwise |diff| <= tolerance.
 
-Storage mirrors `labrun.evaluation`: the reference lives only in an
+Storage mirrors `onoda.evaluation`: the reference lives only in an
 evaluator-visibility store, the observation is read (never written) from the
 agent store, and every evaluation is a brand new `Evaluation` record.
 """
@@ -41,15 +41,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from labrun.errors import CapabilityError
-from labrun.evaluation import _next_evaluation_id
-from labrun.records import Evaluation, Usage
-from labrun.science.contract import CaseManifest, ExcitedState, OrcaObservation, Quantity
-from labrun.store import Store
+from onoda.errors import CapabilityError
+from onoda.evaluation import _next_evaluation_id
+from onoda.records import Evaluation, Usage
+from onoda.science.contract import CaseManifest, ExcitedState, OrcaObservation, Quantity
+from onoda.store import Store
 
 EVALUATOR = "orca-smoke"
 EVALUATOR_VERSION = "1"
-REFERENCE_SCHEMA = "labrun.orca-case-reference/1"
+REFERENCE_SCHEMA = "onoda.orca-case-reference/1"
 
 QuantityName = Literal["excited_states.energy_au", "final_energy"]
 

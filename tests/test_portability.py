@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from labrun.canonical import canonical_bytes, sha256_digest
-from labrun.clock import LogicalClock
-from labrun.errors import ImportRejected, IntegrityError, SchemaVersionError, VisibilityError
-from labrun.portability import export_bundle, import_bundle, inspect_capabilities
-from labrun.records import (
+from onoda.canonical import canonical_bytes, sha256_digest
+from onoda.clock import LogicalClock
+from onoda.errors import ImportRejected, IntegrityError, SchemaVersionError, VisibilityError
+from onoda.portability import export_bundle, import_bundle, inspect_capabilities
+from onoda.records import (
     Checkpoint,
     Evaluation,
     ForkDeclaration,
@@ -26,7 +26,7 @@ from labrun.records import (
     StepSpec,
     TaskManifest,
 )
-from labrun.store import Store, record_ref
+from onoda.store import Store, record_ref
 
 T0 = "2026-01-01T00:00:00Z"
 SECRET = "sk-test-DO-NOT-EXPORT-0123456789"
@@ -234,7 +234,7 @@ def test_round_trip_into_other_absolute_path(tmp_path, suffix, no_network):
     a = src["store"]
     out = tmp_path / "xfer" / f"bundle{suffix}"
     manifest = export_bundle(a, ["r1"], out)
-    assert manifest["format"] == "labrun.bundle/1" and manifest["exact_replay"] is True
+    assert manifest["format"] == "onoda.bundle/1" and manifest["exact_replay"] is True
     assert str(tmp_path).encode() not in bundle_bytes(out)
 
     b = Store(tmp_path / "elsewhere" / "deep" / "store-b")
@@ -420,7 +420,7 @@ def test_unknown_manifest_format_rejected(tmp_path):
     src = build_run(tmp_path / "s")
     b = tmp_path / "b"
     export_bundle(src["store"], ["r1"], b)
-    rewrite_manifest(b, lambda m: m.update(format="labrun.bundle/99"))
+    rewrite_manifest(b, lambda m: m.update(format="onoda.bundle/99"))
     with pytest.raises(SchemaVersionError):
         import_bundle(b, Store(tmp_path / "dst"))
 
@@ -430,7 +430,7 @@ def test_unknown_record_schema_rejected(tmp_path):
     b = tmp_path / "b"
     export_bundle(src["store"], ["r1"], b)
     rec = b / "records" / "run" / "r1.json"
-    data = rec.read_bytes().replace(b"labrun.run/1", b"labrun.run/7")
+    data = rec.read_bytes().replace(b"onoda.run/1", b"onoda.run/7")
     rec.write_bytes(data)
 
     def fix(m):
@@ -531,7 +531,7 @@ def _evaluator(tmp_path: Path, run: dict) -> Store:
 
 
 def test_agent_visible_excludes_secret_and_evaluator_data(tmp_path, monkeypatch):
-    monkeypatch.setenv("LABRUN_TEST_API_KEY", SECRET)
+    monkeypatch.setenv("ONODA_TEST_API_KEY", SECRET)
     src = build_run(tmp_path / "s")
     ev = _evaluator(tmp_path, src)
     for out in (tmp_path / "agent", tmp_path / "agent.tar.gz"):
@@ -560,7 +560,7 @@ def test_export_refuses_credentials_in_content(tmp_path):
 
 
 def test_evaluator_profile_includes_reference_not_secret(tmp_path, monkeypatch):
-    monkeypatch.setenv("LABRUN_TEST_API_KEY", SECRET)
+    monkeypatch.setenv("ONODA_TEST_API_KEY", SECRET)
     src = build_run(tmp_path / "s")
     ev = _evaluator(tmp_path, src)
     out = tmp_path / "eval.tar.gz"

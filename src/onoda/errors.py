@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 
-class LabrunError(Exception):
+class OnodaError(Exception):
     """Base class for all harness errors."""
 
 
-class CanonicalizationError(LabrunError):
+class CanonicalizationError(OnodaError):
     """A value cannot be canonically encoded (float, unsafe int, unknown type)."""
 
 
-class IntegrityError(LabrunError):
+class IntegrityError(OnodaError):
     """Bytes do not match their declared digest, or a hash chain is broken."""
 
 
-class MissingObjectError(LabrunError):
+class MissingObjectError(OnodaError):
     """A referenced artifact or record is absent from the store."""
 
     def __init__(self, ref: str, message: str | None = None):
@@ -23,35 +23,35 @@ class MissingObjectError(LabrunError):
         super().__init__(message or f"missing object {ref}")
 
 
-class SchemaVersionError(LabrunError):
+class SchemaVersionError(OnodaError):
     """A record declares a schema version this reader does not support."""
 
 
-class ReplayMismatch(LabrunError):
+class ReplayMismatch(OnodaError):
     """An offline replay lookup found no recording for the exact request."""
 
     code = "replay_mismatch"
 
 
-class ImportRejected(LabrunError):
+class ImportRejected(OnodaError):
     """A bundle failed a safety or closure check during import."""
 
 
-class VisibilityError(LabrunError):
+class VisibilityError(OnodaError):
     """A reference is outside the caller's permitted view."""
 
 
-class BudgetExceeded(LabrunError):
+class BudgetExceeded(OnodaError):
     """A reservation would exceed a run, branch, or experiment limit."""
 
 
-class ForkError(LabrunError):
+class ForkError(OnodaError):
     """A fork request violates fork semantics (non-quiescent, bad boundary...)."""
 
 
-class CapabilityError(LabrunError):
+class CapabilityError(OnodaError):
     """An operation was requested that the record does not support."""
 
 
-class SubmissionUncertain(LabrunError):
+class SubmissionUncertain(OnodaError):
     """An external submission's outcome is unknown and must be reconciled."""

@@ -28,21 +28,21 @@ depth: deep
 depends_on: []
 footprint:
   modifies:  # landed in the main working copy before any lane dispatched
-    - "src/labrun/science/__init__.py::*"
-    - "src/labrun/science/contract.py::*"
+    - "src/onoda/science/__init__.py::*"
+    - "src/onoda/science/contract.py::*"
     - "cases/orca/cclib/*"
     - ".gitattributes::*"
     - "PLAN.md::*"
 produces:
-  - "src/labrun/science/contract.py::OrcaObservation"
-  - "src/labrun/science/contract.py::ExcitedState"
-  - "src/labrun/science/contract.py::Quantity"
-  - "src/labrun/science/contract.py::Evidence"
-  - "src/labrun/science/contract.py::Problem"
-  - "src/labrun/science/contract.py::CaseManifest"
-  - "src/labrun/science/contract.py::load_case"
-  - "src/labrun/science/contract.py::case_manifests"
-gate: "uv run python -c 'from labrun.science.contract import case_manifests, load_case; [load_case(p) for p in case_manifests().values()]' exits 0"
+  - "src/onoda/science/contract.py::OrcaObservation"
+  - "src/onoda/science/contract.py::ExcitedState"
+  - "src/onoda/science/contract.py::Quantity"
+  - "src/onoda/science/contract.py::Evidence"
+  - "src/onoda/science/contract.py::Problem"
+  - "src/onoda/science/contract.py::CaseManifest"
+  - "src/onoda/science/contract.py::load_case"
+  - "src/onoda/science/contract.py::case_manifests"
+gate: "uv run python -c 'from onoda.science.contract import case_manifests, load_case; [load_case(p) for p in case_manifests().values()]' exits 0"
 ```
 
 ## M2-002 — Deterministic ORCA output parser
@@ -62,14 +62,14 @@ executor: claude-opus
 depends_on: ["M2-001"]
 footprint:
   creates:
-    - "src/labrun/science/orca_parser.py"
+    - "src/onoda/science/orca_parser.py"
     - "tests/test_orca_parser.py"
   modifies:
     - "pyproject.toml::*"
     - "uv.lock::*"
 produces:
-  - "src/labrun/science/orca_parser.py::parse_orca_output"
-  - "src/labrun/science/orca_parser.py::PARSER_ID"
+  - "src/onoda/science/orca_parser.py::parse_orca_output"
+  - "src/onoda/science/orca_parser.py::PARSER_ID"
 gate: "uv run pytest tests/test_orca_parser.py passes, covering every vendored case plus truncated/missing-diagnostic/malformed-number/wrong-unit/ambiguous mutations"
 assumptions:
   - "cclib is acceptable as a dev-only dependency for the cross-check; it must not become a runtime dependency"
@@ -78,7 +78,7 @@ assumptions:
 
 ## M2-003 — Local ORCA solver adapter (fails closed)
 
-A scheduler with the same surface as `labrun.jobs.MockScheduler`
+A scheduler with the same surface as `onoda.jobs.MockScheduler`
 (`submit/lookup/status/collect/cancel/executions`) that runs a
 user-provided ORCA binary in a job directory outside the store. Disabled by
 default; unresolved settings (binary path, wall-time limit, working root)
@@ -94,15 +94,15 @@ executor: claude-sonnet
 depends_on: ["M2-001"]
 footprint:
   creates:
-    - "src/labrun/science/orca_local.py"
+    - "src/onoda/science/orca_local.py"
     - "tests/test_orca_local.py"
 produces:
-  - "src/labrun/science/orca_local.py::OrcaSettings"
-  - "src/labrun/science/orca_local.py::OrcaLocalScheduler"
+  - "src/onoda/science/orca_local.py::OrcaSettings"
+  - "src/onoda/science/orca_local.py::OrcaLocalScheduler"
 gate: "uv run pytest tests/test_orca_local.py passes: disabled-by-default refusal, unresolved-setting refusal, idempotent resubmission, timeout -> failed status, stand-in outputs collected and labelled"
 ```
 
-Ordering-only on M2-001: it needs the `labrun.science` package to exist.
+Ordering-only on M2-001: it needs the `onoda.science` package to exist.
 
 ## M2-004 — External evaluator skeleton
 
@@ -122,13 +122,13 @@ executor: claude-opus
 depends_on: ["M2-001"]
 footprint:
   creates:
-    - "src/labrun/science/evaluator.py"
+    - "src/onoda/science/evaluator.py"
     - "tests/test_science_evaluator.py"
 produces:
-  - "src/labrun/science/evaluator.py::ComparisonPolicy"
-  - "src/labrun/science/evaluator.py::POLICIES"
-  - "src/labrun/science/evaluator.py::publish_case_reference"
-  - "src/labrun/science/evaluator.py::evaluate_observation"
+  - "src/onoda/science/evaluator.py::ComparisonPolicy"
+  - "src/onoda/science/evaluator.py::POLICIES"
+  - "src/onoda/science/evaluator.py::publish_case_reference"
+  - "src/onoda/science/evaluator.py::evaluate_observation"
 gate: "uv run pytest tests/test_science_evaluator.py passes: unresolved-tolerance reports differences, missing evidence is unresolved not pass, symmetry disagreement is flagged, reference never written to an agent store, re-evaluation creates a new record"
 ```
 
@@ -137,7 +137,7 @@ gate: "uv run pytest tests/test_science_evaluator.py passes: unresolved-toleranc
 Record a fixed-input case as a run in the agent store (acquired authentic
 outputs, or a live execution through M2-003 when enabled), parse it through
 M2-002 as a derivation, and evaluate through M2-004 in a separate evaluator
-store. `labrun case list|ingest|evaluate`, a demo section, the assumptions
+store. `onoda case list|ingest|evaluate`, a demo section, the assumptions
 rows this milestone adds, and the README capability matrix.
 
 ```yaml
@@ -146,10 +146,10 @@ depth: deep
 depends_on: ["M2-002", "M2-003", "M2-004"]
 footprint:
   creates:
-    - "src/labrun/science/runner.py"
+    - "src/onoda/science/runner.py"
     - "tests/test_smoke_cases.py"
   modifies:
-    - "src/labrun/cli.py::*"
+    - "src/onoda/cli.py::*"
     - "scripts/demo.sh::*"
     - "docs/ASSUMPTIONS.md::*"
     - "README.md::*"
@@ -173,8 +173,8 @@ flowchart TD
 
 - **M2-005 footprint widened after review.** The correctness review found
   that M1 commands crashed on or mislabelled case runs. Fixes touched
-  `src/labrun/controller.py::Controller.resume` (refuses checkpoints that do
-  not declare semantic restart) and `src/labrun/portability.py::_capabilities`
+  `src/onoda/controller.py::Controller.resume` (refuses checkpoints that do
+  not declare semantic restart) and `src/onoda/portability.py::_capabilities`
   (honours checkpoint-declared `semantic_restart`/`fork`/`reanalyze`), both
   outside the planned footprint. No lane was live, so nothing collided.
 - **Lane files edited during integration.** `orca_parser.py` (undecodable
@@ -185,4 +185,4 @@ flowchart TD
 - **Deferred structural findings** (for a later pass): share
   commit-before-visible primitives between `Controller` and the case runner;
   a public `Store.final_checkpoint`; a public evaluation-id helper instead of
-  importing `labrun.evaluation._next_evaluation_id`.
+  importing `onoda.evaluation._next_evaluation_id`.

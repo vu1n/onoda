@@ -12,7 +12,7 @@ from typing import Any
 
 import rfc8785
 
-from labrun.errors import CanonicalizationError
+from onoda.errors import CanonicalizationError
 
 DIGEST_PREFIX = "sha256:"
 _MAX_SAFE_INT = 2**53 - 1

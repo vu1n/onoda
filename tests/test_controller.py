@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from labrun.controller import normalized_final_state
-from labrun.errors import CapabilityError
+from onoda.controller import normalized_final_state
+from onoda.errors import CapabilityError
 
 FULL_V1 = [
     "initialized",

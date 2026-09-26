@@ -21,9 +21,9 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
 
-from labrun.errors import BudgetExceeded
-from labrun.records import Checkpoint, Event, InvocationReceipt, Run
-from labrun.store import Store
+from onoda.errors import BudgetExceeded
+from onoda.records import Checkpoint, Event, InvocationReceipt, Run
+from onoda.store import Store
 
 
 def _receipts(store: Store, invocation_ids: Iterable[str]) -> list[InvocationReceipt]:

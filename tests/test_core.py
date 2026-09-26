@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from labrun.canonical import canonical_bytes, digest_of, sha256_digest
-from labrun.errors import (
+from onoda.canonical import canonical_bytes, digest_of, sha256_digest
+from onoda.errors import (
     CanonicalizationError,
     IntegrityError,
     MissingObjectError,
     SchemaVersionError,
     VisibilityError,
 )
-from labrun.records import ArtifactDescriptor, StepSpec, load_record
-from labrun.store import Store
+from onoda.records import ArtifactDescriptor, StepSpec, load_record
+from onoda.store import Store
 
 
 class Crash(Exception):
@@ -122,8 +122,8 @@ def test_crash_mid_commit_leaves_nothing_visible(tmp_path, point):
 
 def test_unknown_schema_rejected_and_migration_is_new_record(tmp_path):
     with pytest.raises(SchemaVersionError):
-        load_record("artifact", {"schema": "labrun.artifact/9", "digest": "x"})
-    old = {"schema": "labrun.artifact/0", "sha256": "ab" * 32, "size": 3, "media_type": "t/p"}
+        load_record("artifact", {"schema": "onoda.artifact/9", "digest": "x"})
+    old = {"schema": "onoda.artifact/0", "sha256": "ab" * 32, "size": 3, "media_type": "t/p"}
     old_digest = digest_of(old)
     with pytest.raises(SchemaVersionError):
         load_record("artifact", old)

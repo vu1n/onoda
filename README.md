@@ -14,6 +14,9 @@ were produced elsewhere (cclib's public regression data) and are recorded as
 acquired, not executed here. No ORCA has been run by this harness, and no
 chemistry experiment has been reproduced.
 
+The handoff names the CLI `labrun`; in this repository the package and CLI are
+`onoda`.
+
 ## Quick start
 
 ```sh
@@ -29,21 +32,21 @@ lineage and costs, and grades both branches in a separate evaluator store.
 
 ## CLI
 
-`labrun` implements the interface proposed in PORTABLE_RUN_SPEC §14. Every
+`onoda` implements the interface proposed in PORTABLE_RUN_SPEC §14. Every
 command prints JSON.
 
 ```sh
-labrun fixture run --run-id demo --store ./store-a
-labrun checkpoint list demo --store ./store-a
-labrun export demo --store ./store-a --profile agent-visible --out demo.tar.gz
-labrun import demo.tar.gz --store ./store-b
-labrun inspect demo --store ./store-b --capabilities
-labrun replay demo --store ./store-b --offline
-labrun reanalyze demo --step parse --store ./store-b [--transform fixture-parser@2]
-labrun fork demo --checkpoint <digest> --declaration fork.yaml --new-run demo-branch --store ./store-b
-labrun resume demo-branch --mode fixture --store ./store-b
-labrun compare demo demo-branch --store ./store-b --include-cost-lineage
-labrun evaluate demo-branch --store ./store-b --evaluator-store ./evaluator
+onoda fixture run --run-id demo --store ./store-a
+onoda checkpoint list demo --store ./store-a
+onoda export demo --store ./store-a --profile agent-visible --out demo.tar.gz
+onoda import demo.tar.gz --store ./store-b
+onoda inspect demo --store ./store-b --capabilities
+onoda replay demo --store ./store-b --offline
+onoda reanalyze demo --step parse --store ./store-b [--transform fixture-parser@2]
+onoda fork demo --checkpoint <digest> --declaration fork.yaml --new-run demo-branch --store ./store-b
+onoda resume demo-branch --mode fixture --store ./store-b
+onoda compare demo demo-branch --store ./store-b --include-cost-lineage
+onoda evaluate demo-branch --store ./store-b --evaluator-store ./evaluator
 ```
 
 The mock scheduler stands in for an external system, so its state lives beside
@@ -52,11 +55,11 @@ the store (`<store>.scheduler/`) and is never exported.
 M2 scientific smoke cases:
 
 ```sh
-labrun case list
-labrun case ingest orca6-dvb-tddft --run-id td6 --store ./store-a
-labrun case evaluate td6 --store ./store-a --evaluator-store ./evaluator --reference-case orca5-dvb-tddft
+onoda case list
+onoda case ingest orca6-dvb-tddft --run-id td6 --store ./store-a
+onoda case evaluate td6 --store ./store-a --evaluator-store ./evaluator --reference-case orca5-dvb-tddft
 # Live execution needs an operator-supplied ORCA and every setting stated:
-labrun case ingest orca6-water-mp2 --run-id live --store ./store-a --execute \
+onoda case ingest orca6-water-mp2 --run-id live --store ./store-a --execute \
   --enable-live-execution --orca-binary /opt/orca/orca --work-root ./orca-jobs --max-wall-seconds 600
 ```
 
@@ -88,7 +91,7 @@ labrun case ingest orca6-water-mp2 --run-id live --store ./store-a --execute \
 ## Capability matrix
 
 What was actually demonstrated, and on what. "Fixture" means the synthetic
-workflow in `labrun.fixture`; none of these rows is a scientific result.
+workflow in `onoda.fixture`; none of these rows is a scientific result.
 
 | Capability (PORTABLE_RUN_SPEC §1) | Status | Evidence |
 |---|---|---|
@@ -152,7 +155,7 @@ and have not been run.
 - Case runs support inspect, export/import, and offline replay. Fixture-only
   commands (`resume`, `fork`, `reanalyze`, `compare`, `evaluate`) refuse them,
   and `inspect --capabilities` reports those as unsupported by the record. An
-  interrupted case run is continued by rerunning `labrun case ingest` with the
+  interrupted case run is continued by rerunning `onoda case ingest` with the
   same run id.
 - `case evaluate` re-checks an acquired run against the pinned case (manifest
   digest, log sha256, a fresh parse). A live run's log has no pinned digest,

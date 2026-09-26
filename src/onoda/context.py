@@ -24,11 +24,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
-from labrun.canonical import canonical_bytes, digest_of, sha256_digest
-from labrun.clock import Clock
-from labrun.errors import CanonicalizationError, CapabilityError
-from labrun.records import Event, InvocationReceipt, StepSpec, Usage
-from labrun.store import Store, record_ref
+from onoda.canonical import canonical_bytes, digest_of, sha256_digest
+from onoda.clock import Clock
+from onoda.errors import CanonicalizationError, CapabilityError
+from onoda.records import Event, InvocationReceipt, StepSpec, Usage
+from onoda.store import Store, record_ref
 
 _EXCERPT_BYTES = 256
 
@@ -56,7 +56,7 @@ class ObservationPack:
     in any store holding the same object.
     """
 
-    SCHEMA = "labrun.context.observation-pack/1"
+    SCHEMA = "onoda.context.observation-pack/1"
 
     def __init__(
         self,
@@ -324,7 +324,7 @@ def reduce_log(
     step = StepSpec.new(
         operation="context.reduce_log",
         inputs={"log": log_desc.digest},
-        code_ref=f"labrun.context.reduce_log@{reducer_id}",
+        code_ref=f"onoda.context.reduce_log@{reducer_id}",
         determinism="nondeterministic",
     )
     spec_digest = store.put_record(step)

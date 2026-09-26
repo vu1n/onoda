@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from labrun.clock import LogicalClock
-from labrun.controller import Controller, RunState
-from labrun.fixture import PROGRAMS
-from labrun.jobs import MockScheduler
-from labrun.store import Store
+from onoda.clock import LogicalClock
+from onoda.controller import Controller, RunState
+from onoda.fixture import PROGRAMS
+from onoda.jobs import MockScheduler
+from onoda.store import Store
 
 
 @dataclass

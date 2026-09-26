@@ -7,7 +7,7 @@ never a claim about scientific correctness.
 
 `publish_reference` derives the protected reference by re-deriving the
 fixture's energy ordering directly from `params` (system/points/seed), not by
-importing `labrun.fixture`'s agent-visible calculation or parser, and stores
+importing `onoda.fixture`'s agent-visible calculation or parser, and stores
 it with `visibility="evaluator"` in the evaluator's own store. An agent store
 (default `allowed_visibility=("agent",)`) refuses such artifacts outright.
 
@@ -24,10 +24,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from labrun.canonical import digest_of
-from labrun.errors import CapabilityError
-from labrun.records import Evaluation, Usage
-from labrun.store import Store
+from onoda.canonical import digest_of
+from onoda.errors import CapabilityError
+from onoda.records import Evaluation, Usage
+from onoda.store import Store
 
 GraderResult = tuple[dict[str, str], list[str], dict[str, str]]
 GraderFn = Callable[[dict[str, Any], dict[str, Any]], GraderResult]

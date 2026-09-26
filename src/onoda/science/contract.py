@@ -29,12 +29,12 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from labrun.canonical import sha256_digest
-from labrun.errors import IntegrityError, LabrunError
+from onoda.canonical import sha256_digest
+from onoda.errors import IntegrityError, OnodaError
 
 Digest = str
 
-OBSERVATION_SCHEMA = "labrun.orca-observation/1"
+OBSERVATION_SCHEMA = "onoda.orca-observation/1"
 
 ProblemState = Literal["missing", "error", "ambiguous", "unresolved"]
 Termination = Literal["normal", "error", "absent"]
@@ -170,7 +170,7 @@ class LoadedCase(BaseModel):
 def _read_pinned(root: Path, pinned: PinnedFile) -> bytes:
     path = (root / pinned.path).resolve()
     if not path.is_relative_to(root.resolve()):
-        raise LabrunError(f"case file {pinned.path!r} escapes its case directory")
+        raise OnodaError(f"case file {pinned.path!r} escapes its case directory")
     data = path.read_bytes()
     if sha256_digest(data) != pinned.sha256:
         raise IntegrityError(f"{pinned.path}: bytes do not match pinned {pinned.sha256}")
@@ -199,6 +199,6 @@ def case_manifests(root: Path = CASES_ROOT) -> dict[str, Path]:
     for path in sorted(root.glob("**/*.case.yaml")):
         case_id = yaml.safe_load(path.read_text())["case_id"]
         if case_id in found:
-            raise LabrunError(f"duplicate case id {case_id!r}: {found[case_id]} and {path}")
+            raise OnodaError(f"duplicate case id {case_id!r}: {found[case_id]} and {path}")
         found[case_id] = path
     return found

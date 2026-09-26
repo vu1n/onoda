@@ -30,7 +30,7 @@ not attempted here.
 
 The single hard requirement (PORTABLE_RUN_SPEC, AGENTS.md rule 6): **critical
 data cannot exist only in a Python variable, retained subagent, host cache,
-or daemon.** Concretely, the seam (`src/labrun/adapters/agents.py`,
+or daemon.** Concretely, the seam (`src/onoda/adapters/agents.py`,
 `AgentAdapter`) externalizes exactly three things, each independent of which
 harness implements it:
 
@@ -49,7 +49,7 @@ harness implements it:
    gateway records (SOL_PI_DELTA §2) before commit.
 3. **`capture(call) -> CallRecord`** — the observable record of the
    underlying provider call: request body, response, model id, usage,
-   request id. Field names mirror `labrun.records.InvocationReceipt` /
+   request id. Field names mirror `onoda.records.InvocationReceipt` /
    `Usage` so a real gateway can commit a `CallRecord` directly as evidence.
    It never contains unobservable model-internal reasoning (AGENTS.md
    rule 13) and never claims a provider-resolved model version that was not
@@ -86,8 +86,8 @@ extension is:
   — is committed as an artifact or checkpoint field through the gateway
   *before* any subsequent step may reference it. "Committed" means: written
   to `core/artifacts` (content-addressed), or included in the checkpoint's
-  `context` / `visible` fields (`labrun.records.Checkpoint`).
-- A checkpoint's `capabilities` field (already in `labrun.records.Checkpoint`)
+  `context` / `visible` fields (`onoda.records.Checkpoint`).
+- A checkpoint's `capabilities` field (already in `onoda.records.Checkpoint`)
   states `{"semantic_restart": "supported", "native_resume": "unsupported"}`
   for any Pi/RLM-backed run: resuming means replaying committed state into
   a fresh kernel, never reattaching to the original process (assumptions
@@ -119,7 +119,7 @@ and what gets recorded alongside:
   assumptions register A15).
 - **Online Context Compact** — every trigger decision and its inputs is an
   event; compaction points are aligned with the same checkpoint boundaries
-  `labrun.records.BOUNDARIES` already defines, so a fork always lands on a
+  `onoda.records.BOUNDARIES` already defines, so a fork always lands on a
   declared boundary and its metadata states whether it sees raw history or
   a summary (SOL_PI_DELTA §2).
 - **Action Fusion** — allowed only for idempotent local checks; a fused call

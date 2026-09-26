@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from labrun.errors import SubmissionUncertain
+from onoda.errors import SubmissionUncertain
 
 
 class Crash(Exception):

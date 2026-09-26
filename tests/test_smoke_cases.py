@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from labrun.clock import LogicalClock
-from labrun.errors import CapabilityError, IntegrityError, LabrunError
-from labrun.science.contract import case_manifests, load_case
-from labrun.science.orca_local import OrcaLocalScheduler, OrcaSettings
-from labrun.science.orca_parser import parse_orca_output
-from labrun.science.runner import evaluate_case_run, final_observation, record_case_run
-from labrun.store import Store
+from onoda.clock import LogicalClock
+from onoda.errors import CapabilityError, IntegrityError, OnodaError
+from onoda.science.contract import case_manifests, load_case
+from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
+from onoda.science.orca_parser import parse_orca_output
+from onoda.science.runner import evaluate_case_run, final_observation, record_case_run
+from onoda.store import Store
 
 CASES = case_manifests()
 
@@ -184,9 +184,9 @@ def test_undecodable_output_is_an_explicit_problem():
 
 
 def test_fixture_resume_refuses_a_case_run(tmp_path):
-    from labrun.controller import Controller
-    from labrun.fixture import PROGRAMS
-    from labrun.jobs import MockScheduler
+    from onoda.controller import Controller
+    from onoda.fixture import PROGRAMS
+    from onoda.jobs import MockScheduler
 
     agent, _ = stores(tmp_path)
     record_case_run(agent, case("orca6-water-mp2"), "run")
@@ -239,7 +239,7 @@ def test_interrupted_case_run_continues_to_the_same_result(tmp_path):
             "diagnostics-committed",
             "finalized",
         ], at
-        with pytest.raises(LabrunError, match="finalized"):
+        with pytest.raises(OnodaError, match="finalized"):
             record_case_run(store, case("orca6-water-mp2"), "run")
 
 
@@ -307,8 +307,8 @@ def test_evaluation_uses_the_manifest_pinned_at_ingest(tmp_path):
 
 
 def test_fixture_commands_refuse_case_runs_and_inspect_says_why(tmp_path):
-    from labrun.cli import main
-    from labrun.portability import inspect_capabilities
+    from onoda.cli import main
+    from onoda.portability import inspect_capabilities
 
     agent, _ = stores(tmp_path)
     record_case_run(agent, case("orca6-water-mp2"), "run")
@@ -327,7 +327,7 @@ def test_fixture_commands_refuse_case_runs_and_inspect_says_why(tmp_path):
 
 def test_forged_runs_are_refused_by_evaluation(tmp_path, monkeypatch):
     """Records in the agent store may be imported, so evaluation re-checks them."""
-    from labrun.science import runner
+    from onoda.science import runner
 
     _, evaluator = stores(tmp_path)
     c = case("orca6-dvb-tddft")

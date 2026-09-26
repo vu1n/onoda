@@ -29,9 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from labrun.canonical import canonical_bytes, sha256_digest
-from labrun.errors import CapabilityError, IntegrityError, LabrunError, SubmissionUncertain
-from labrun.records import (
+from onoda.canonical import canonical_bytes, sha256_digest
+from onoda.errors import CapabilityError, IntegrityError, OnodaError, SubmissionUncertain
+from onoda.records import (
     Checkpoint,
     Evaluation,
     InvocationReceipt,
@@ -40,17 +40,17 @@ from labrun.records import (
     TaskManifest,
     Usage,
 )
-from labrun.science.contract import LoadedCase, OrcaObservation
-from labrun.science.evaluator import evaluate_observation, publish_case_reference
-from labrun.science.orca_local import OrcaLocalScheduler
-from labrun.science.orca_parser import PARSER_ID, parse_orca_output
-from labrun.store import Store, check_safe_id, record_ref
+from onoda.science.contract import LoadedCase, OrcaObservation
+from onoda.science.evaluator import evaluate_observation, publish_case_reference
+from onoda.science.orca_local import OrcaLocalScheduler
+from onoda.science.orca_parser import PARSER_ID, parse_orca_output
+from onoda.store import Store, check_safe_id, record_ref
 
 CASE_CAPABILITIES = {
     "inspect": "supported",
-    "reanalyze": "unsupported: labrun reanalyze knows fixture parsers only",
+    "reanalyze": "unsupported: onoda reanalyze knows fixture parsers only",
     "fork": "unsupported: a case run has no decision step to fork at",
-    "semantic_restart": "unsupported: rerun `labrun case ingest` with the same run id",
+    "semantic_restart": "unsupported: rerun `onoda case ingest` with the same run id",
     "native_resume": "unsupported",
     "reexecute": "requires-operator-enabled-orca",
 }
@@ -115,7 +115,7 @@ class _Journal:
             # Committed just before a crash, not yet journaled: journal it as is.
             receipt = self.store.receipt(inv_id)
             if receipt.spec_digest != spec_id:
-                raise LabrunError(f"orphan receipt {inv_id} belongs to another step")
+                raise OnodaError(f"orphan receipt {inv_id} belongs to another step")
         else:
             now = self.store.clock.now()
             receipt = InvocationReceipt.new(
@@ -181,12 +181,12 @@ def _start(store: Store, case: LoadedCase, run_id: str, mode: str) -> tuple[_Jou
         run = store.run_record(run_id)
         task = store.get_record("task", run.task)
         if run.config.get("case_id") != m.case_id or run.config.get("mode") != mode:
-            raise LabrunError(f"run {run_id} already exists for a different case or mode")
+            raise OnodaError(f"run {run_id} already exists for a different case or mode")
         if task.inputs.get("case") != sha256_digest(canonical_bytes(_manifest_json(case))):
-            raise LabrunError(f"run {run_id} was recorded from a different case manifest")
+            raise OnodaError(f"run {run_id} was recorded from a different case manifest")
         j = _Journal(store, run)
         if j.events("checkpoint", boundary="finalized"):
-            raise LabrunError(f"run {run_id} already exists and is finalized")
+            raise OnodaError(f"run {run_id} already exists and is finalized")
         if not j.events("run.created"):
             _announce(j, task)  # records committed, event lost in the crash
         return j, task.inputs["input"]
@@ -258,7 +258,7 @@ def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt
         operation=ACQUIRE,
         inputs={"input": inp},
         config={"case_id": m.case_id, "program": m.program, "program_version": m.program_version},
-        code_ref="labrun.science.runner:_acquire",
+        code_ref="onoda.science.runner:_acquire",
         determinism="external",
     )
     receipt = j.invocation(
@@ -286,7 +286,7 @@ def _execute(
         operation=EXECUTE,
         inputs={"input": inp},
         config={"case_id": case.manifest.case_id},
-        code_ref="labrun.science.orca_local:OrcaLocalScheduler",
+        code_ref="onoda.science.orca_local:OrcaLocalScheduler",
         determinism="external",
     )
     submitted = j.events("job.submitted", key=key)
@@ -370,7 +370,7 @@ def record_case_run(
             StepSpec.new(
                 operation=PARSE,
                 inputs={"log": log},
-                code_ref="labrun.science.orca_parser:parse_orca_output",
+                code_ref="onoda.science.orca_parser:parse_orca_output",
                 determinism="pure",
             ),
             "derivation",

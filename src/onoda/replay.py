@@ -20,11 +20,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from labrun.canonical import digest_of
-from labrun.errors import CapabilityError, IntegrityError, LabrunError
-from labrun.fixture import PARSERS
-from labrun.records import Checkpoint, InvocationReceipt, StepSpec, Usage
-from labrun.store import Store, record_ref
+from onoda.canonical import digest_of
+from onoda.errors import CapabilityError, IntegrityError, OnodaError
+from onoda.fixture import PARSERS
+from onoda.records import Checkpoint, InvocationReceipt, StepSpec, Usage
+from onoda.store import Store, record_ref
 
 
 def _checkpoints(store: Store, run_id: str) -> list[tuple[int, str, Checkpoint]]:
@@ -119,9 +119,7 @@ def replay_state_at(store: Store, run_id: str, checkpoint_digest: str) -> dict[s
     """
     cp = store.checkpoint(checkpoint_digest)
     if cp.run_id != run_id:
-        raise LabrunError(
-            f"checkpoint {checkpoint_digest} belongs to {cp.run_id!r}, not {run_id!r}"
-        )
+        raise OnodaError(f"checkpoint {checkpoint_digest} belongs to {cp.run_id!r}, not {run_id!r}")
     state: dict[str, Any] = {}
     for name, digest in cp.visible.items():
         desc = store.descriptor(digest)
@@ -151,7 +149,7 @@ def _reanalyze_one(
         operation="parse",
         inputs=original.inputs,
         config={"parser": transform},
-        code_ref=f"labrun.fixture:PARSERS[{transform}]",
+        code_ref=f"onoda.fixture:PARSERS[{transform}]",
         determinism="pure",
     )
     spec_digest = store.put_record(spec)

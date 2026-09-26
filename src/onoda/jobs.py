@@ -18,7 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from labrun.errors import LabrunError, SubmissionUncertain
+from onoda.errors import OnodaError, SubmissionUncertain
 
 Program = Callable[[dict[str, bytes], dict[str, Any], str], dict[str, bytes]]
 """(inputs by name, config, job_id) -> outputs by name."""
@@ -61,7 +61,7 @@ class MockScheduler:
         if key in state["by_key"]:
             return state["by_key"][key]
         if program not in self.programs:
-            raise LabrunError(f"unknown program {program!r}")
+            raise OnodaError(f"unknown program {program!r}")
         job_id = f"job-{len(state['jobs']) + 1:05d}"
         outputs = self.programs[program](inputs, config, job_id)
         state["jobs"][job_id] = {
@@ -88,7 +88,7 @@ class MockScheduler:
     def collect(self, job_id: str) -> dict[str, bytes]:
         job = self._load()["jobs"][job_id]
         if job["status"] != "completed":
-            raise LabrunError(f"job {job_id} is {job['status']}, not collectable")
+            raise OnodaError(f"job {job_id} is {job['status']}, not collectable")
         return {k: v.encode("latin-1") for k, v in job["outputs"].items()}
 
     def cancel(self, job_id: str) -> None:
