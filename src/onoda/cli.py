@@ -334,6 +334,12 @@ def cmd_pi_run(a) -> Any:
 
     if bool(a.script) == bool(a.live):
         raise OnodaError("give exactly one of --script (offline) or --live")
+    if a.max_requests is not None and a.max_requests <= 0:
+        raise OnodaError("--max-requests must be greater than 0")
+    if a.max_acquisitions < 0:
+        raise OnodaError("--max-acquisitions must be 0 or more")
+    if bool(a.reducer_provider) != bool(a.reducer_model):
+        raise OnodaError("give both --reducer-provider and --reducer-model, or neither")
     script = Script.model_validate_json(Path(a.script).read_text()) if a.script else None
     live = None
     if a.live:
@@ -357,8 +363,9 @@ def cmd_pi_run(a) -> Any:
         ladder=Path(a.ladder).read_bytes() if a.ladder else None,
         synthetic_ladder=a.synthetic_ladder,
         # A live run's request cap is its own explicit setting (A35); never defaulted.
-        max_requests=a.max_requests if a.max_requests is not None else (0 if a.live else 16),
+        max_requests=a.max_requests,
         max_acquisitions=a.max_acquisitions,
+        reducer=(a.reducer_provider, a.reducer_model) if a.reducer_provider else None,
         timeout_s=a.timeout,
     )
     r = pi.ingest
@@ -540,6 +547,8 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--max-cost-usd")
     pr.add_argument("--max-requests", type=int)
     pr.add_argument("--max-acquisitions", type=int, default=1)
+    pr.add_argument("--reducer-provider", help="reducer provider for S2b/S3 (live runs)")
+    pr.add_argument("--reducer-model", help="reducer model for S2b/S3 (live runs)")
     pr.add_argument("--doc", action="append", default=[], help="allowed documentation (.md)")
     pr.add_argument("--ladder", help="advisory ladder document (required from S1 on)")
     pr.add_argument("--synthetic-ladder", action="store_true")

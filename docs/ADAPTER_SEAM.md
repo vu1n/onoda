@@ -86,6 +86,25 @@ Findings that differ from the M0 sketch:
   fires no hooks. The scripted provider spools reducer calls itself; a real
   reducer provider's calls would not be spooled (open before any live S2b/S3
   run).
+- Pi's compaction summaries call the provider directly, without
+  `options.onPayload`, so they fire no `before_provider_request` and no
+  `message_end`. The scripted provider recognizes them by that missing
+  `onPayload`, serves them from `Script.summary_turns`, and spools them with
+  `purpose: "summary"` (ingest: `compaction-summary` receipts). A live
+  provider's compaction-summary calls are not spooled (the same gap as the
+  reducer's; open before any live S2c/S3 run).
+- Pi rejects some tool calls before `tool_call` fires (unknown or disallowed
+  tool name, arguments failing the schema, a message truncated at the token
+  limit) and still shows the model an error result. The recorder spools a
+  blocked `tool.call` for each such result ("rejected by Pi before
+  tool_call") from the `tool_execution_start` arguments.
+- Spool integrity: each launch hands the Pi process a random HMAC key through
+  a 0600 file the spool writer reads and unlinks at load; every spool line
+  carries a chained `mac` that ingest verifies with the key the runtime kept
+  in memory. The recorder then deletes every `ONODA_PI_*` variable from the
+  process environment, and the child environment itself is an allowlist.
+  This is tamper evidence against the agent's tools rewriting the spool, not
+  a sandbox (A38): Pi's `bash` runs unsandboxed.
 - SoL-Pi's reducer only rewrites output of commands it recognizes as build or
   test logs, so on the task tools (`case_input`, `orca_run`) S2b is inert.
 

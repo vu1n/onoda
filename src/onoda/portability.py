@@ -452,6 +452,18 @@ def _imported_prefixes(store: Store) -> dict[str, int]:
     return out
 
 
+def imported_runs(store: Store) -> set[str]:
+    """Every run id this store received through `import_bundle` (roots and ancestors)."""
+    out: set[str] = set()
+    base = store.root / "imports"
+    if base.is_dir():
+        for path in sorted(base.glob("*.json")):
+            meta = json.loads(path.read_bytes())
+            out.update(meta.get("roots", []))
+            out.update(meta.get("ancestors", {}))
+    return out
+
+
 def inspect_capabilities(
     store: Store, run_id: str, *, available_environment: dict[str, Any] | None = None
 ) -> dict[str, dict[str, Any]]:

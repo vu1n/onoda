@@ -59,6 +59,11 @@ ENV_SCRIPT = "ONODA_PI_SCRIPT"  # Script JSON path; scripted provider only
 ENV_TASK = "ONODA_PI_TASK"  # staged TaskBundle directory
 ENV_POLICY = "ONODA_PI_POLICY"  # GatewayPolicy JSON path
 ENV_RUN_INFO = "ONODA_PI_RUN_INFO"  # SpoolStart fields the recorder copies verbatim
+# Path of a 0600 file holding the spool's HMAC key. The spool writer reads it
+# when constructed (at extension load, before any tool can run) and unlinks it;
+# the recorder then removes every ONODA_PI_* variable from the process
+# environment so tool subprocesses inherit none of them.
+ENV_SPOOL_KEY = "ONODA_PI_SPOOL_KEY"
 
 SCRIPTED_PROVIDER = "onoda-scripted"
 SCRIPTED_MODEL = "scripted"
@@ -170,21 +175,28 @@ VARIANTS: dict[str, Variant] = {
 
 # -------------------------------------------------------------- gateway policy
 
+DECIMAL_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$")
+# Allowed-documentation file names: a plain `*.md` name, never a path.
+DOC_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.md$")
+
 
 class GatewayPolicy(_Frozen):
     """What the recorder enforces at Pi's `tool_call` hook, before any tool runs.
 
-    A call outside `allowed_tools`, a fused `then_run` containing an
-    unfusable token, an `orca_run` past `max_acquisitions`, or any call after
-    `max_requests` provider requests is blocked and spooled as `tool.call`
-    with `decision: "blocked"`. `max_requests` also aborts the agent at
-    `turn_start` once reached.
+    A call outside `allowed_tools`, a `then_run` without a string `command`
+    or containing an unfusable token, an `orca_run` past `max_acquisitions`,
+    any call after `max_requests` provider requests, or any call once the
+    summed cost reached `max_cost_usd` is blocked and spooled as `tool.call`
+    with `decision: "blocked"`. Both budgets also abort the agent at
+    `turn_start` once reached; with a cost cap set, a response that carries
+    no cost figure ends the run too (fail closed).
     """
 
     schema_: Literal["onoda.pi-policy/1"] = Field("onoda.pi-policy/1", alias="schema")
     allowed_tools: tuple[str, ...]
     max_requests: int = Field(gt=0)
     max_acquisitions: int = Field(ge=0)
+    max_cost_usd: str | None = None  # decimal text; checked against Pi's cost estimate (A35)
     unfusable_command_tokens: tuple[str, ...] = UNFUSABLE_COMMAND_TOKENS
     # Absolute path -> placeholder, applied to every string before computing a
     # replay key, so a moved workspace or runtime does not change the key.
@@ -192,10 +204,15 @@ class GatewayPolicy(_Frozen):
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
+    @field_validator("max_cost_usd")
+    @classmethod
+    def _cost(cls, v: str | None) -> str | None:
+        if v is not None and not DECIMAL_RE.match(v):
+            raise ValueError(f"max_cost_usd is not decimal text: {v!r}")
+        return v
+
 
 # ------------------------------------------------------------------ task bundle
-
-DECIMAL_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$")
 
 
 class TaskBundle(_Frozen):
@@ -221,6 +238,22 @@ class TaskBundle(_Frozen):
     synthetic_ladder: bool = False  # a test fixture, never a reconstruction of the paper's
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    @field_validator("instruction")
+    @classmethod
+    def _instruction(cls, v: str) -> str:
+        # Pi reads a leading `@` as a file include and a leading `-` as a flag.
+        if v.startswith(("@", "-")):
+            raise ValueError("instruction must not start with '@' or '-'")
+        return v
+
+    @field_validator("docs")
+    @classmethod
+    def _docs(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        for name in v:
+            if not DOC_NAME_RE.match(name):
+                raise ValueError(f"doc name {name!r} is not a plain *.md file name")
+        return v
 
 
 class ClaimedQuantity(_Frozen):
@@ -276,6 +309,16 @@ class ScriptTurn(_Frozen):
     # Replay: the provider fails closed (`replay.mismatch`) unless the
     # normalized context it receives hashes to this key.
     expect_replay_key: str | None = None
+    # Synthetic cost (decimal text, USD) the scripted provider reports for
+    # this turn, so tests and replays can drive `max_cost_usd`. Never a price.
+    usage_cost: str | None = None
+
+    @field_validator("usage_cost")
+    @classmethod
+    def _cost(cls, v: str | None) -> str | None:
+        if v is not None and not DECIMAL_RE.match(v):
+            raise ValueError(f"usage_cost is not decimal text: {v!r}")
+        return v
 
 
 class Script(_Frozen):
@@ -286,6 +329,9 @@ class Script(_Frozen):
     source: str  # who wrote it: a test name, or "replay:<run_id>"
     turns: tuple[ScriptTurn, ...]
     reducer_turns: tuple[ScriptTurn, ...] = ()  # served to SCRIPTED_REDUCER_MODEL
+    # Served to compaction-summary requests: Pi calls the provider without
+    # `onPayload` for them (the agent loop always passes it).
+    summary_turns: tuple[ScriptTurn, ...] = ()
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -299,8 +345,22 @@ SPOOL_SCHEMA = "onoda.pi-spool/1"
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
+MAC_RE = re.compile(rb',"mac":"([0-9a-f]{64})"\}$')
+
+
 class _Line(_Frozen):
+    """Every line may end with `mac`, chaining the spool (tamper evidence, not a sandbox).
+
+    Byte rule, mirrored by `SpoolWriter.line` in `spool.ts`: `body` is the
+    line's JSON without `mac` (UTF-8, no trailing newline). The written line
+    is `body` with its closing `}` replaced by `,"mac":"<hex>"}`, where hex is
+    HMAC-SHA256(key, previous line's mac hex + body), and the first line's
+    previous mac is the empty string. A reader recovers `body` from the raw
+    line by replacing that exact suffix with `}` (`MAC_RE`).
+    """
+
     seq: int = Field(ge=0)
+    mac: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class SpoolStart(_Line):
@@ -315,6 +375,7 @@ class SpoolStart(_Line):
     scripted: bool
     session_id: str
     session_dir: str
+    max_cost_usd: str | None = None  # a live run's cost cap, as given (decimal text)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -324,10 +385,13 @@ class ProviderRequest(_Line):
 
     type: Literal["provider.request"]
     request_index: int = Field(ge=0)
-    model: str  # SCRIPTED_REDUCER_MODEL marks a reducer call
+    model: str
     context: Sha256  # raw JSON bytes of the context / provider payload
     source: Literal["scripted-provider", "before_provider_request"]
     replay_key: Sha256  # sha256 of the normalized context (timestamps dropped, paths aliased)
+    # agent: the main loop; reducer: SoL-Pi's reducer; summary: a compaction summary.
+    # Only the scripted provider sees reducer and summary requests (ADAPTER_SEAM §2).
+    purpose: Literal["agent", "reducer", "summary"] = "agent"
 
 
 class ProviderResponse(_Line):
@@ -390,7 +454,14 @@ class ReplayMismatchLine(_Line):
 
 class SpoolEnd(_Line):
     type: Literal["spool.end"]
-    status: Literal["settled", "aborted", "budget-exhausted", "replay-mismatch", "script-exhausted"]
+    status: Literal[
+        "settled",
+        "aborted",
+        "budget-exhausted",
+        "replay-mismatch",
+        "script-exhausted",
+        "provider-error",  # the last assistant message ended with stopReason "error"
+    ]
     requests: int
     reason: str | None = None
 

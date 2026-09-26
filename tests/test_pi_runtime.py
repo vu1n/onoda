@@ -19,6 +19,7 @@ from onoda.adapters.pi.contract import (
     ENV_RUN_INFO,
     ENV_SCRIPT,
     ENV_SPOOL,
+    ENV_SPOOL_KEY,
     ENV_TASK,
     EXTENSIONS_DIR,
     PI_VERSION,
@@ -35,6 +36,7 @@ from onoda.adapters.pi.contract import (
     Script,
     ScriptTurn,
     TextBlock,
+    parse_spool_line,
 )
 from onoda.adapters.pi.runtime import LiveSettings, build_launch, doctor, launch
 from onoda.errors import CapabilityError, OnodaError
@@ -309,13 +311,14 @@ def test_requires_exactly_one_of_script_or_live(tmp_path):
         )
 
 
-def test_scripted_env_has_no_inherited_provider_keys(tmp_path, monkeypatch):
+def test_scripted_env_is_an_allowlist(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "leaked")
     monkeypatch.setenv("OPENAI_API_KEY", "leaked")
     monkeypatch.setenv("GEMINI_API_KEY", "leaked")
     monkeypatch.setenv("GOOGLE_API_KEY", "leaked")
     monkeypatch.setenv("SOME_OTHER_API_KEY", "leaked")
-    monkeypatch.setenv("UNRELATED_VAR", "keep-me")
+    monkeypatch.setenv("ONODA_TEST_SECRET", "leaked")
+    monkeypatch.setenv("LANG", "C.UTF-8")
     bundle_dir = make_bundle(tmp_path, ladder=False)
     launch_obj = build_launch(
         variant_id="S0",
@@ -328,7 +331,9 @@ def test_scripted_env_has_no_inherited_provider_keys(tmp_path, monkeypatch):
     for key in launch_obj.env:
         assert not key.endswith("_API_KEY"), key
         assert not key.startswith(("ANTHROPIC_", "OPENAI_", "GEMINI_", "GOOGLE_")), key
-    assert launch_obj.env["UNRELATED_VAR"] == "keep-me"
+    # Built from an allowlist, not os.environ: an arbitrary variable never reaches Pi.
+    assert "ONODA_TEST_SECRET" not in launch_obj.env
+    assert launch_obj.env["LANG"] == "C.UTF-8"
 
 
 def test_scripted_env_still_keeps_own_provider_name_out_of_credentials(tmp_path):
@@ -408,3 +413,94 @@ def test_launch_times_out(tmp_path):
     launch_obj = dataclasses.replace(launch_obj, argv=("sleep", "5"))
     result = launch(launch_obj, timeout_s=0.2)
     assert result.timed_out is True
+
+
+# ------------------------------------------------------------ review fixes (M3)
+
+
+def live_launch(tmp_path: Path, monkeypatch, **kw):
+    monkeypatch.setenv("MY_KEY", "x")
+    live = LiveSettings(
+        provider="anthropic",
+        model="claude-x",
+        credential_env="MY_KEY",
+        max_requests=5,
+        max_cost_usd="2.50",
+    )
+    return build_launch(
+        variant_id="S0",
+        bundle_dir=make_bundle(tmp_path, ladder=False),
+        work_dir=tmp_path / "work",
+        live=live,
+        max_acquisitions=0,
+        **{"max_requests": 5, **kw},
+    )
+
+
+def test_live_spool_start_matches_the_contract(tmp_path, monkeypatch):
+    launch_obj = live_launch(tmp_path, monkeypatch)
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    # What the recorder writes: run info verbatim plus type, schema and session.
+    line = {
+        "seq": 0,
+        **run_info,
+        "type": "spool.start",
+        "session_id": "s",
+        "session_dir": str(launch_obj.session_dir),
+    }
+    start = parse_spool_line(line)
+    assert (start.max_cost_usd, start.scripted) == ("2.50", False)
+    policy = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text())
+    assert (policy.max_cost_usd, policy.max_requests) == ("2.50", 5)
+
+
+def test_live_launch_refuses_a_conflicting_request_cap(tmp_path, monkeypatch):
+    with pytest.raises(OnodaError, match="conflicts"):
+        live_launch(tmp_path, monkeypatch, max_requests=6)
+
+
+def test_live_env_passes_only_the_named_credential(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "other-key")
+    launch_obj = live_launch(tmp_path, monkeypatch)
+    assert launch_obj.env["MY_KEY"] == "x"
+    assert "ANTHROPIC_API_KEY" not in launch_obj.env
+    assert "PI_OFFLINE" not in launch_obj.env
+
+
+def test_spool_key_file_is_private_and_the_key_stays_in_memory(tmp_path):
+    launch_obj = build_launch(
+        variant_id="S0",
+        bundle_dir=make_bundle(tmp_path, ladder=False),
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    key_path = Path(launch_obj.env[ENV_SPOOL_KEY])
+    assert key_path.read_bytes() == launch_obj.spool_key and len(launch_obj.spool_key) == 32
+    assert key_path.stat().st_mode & 0o777 == 0o600
+    assert launch_obj.spool_key.hex() not in repr(launch_obj)
+    again = build_launch(
+        variant_id="S0",
+        bundle_dir=tmp_path / "bundle",
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    assert again.spool_key != launch_obj.spool_key  # fresh per launch
+
+
+def test_replay_aliases_cover_sessions_and_the_resolved_runtime(tmp_path):
+    launch_obj = build_launch(
+        variant_id="S0",
+        bundle_dir=make_bundle(tmp_path, ladder=False),
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    aliases = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text()).path_aliases
+    assert aliases[str(launch_obj.session_dir)] == "$SESSIONS"
+    assert aliases[str(RUNTIME_DIR.resolve())] == "$PI_RUNTIME"
+    assert aliases[str((RUNTIME_DIR / "node_modules").resolve())] == "$PI_RUNTIME/node_modules"

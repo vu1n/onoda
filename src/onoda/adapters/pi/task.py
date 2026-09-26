@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
-from onoda.adapters.pi.contract import Claim, ClaimedState, TaskBundle
+from onoda.adapters.pi.contract import DOC_NAME_RE, Claim, ClaimedState, TaskBundle
 from onoda.canonical import canonical_bytes, sha256_digest
 from onoda.errors import CapabilityError, IntegrityError, OnodaError
 from onoda.evaluation import _next_evaluation_id
@@ -58,11 +58,16 @@ def stage_bundle(
 ) -> TaskBundle:
     """Write a `TaskBundle` for `case` under `dest`. `dest` must be empty or absent.
 
-    Only the case's own pinned bytes, `docs` (allowed documentation, named
-    `*.md`) and an optional `ladder.md` are written; nothing from the
-    evaluator side (no parsed reference, no reference observation) goes into
-    the bundle.
+    Only the case's own pinned bytes, `docs` (allowed documentation, each a
+    plain `*.md` file name matching `DOC_NAME_RE`, never a path) and an
+    optional `ladder.md` are written; nothing from the evaluator side (no
+    parsed reference, no reference observation) goes into the bundle. The
+    instruction may not start with `@` (Pi reads that as a file include) or
+    `-`. Every refusal happens before anything is written.
     """
+    check_instruction(instruction)
+    for name in docs:
+        check_doc_name(name)
     if dest.exists() and any(dest.iterdir()):
         raise OnodaError(f"stage destination {dest} is not empty")
     dest.mkdir(parents=True, exist_ok=True)
@@ -89,11 +94,13 @@ def stage_bundle(
 
     doc_names: list[str] = []
     if docs:
-        (dest / "docs").mkdir()
+        docs_dir = (dest / "docs").resolve()
+        docs_dir.mkdir()
         for name in sorted(docs):
-            if not name.endswith(".md"):
-                raise ValueError(f"doc {name!r} is not a .md file")
-            (dest / "docs" / name).write_bytes(docs[name])
+            path = (docs_dir / name).resolve()
+            if path.parent != docs_dir:
+                raise OnodaError(f"doc {name!r} resolves outside {docs_dir}")
+            path.write_bytes(docs[name])
             doc_names.append(name)
 
     ladder_sha256: str | None = None
@@ -117,6 +124,18 @@ def stage_bundle(
     )
     (dest / "task.json").write_bytes(canonical_bytes(bundle.model_dump(mode="json", by_alias=True)))
     return bundle
+
+
+def check_doc_name(name: str) -> None:
+    """Refuse a doc name that is not a plain `*.md` file name (no path, no traversal)."""
+    if not DOC_NAME_RE.match(name):
+        raise OnodaError(f"doc {name!r} is not a plain *.md file name")
+
+
+def check_instruction(instruction: str) -> None:
+    """Refuse an instruction Pi would read as a file include (`@path`) or a flag."""
+    if instruction.startswith(("@", "-")):
+        raise OnodaError("instruction must not start with '@' or '-'")
 
 
 def _decimal(text: str) -> Decimal:

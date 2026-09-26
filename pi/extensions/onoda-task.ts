@@ -41,6 +41,7 @@ interface TaskBundle {
 }
 
 const DECIMAL_RE = /^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$/;
+const DOC_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/; // contract.py DOC_NAME_RE
 
 /** Read a bundle file and check it against a pin given as `<hex>` or `sha256:<hex>`. */
 function readPinned(dir: string, name: string, pin: string): Buffer {
@@ -60,6 +61,7 @@ function loadBundle(dir: string) {
 	const output = readPinned(join(dir, "output"), task.output_name, task.output_sha256);
 	const sections: string[] = [];
 	for (const name of [...(task.docs ?? [])].sort()) {
+		if (!DOC_NAME_RE.test(name)) throw new Error(`onoda-task: doc name ${JSON.stringify(name)} is not a plain *.md name`);
 		sections.push(`## Allowed documentation: ${name}\n\n${readFileSync(join(dir, "docs", name), "utf8")}`);
 	}
 	if (task.ladder_sha256) {

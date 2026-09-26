@@ -10,6 +10,7 @@ The argv is written by hand: the runtime module is a separate lane.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import subprocess
@@ -26,6 +27,7 @@ pytestmark = requires_pi
 
 CASE_ID = "orca6-water-mp2"  # smallest vendored output that is still > 10 KiB
 PI_BIN = C.RUNTIME_DIR / "node_modules/.bin/pi"
+FIXTURES = Path(__file__).parent / "pi_fixtures"  # test-only Pi extensions
 SYNTHETIC_DOC = (
     "# Synthetic test document\n\nonoda-doc-marker: allowed documentation reaches the prompt.\n"
 )
@@ -126,8 +128,12 @@ def run_pi(
     *,
     variant: str = "S0",
     tools: tuple[str, ...] | None = None,
+    extra_extensions: tuple[Path, ...] = (),
+    provider: tuple[str, str] = (C.SCRIPTED_PROVIDER, C.SCRIPTED_MODEL),
+    spool_key: bytes | None = None,
     **policy: Any,
 ) -> Run:
+    """Launch Pi by hand; `extra_extensions` load just before the recorder."""
     v = C.VARIANTS[variant]
     for d in ("ws", "agent", "sessions", "spool", "home", "bundle"):
         (root / d).mkdir(parents=True)
@@ -151,12 +157,14 @@ def run_pi(
         allowed_tools=policy.pop("allowed_tools", tools),
         max_requests=policy.pop("max_requests", 20),
         max_acquisitions=policy.pop("max_acquisitions", 2),
+        max_cost_usd=policy.pop("max_cost_usd", None),
         path_aliases=aliases,
     )
     script = C.Script(
         source="tests/test_pi_extensions.py",
         turns=turns,
         reducer_turns=policy.pop("reducer_turns", []),
+        summary_turns=policy.pop("summary_turns", []),
     )
     assert not policy
     run_info = {
@@ -164,9 +172,9 @@ def run_pi(
         "sol_pi_commit": C.SOL_PI_COMMIT if sol_pi else None,
         "variant": v.id,
         "mechanisms": list(v.mechanisms),
-        "provider": C.SCRIPTED_PROVIDER,
-        "model": C.SCRIPTED_MODEL,
-        "scripted": True,
+        "provider": provider[0],
+        "model": provider[1],
+        "scripted": provider[0] == C.SCRIPTED_PROVIDER,
     }
     files = {
         "policy.json": gateway.model_dump_json(by_alias=True),
@@ -179,14 +187,15 @@ def run_pi(
     extensions = [C.EXTENSIONS_DIR / C.TASK_EXTENSION]
     if sol_pi:
         extensions.append(C.RUNTIME_DIR / C.SOL_PI_ENTRY)
-    extensions += [C.EXTENSIONS_DIR / C.SCRIPTED_EXTENSION, C.EXTENSIONS_DIR / C.RECORDER_EXTENSION]
+    extensions += [C.EXTENSIONS_DIR / C.SCRIPTED_EXTENSION, *extra_extensions]
+    extensions.append(C.EXTENSIONS_DIR / C.RECORDER_EXTENSION)
     argv = [str(PI_BIN), "--no-extensions"]
     for ext in extensions:
         argv += ["-e", str(ext)]
     argv += [
         "--session-dir", str(root / "sessions"),
         "--no-context-files", "--no-skills", "--no-prompt-templates",
-        "--provider", C.SCRIPTED_PROVIDER, "--model", C.SCRIPTED_MODEL,
+        "--provider", provider[0], "--model", provider[1],
         "--tools", ",".join(tools),
         "--mode", "json", "-p", bundle.instruction,
     ]  # fmt: skip
@@ -203,6 +212,9 @@ def run_pi(
         C.ENV_POLICY: str(root / "policy.json"),
         C.ENV_RUN_INFO: str(root / "run-info.json"),
     }
+    if spool_key is not None:
+        (root / "spool.key").write_bytes(spool_key)
+        env[C.ENV_SPOOL_KEY] = str(root / "spool.key")
     proc = subprocess.run(
         argv,
         cwd=root / "ws",
@@ -214,7 +226,10 @@ def run_pi(
     )
     events = root / "spool" / C.SPOOL_EVENTS
     assert events.exists(), proc.stderr.decode()
-    lines = [C.parse_spool_line(json.loads(raw)) for raw in events.read_text().splitlines()]
+    lines = [
+        C.parse_spool_line(json.loads(raw))
+        for raw in events.read_text(encoding="utf-8").splitlines()
+    ]
     run = Run(root, proc, lines, output)
     assert_well_formed(run)
     return run
@@ -470,3 +485,170 @@ def test_missing_reducer_turn_stops_the_run(tmp_path):
     end = run.lines[-1]
     assert (end.status, end.requests) == ("script-exhausted", 2)
     assert [r.model for r in run.of("provider.request")] == ["scripted", "scripted-reducer"]
+
+
+# ------------------------------------------------------------ review fixes (M3)
+
+
+def test_call_rejected_before_tool_call_gets_a_blocked_call_line(tmp_path):
+    # Pi answers an unknown tool and schema-invalid arguments itself, before its
+    # tool_call hook: the recorder still spools a (blocked) call for each result.
+    bad_claim = {"states": [{"root": 0, "energy": {"text": "1.0", "unit": "eV"}}]}
+    turns = [
+        turn(call("g1", "grep", pattern="x"), call("r0", "report_states", **bad_claim)),
+        turn(text("done")),
+    ]
+    run = run_pi(tmp_path, turns)
+    assert run.lines[-1].status == "settled"
+    calls = {c.tool_call_id: c for c in run.of("tool.call")}
+    for cid, name in (("g1", "grep"), ("r0", "report_states")):
+        c = calls[cid]
+        assert (c.tool_name, c.decision) == (name, "blocked")
+        assert c.reason == "rejected by Pi before tool_call"
+        (visible,) = run.results(cid, "visible")
+        assert visible.is_error and c.seq < visible.seq
+    assert run.json(calls["g1"].input) == {"pattern": "x"}
+    assert run.json(calls["r0"].input) == bad_claim
+    assert not run.of("task.claim")
+
+
+def test_cost_cap_ends_the_run_budget_exhausted(tmp_path):
+    # usage_cost is a synthetic figure the scripted provider reports as Pi's cost.
+    turns = [
+        {**turn(call("c1", "case_input")), "usage_cost": "0.30"},
+        {**turn(call("c2", "case_input")), "usage_cost": "0.30"},
+        turn(text("never served")),
+    ]
+    run = run_pi(tmp_path, turns, max_cost_usd="0.50")
+    end = run.lines[-1]
+    assert (end.status, end.requests) == ("budget-exhausted", 2)
+    assert "cost budget exhausted" in end.reason
+    assert [r.cost_usd for r in run.of("provider.response")] == ["0.3", "0.3"]
+    calls = {c.tool_call_id: c for c in run.of("tool.call")}
+    assert calls["c1"].decision == "allowed"
+    assert calls["c2"].decision == "blocked" and "cost budget" in calls["c2"].reason
+
+
+def test_run_without_cost_cap_ignores_cost(tmp_path):
+    turns = [{**turn(call("c1", "case_input")), "usage_cost": "5"}, turn(text("done"))]
+    assert run_pi(tmp_path, turns).lines[-1].status == "settled"
+
+
+def test_compaction_summary_requests_are_spooled_and_served(tmp_path):
+    turns = [
+        turn(call("o1", "orca_run"), call("o2", "orca_run")),
+        turn(text("Synthetic scripted run complete.")),
+        turn(text("never served")),
+    ]
+    summaries = [turn(text("synthetic summary")), turn(text("synthetic turn-prefix summary"))]
+    run = run_pi(
+        tmp_path,
+        turns,
+        extra_extensions=(FIXTURES / "compact-on-settle.ts",),
+        summary_turns=summaries,
+    )
+    requests = run.of("provider.request")
+    summary = [r for r in requests if r.purpose == "summary"]
+    assert summary and [r.purpose for r in requests[:2]] == ["agent", "agent"]
+    assert all(r.model == C.SCRIPTED_MODEL for r in summary)
+    answered = {r.request_index: r for r in run.of("provider.response")}
+    for r in summary:
+        assert answered[r.request_index].stop_reason == "stop"
+        assert r.seq < answered[r.request_index].seq
+    phases = [c.phase for c in run.of("compaction")]
+    assert phases == ["before", "done"]
+    assert run.lines[-1].status == "settled"
+
+
+def test_reducer_request_past_the_budget_is_refused_unsent(tmp_path):
+    # Counted: every spooled provider.request (agent, reducer, summary). With
+    # max_requests=1 the agent's request 0 spends the budget, so both reducer
+    # requests are refused before being sent (no provider.request line, not
+    # counted), SoL-Pi falls back to the raw output, and the run ends there.
+    turns = [
+        turn(
+            call("b1", "bash", command=REDUCER_COMMAND),
+            call("b2", "bash", command=REDUCER_COMMAND + " # 2"),
+        ),
+        turn(text("never served")),
+    ]
+    log_receipt = turn(text(receipt(sha(REDUCER_LOG.encode()))))
+    run = run_pi(
+        tmp_path, turns, variant="S2b", reducer_turns=[log_receipt, log_receipt], max_requests=1
+    )
+    end = run.lines[-1]
+    assert end.status == "budget-exhausted"
+    assert end.requests == len(run.of("provider.request")) == 1
+    assert [r.purpose for r in run.of("provider.request")] == ["agent"]
+    for cid in ("b1", "b2"):
+        (raw,) = run.results(cid, "raw")
+        (visible,) = run.results(cid, "visible")
+        assert raw.content == visible.content  # unreduced
+
+
+def test_provider_error_does_not_end_settled(tmp_path):
+    run = run_pi(
+        tmp_path,
+        [],
+        extra_extensions=(FIXTURES / "failing-provider.ts",),
+        provider=("onoda-test-failing", "failing"),
+    )
+    end = run.lines[-1]
+    assert end.status == "provider-error"
+    assert "synthetic invalid request" in end.reason
+    (response,) = run.of("provider.response")
+    assert response.stop_reason == "error"
+    assert run.of("provider.request")[0].source == "before_provider_request"
+
+
+def test_gateway_blocks_then_run_without_a_string_command(tmp_path):
+    # Without Action Fusion Pi's write schema passes then_run through unread;
+    # the gateway still refuses one it cannot check. (Under S2d SoL-Pi's own
+    # schema rejects these before tool_call.)
+    turns = [
+        turn(
+            call("w1", "write", path="a.txt", content="x\n", then_run="python3 -c 1"),
+            call("w2", "write", path="b.txt", content="x\n", then_run={"command": ["ls"]}),
+        ),
+        turn(text("done")),
+    ]
+    run = run_pi(tmp_path, turns, variant="S0")
+    calls = {c.tool_call_id: c for c in run.of("tool.call")}
+    for cid in ("w1", "w2"):
+        assert calls[cid].decision == "blocked"
+        assert calls[cid].reason == "then_run has no string command"
+    assert not (tmp_path / "ws" / "a.txt").exists() and not (tmp_path / "ws" / "b.txt").exists()
+
+
+def mac_chain_ok(events: bytes, key: bytes) -> bool:
+    prev = ""
+    for raw in events.splitlines():
+        m = C.MAC_RE.search(raw)
+        if m is None:
+            return False
+        body = raw[: m.start()] + b"}"
+        mac = hmac.new(key, prev.encode() + body, hashlib.sha256).hexdigest()
+        if mac != m.group(1).decode():
+            return False
+        prev = mac
+    return True
+
+
+def test_spool_lines_carry_a_chained_mac_and_the_key_file_is_unlinked(tmp_path):
+    key = os.urandom(32)
+    run = run_pi(tmp_path, s0_script(), spool_key=key)
+    assert run.lines[-1].status == "settled"
+    assert not (tmp_path / "spool.key").exists()
+    events = (run.spool / C.SPOOL_EVENTS).read_bytes()
+    assert all(line.mac for line in run.lines)
+    assert mac_chain_ok(events, key)
+    assert not mac_chain_ok(events, os.urandom(32))
+
+
+def test_tool_subprocesses_inherit_no_onoda_variables(tmp_path):
+    turns = [turn(call("b1", "bash", command="env")), turn(text("done"))]
+    run = run_pi(tmp_path, turns, spool_key=os.urandom(32))
+    (visible,) = run.results("b1", "visible")
+    shown = run.json(visible.content)[0]["text"]
+    assert "PATH=" in shown  # the command ran
+    assert "ONODA_PI_" not in shown

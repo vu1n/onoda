@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import shutil
 from pathlib import Path
@@ -154,8 +155,16 @@ class SpoolBuilder:
     def end(self, status: str = "settled") -> None:
         self.line("spool.end", status=status, requests=self.request_index)
 
-    def write(self) -> Path:
-        (self.dir / "events.jsonl").write_text("".join(json.dumps(x) + "\n" for x in self.lines))
+    def write(self, key: bytes | None = None) -> Path:
+        """Write events.jsonl; with `key`, chain every line's mac as spool.ts does."""
+        out, prev = [], ""
+        for x in self.lines:
+            body = json.dumps(x, separators=(",", ":"))
+            if key is not None:
+                prev = hmac.new(key, (prev + body).encode(), hashlib.sha256).hexdigest()
+                body = body[:-1] + f',"mac":"{prev}"}}'
+            out.append(body + "\n")
+        (self.dir / "events.jsonl").write_text("".join(out))
         return self.dir
 
 
@@ -575,3 +584,133 @@ def test_unanswered_request_and_missing_result_are_recorded_as_such(tmp_path):
     assert "pi.replay-mismatch" in [e.type for e in store.events("pi-run")]
     assert len(recorded_script(store, "pi-run").turns) == 1
     replay_run(store, "pi-run")
+
+
+# ------------------------------------------------------------ review fixes (M3)
+
+KEY = bytes(range(32))
+
+
+def test_keyed_spool_ingests_when_every_mac_verifies(tmp_path):
+    sb, _ = full_run(tmp_path / "w")
+    sb.write(key=KEY)
+    store, task = make_store(tmp_path / "store")
+    assert ingest(store, task, sb.dir, key=KEY).complete
+
+
+def _rewrite(spool: Path, edit) -> None:
+    events = spool / "events.jsonl"
+    lines = events.read_bytes().splitlines(keepends=True)
+    events.write_bytes(b"".join(edit(lines)))
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        # a tool call's input swapped for another object (what an agent's bash could do)
+        lambda lines: [
+            ln.replace(b'"input":"', b'"input":"' + b"0" * 64 + b'","x":"', 1)
+            if b'"tool.call"' in ln
+            else ln
+            for ln in lines
+        ],
+        lambda lines: lines[:3] + lines[4:],  # a line dropped from the middle
+        lambda lines: [lines[0], lines[2], lines[1], *lines[3:]],  # reordered
+        lambda lines: [ln.replace(b',"mac":"', b',"mbc":"') for ln in lines],  # macs stripped
+    ],
+)
+def test_tampered_keyed_spool_is_refused(tmp_path, tamper):
+    sb, _ = full_run(tmp_path / "w")
+    sb.write(key=KEY)
+    _rewrite(sb.dir, tamper)
+    store, task = make_store(tmp_path / "store")
+    with pytest.raises(IntegrityError, match="mac"):
+        ingest(store, task, sb.dir, key=KEY)
+    _assert_nothing_recorded(store)
+
+
+def test_keyed_ingest_refuses_a_spool_without_macs_or_under_another_key(tmp_path):
+    sb, _ = full_run(tmp_path / "w")
+    store, task = make_store(tmp_path / "store")
+    with pytest.raises(IntegrityError, match="no mac"):
+        ingest(store, task, sb.dir, key=KEY)
+    sb.write(key=bytes(32))
+    with pytest.raises(IntegrityError, match="mac"):
+        ingest(store, task, sb.dir, key=KEY)
+    _assert_nothing_recorded(store)
+
+
+def test_session_dir_outside_the_launch_is_refused(tmp_path):
+    sb, _ = full_run(tmp_path / "w")
+    store, task = make_store(tmp_path / "store")
+    with pytest.raises(IntegrityError, match="outside"):
+        ingest(store, task, sb.dir, expected_session_dir=tmp_path / "elsewhere")
+    _assert_nothing_recorded(store)
+    assert ingest(store, task, sb.dir, expected_session_dir=sb.session_dir).complete
+
+
+def test_only_archives_a_tool_result_vouches_for_are_imported(tmp_path):
+    sb, obs_id = full_run(tmp_path / "w")
+    planted = "obs_" + "f" * 24
+    objects = sb.session_dir / "sol-pi" / sb.session_id / "observation-pack" / "objects"
+    (objects / f"{planted}.txt").write_text("planted by a tool, cited by no result")
+    store, task = make_store(tmp_path / "store")
+    result = ingest(store, task, sb.dir)
+    assert set(result.observation_pack) == {obs_id}
+
+
+def test_then_run_outside_action_fusion_is_plain_even_if_malformed(tmp_path):
+    sb = SpoolBuilder(tmp_path / "w", variant="S0").start()
+    sb.call("c1", "write", {"path": "a.txt", "content": "x\n", "then_run": "orca x"})
+    sb.result("c1", "write", "wrote a.txt")
+    sb.end()
+    sb.write()
+    store, task = make_store(tmp_path / "store")
+    ingest(store, task, sb.dir, config={"mode": "pi-scripted", "variant": "S0"})
+    events = store.events("pi-run")
+    assert "context.fused-step" not in [e.type for e in events]
+    (receipt,) = [
+        store.receipt(e.payload["invocation_id"])
+        for e in events
+        if e.type == "invocation.committed"
+        and store.receipt(e.payload["invocation_id"]).metadata.get("tool_call_id") == "c1"
+    ]
+    assert receipt.metadata["fused"] is False and receipt.status == "succeeded"
+
+
+def test_summary_requests_are_their_own_receipts_and_errors_are_not_turns(tmp_path):
+    sb = SpoolBuilder(tmp_path / "w", variant="S0").start()
+    sb.call("c1", "case_input", {})
+    sb.result("c1", "case_input", INPUT.decode())
+    sb.turn({"type": "text", "text": "synthetic summary"})
+    sb.lines[-2]["purpose"] = "summary"
+    sb.turn({"type": "text", "text": "provider failed"})
+    sb.lines[-1]["stop_reason"] = "error"
+    sb.end("script-exhausted")
+    sb.write()
+    store, task = make_store(tmp_path / "store")
+    result = ingest(store, task, sb.dir, config={"mode": "pi-scripted", "variant": "S0"})
+    decisions = [
+        store.receipt(i)
+        for i in result.invocations
+        if store.receipt(i).invocation_kind == "decision"
+    ]
+    assert [d.metadata["role"] for d in decisions] == ["agent", "compaction-summary", "agent"]
+    assert "compaction-summary" in decisions[1].labels
+    script = recorded_script(store, "pi-run")
+    assert [t.expect_replay_key for t in script.turns] == [sb.replay_keys[0]]  # error skipped
+    assert [t.content[0].text for t in script.summary_turns] == ["synthetic summary"]
+
+
+def test_live_spool_start_with_cost_cap_and_provider_error_ingests(tmp_path):
+    sb = SpoolBuilder(tmp_path / "w", variant="S0").start()
+    sb.lines[0].update(provider="anthropic", model="some-model", scripted=False)
+    sb.lines[0]["max_cost_usd"] = "0.50"
+    sb.turn({"type": "text", "text": ""})
+    sb.lines[-2]["source"] = "before_provider_request"
+    sb.lines[-1].update(stop_reason="error", cost_usd=None)
+    sb.end("provider-error")
+    sb.write()
+    store, task = make_store(tmp_path / "store")
+    result = ingest(store, task, sb.dir, config={"mode": "pi-live", "variant": "S0"})
+    assert (result.status, result.complete) == ("provider-error", True)

@@ -294,3 +294,15 @@ flowchart TD
   manifest, which the agent never sees.
 - **M3-006:** `build_launch` resolves `bundle_dir`/`work_dir` to absolute
   paths (Pi runs with the workspace as cwd; the demo passed relative paths).
+- **M3 review fixes:** calls Pi rejects before `tool_call` get a blocked
+  `tool.call`; `max_cost_usd` moved into `GatewayPolicy` and enforced
+  (fail closed without a cost figure); compaction-summary requests are served
+  from `Script.summary_turns` and spooled with `ProviderRequest.purpose`;
+  replay compares the recorded end status and reducer/summary counts, skips
+  error turns, drops tool-result `details` and Pi temp-log paths from replay
+  keys (A34), and refuses imported runs; `spool.end` gains `provider-error`;
+  Action Fusion attribution needs the variant's `actionFusion`. Security: the
+  child env is an allowlist, ONODA_PI_* is scrubbed before tools run, the
+  spool is HMAC-chained (`_Line.mac`, `ENV_SPOOL_KEY`), doc names and
+  instructions are validated, ingest bounds `session_dir`, and A38 records
+  that `bash`/`then_run` are unsandboxed.

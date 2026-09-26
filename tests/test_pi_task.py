@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from onoda.adapters.pi.contract import Claim, ClaimedQuantity, ClaimedState
+from onoda.adapters.pi.contract import Claim, ClaimedQuantity, ClaimedState, TaskBundle
 from onoda.adapters.pi.task import (
     CLAIM_EVALUATOR,
     CLAIM_EVALUATOR_VERSION,
@@ -114,8 +114,35 @@ def test_stage_bundle_synthetic_ladder_without_bytes_is_rejected(tmp_path):
 
 def test_stage_bundle_rejects_non_markdown_docs(tmp_path):
     case = _load("orca6-dvb-tddft")
-    with pytest.raises(ValueError):
+    with pytest.raises(OnodaError):
         stage_bundle(case, tmp_path / "bundle", instruction="go", docs={"notes.txt": b"x"})
+
+
+@pytest.mark.parametrize(
+    "name", ["/tmp/escaped.md", "../outside.md", "../../outside.md", "sub/dir.md", ".hidden.md"]
+)
+def test_stage_bundle_refuses_doc_names_that_are_paths(tmp_path, name):
+    case = _load("orca6-dvb-tddft")
+    dest = tmp_path / "a" / "bundle"
+    with pytest.raises(OnodaError, match="plain"):
+        stage_bundle(case, dest, instruction="go", docs={name: b"x"})
+    assert not dest.exists()  # refused before anything was written
+    assert not (tmp_path / "a" / "outside.md").exists()
+    assert not (tmp_path / "outside.md").exists()
+
+
+@pytest.mark.parametrize("instruction", ["@/etc/passwd", "-p", "--help"])
+def test_stage_bundle_refuses_instruction_pi_would_misread(tmp_path, instruction):
+    case = _load("orca6-dvb-tddft")
+    with pytest.raises(OnodaError, match="instruction"):
+        stage_bundle(case, tmp_path / "bundle", instruction=instruction)
+    with pytest.raises(ValueError):  # the contract refuses it too
+        TaskBundle.model_validate(
+            {
+                **stage_bundle(case, tmp_path / "ok", instruction="go").model_dump(by_alias=True),
+                "instruction": instruction,
+            }
+        )
 
 
 # ------------------------------------------------------------------ evaluate_claims

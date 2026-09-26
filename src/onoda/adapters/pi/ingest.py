@@ -7,24 +7,30 @@ journal event that cites them:
 
 - `provider.request`/`provider.response` pairs become `decision` receipts
   (inputs `context`, outputs `message`, the request's replay key in
-  metadata). Requests to the reducer model are their own receipts, labelled
-  `reducer`. Scripted runs are `simulated` and labelled `synthetic`.
+  metadata). Reducer requests and compaction-summary requests are their own
+  receipts, labelled `reducer` and `compaction-summary`. Scripted runs are
+  `simulated` and labelled `synthetic`.
 - allowed `tool.call`s become `read`/`execution` receipts when their visible
-  result arrives; blocked calls become `pi.tool-blocked` events, never
-  receipts.
+  result arrives; blocked calls (including calls Pi rejected before its
+  `tool_call` hook) become `pi.tool-blocked` events, never receipts.
 - `task.acquire` is an acquisition `read` receipt citing the pinned output
   with `executed_here: false`, followed by a `job-collected` checkpoint.
-- Action Fusion calls (`edit`/`write` with `then_run`) are decomposed with
-  `context.decompose_fused_call` into `write_input` + `validate_input`.
+- In a variant with Action Fusion, `edit`/`write` calls with `then_run` are
+  decomposed with `context.decompose_fused_call` into `write_input` +
+  `validate_input`; elsewhere Pi ignores `then_run` and the call is plain.
 - ObservationPack archives under `<session_dir>/sol-pi/<session_id>/
   observation-pack/` are imported as `context.observation-archived` events
-  (obs id -> store digest), `obs_recall` calls as `context.page`.
+  (obs id -> store digest) for each archived object that matches a recorded
+  tool result, `obs_recall` calls as `context.page`.
 - a raw tool result that differs from the visible one is `context.reduced`.
 - `compaction` lines with phase `done` go through `context.record_compaction`.
 - the agent's claim is a `pi-claim` artifact cited by a `pi.claim` event.
 
 Everything in the spool is untrusted input: every line and object is
-validated, and anything inconsistent (a torn object, a result for an unknown
+validated; given the launch's HMAC key, every line's chained `mac` must
+verify (tamper evidence against the agent's own tools, not a sandbox); a
+`session_dir` outside `expected_session_dir` is refused; and anything
+inconsistent (a torn object, a result for an unknown
 call, a fused solver submission recorded as allowed) raises before a single
 record is written. Each write is keyed by its spool position, so re-running
 an interrupted ingest continues it, re-ingesting a finished one is a no-op,
@@ -34,10 +40,12 @@ and a different spool under the same run id is refused.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +59,7 @@ from onoda.adapters.pi.contract import (
     CTX_RUNTIME,
     CTX_VARIANT,
     DECIMAL_RE,
+    MAC_RE,
     PI_CAPABILITIES,
     PI_EXPERIMENT,
     PI_PACKAGE,
@@ -188,14 +197,30 @@ class _Spool:
         return self.lines[-1] if isinstance(self.lines[-1], SpoolEnd) else None
 
 
-def _read_spool(spool_dir: Path) -> _Spool:
+def _check_mac(text: bytes, n: int, key: bytes, prev: str) -> str:
+    """Verify line `n`'s chained mac (contract `_Line`); returns it."""
+    m = MAC_RE.search(text)
+    if m is None:
+        raise IntegrityError(f"spool line {n} carries no mac")
+    body = text[: m.start()] + b"}"
+    expected = hmac.new(key, prev.encode() + body, hashlib.sha256).hexdigest()
+    mac = m.group(1).decode()
+    if not hmac.compare_digest(expected, mac):
+        raise IntegrityError(f"spool line {n} fails its mac: the spool was altered")
+    return mac
+
+
+def _read_spool(spool_dir: Path, key: bytes | None = None) -> _Spool:
     raw = _read_file(spool_dir / SPOOL_EVENTS, "spool")
     # A torn final line was never fsynced, so nothing downstream saw it (WAL rule).
     torn_tail = bool(raw) and not raw.endswith(b"\n")
     if torn_tail:
         raw = raw[: raw.rfind(b"\n") + 1]
     lines = []
-    for n, text in enumerate(raw.splitlines()):
+    prev_mac = ""
+    for n, text in enumerate(raw.split(b"\n")[:-1] if raw else []):
+        if key is not None:
+            prev_mac = _check_mac(text, n, key, prev_mac)
         data = _load_json(text, f"spool line {n}")
         if not isinstance(data, dict):
             raise IntegrityError(f"spool line {n} is not an object")
@@ -234,10 +259,19 @@ class _Archive:
     stats: dict[str, dict[str, int]] = field(default_factory=dict)  # obs id -> event counts
 
 
-def _read_archive(start: SpoolStart) -> _Archive:
+def _read_archive(start: SpoolStart, expected_session_dir: Path | None) -> _Archive:
     if not _SESSION_ID.match(start.session_id):
         raise IntegrityError(f"unsafe Pi session id {start.session_id!r}")
-    root = Path(start.session_dir) / "sol-pi" / start.session_id / "observation-pack"
+    session_dir = Path(start.session_dir)
+    if expected_session_dir is not None:
+        if not (
+            session_dir.is_absolute()
+            and session_dir.resolve().is_relative_to(Path(expected_session_dir).resolve())
+        ):
+            raise IntegrityError(
+                f"spool session_dir {start.session_dir!r} is outside {expected_session_dir}"
+            )
+    root = session_dir / "sol-pi" / start.session_id / "observation-pack"
     if not root.is_dir() or root.is_symlink():
         return _Archive()
     objects: dict[str, bytes] = {}
@@ -309,9 +343,14 @@ class _Analysis:
     reducer_models: frozenset[str]
 
 
-def _fused_steps(line: ToolCall, args: dict[str, Any], tokens: tuple[str, ...]):
+def _fused_steps(line: ToolCall, args: dict[str, Any], tokens: tuple[str, ...], fusion: bool):
+    """Decomposed steps of an Action Fusion call, or None for a plain call.
+
+    Without Action Fusion in the variant Pi ignores `then_run`, so the call is
+    plain whatever `then_run` holds.
+    """
     then_run = args.get("then_run")
-    if line.tool_name not in FUSED_TOOLS or then_run is None:
+    if not fusion or line.tool_name not in FUSED_TOOLS or then_run is None:
         return None
     command = then_run.get("command") if isinstance(then_run, dict) else None
     if not isinstance(command, str):
@@ -353,6 +392,7 @@ def _analyze(
     if start.model in reducer_models:
         raise OnodaError(f"agent model {start.model!r} is also the reducer model")
     tokens = tuple(t.lower() for t in (*UNFUSABLE_COMMAND_TOKENS, *config.get("unfusable", ())))
+    fusion = "actionFusion" in variant.mechanisms
 
     calls: dict[str, _Call] = {}
     pending: dict[int, list[ProviderRequest]] = defaultdict(list)
@@ -383,7 +423,7 @@ def _analyze(
                 args = _load_json(spool.objects[line.input], f"input of {line.tool_call_id}")
                 if not isinstance(args, dict):
                     raise IntegrityError(f"input of {line.tool_call_id} is not an object")
-                fused = _fused_steps(line, args, tokens)
+                fused = _fused_steps(line, args, tokens, fusion)
                 calls[line.tool_call_id] = _Call(line, args, fused)
             case ToolResult():
                 call = call_for(line)
@@ -628,13 +668,15 @@ class _Writer:
         self.obj(line.context, "application/json", ["pi-context", *self.synthetic])
 
     def decision(self, req: ProviderRequest, resp: ProviderResponse | None) -> None:
-        reducer = req.model in self.a.reducer_models
+        reducer = req.purpose == "reducer" or req.model in self.a.reducer_models
         provider = self.spool.start.provider
         if reducer:
             provider = self.run.config.get("reducer_provider") or (
                 SCRIPTED_PROVIDER if self.scripted else "unknown"
             )
-        role = "reducer" if reducer else "agent"
+        role = (
+            "reducer" if reducer else "compaction-summary" if req.purpose == "summary" else "agent"
+        )
         ctx = self.obj(req.context, "application/json", ["pi-context", *self.synthetic])
         outputs, metadata = (
             {},
@@ -679,7 +721,7 @@ class _Writer:
             labels=[role, *self.synthetic],
             usage=usage,
         )
-        if not reducer:
+        if role == "agent":
             self.decision_by_index[req.request_index] = inv_id
 
     def on_response(self, line: ProviderResponse) -> None:
@@ -704,7 +746,8 @@ class _Writer:
             obs_id = obs_id if isinstance(obs_id, str) else None
             offset = call.args.get("offset", 0)
             offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else None
-            handle = self.archived(obs_id) if obs_id in self.archive.objects else None
+            matched = set(self.a.observation_of.values())
+            handle = self.archived(obs_id) if obs_id in matched else None
             self.emit(
                 f"page:{line.seq}",
                 "context.page",
@@ -945,7 +988,9 @@ class _Writer:
             if call.line.decision == "allowed" and call.visible is None:
                 raw = self.raw_content.get(call.line.tool_call_id)
                 self.tool_receipt(call, None, None, raw, True)
-        for obs_id in sorted(self.archive.objects):
+        # Only archives a recorded tool result vouches for; anything else in the
+        # session dir could have been planted by the agent's own tools.
+        for obs_id in sorted(set(self.a.observation_of.values())):
             self.archived(obs_id)
         if self.archive.ledger is not None:
             ledger = self.store.put_bytes(
@@ -992,6 +1037,8 @@ def ingest_spool(
     task: TaskManifest,
     config: dict[str, Any],
     labels: tuple[str, ...] | list[str] = (),
+    key: bytes | None = None,
+    expected_session_dir: str | Path | None = None,
 ) -> IngestResult:
     """Turn one Pi spool into a run record; see the module docstring for the mapping.
 
@@ -1000,10 +1047,13 @@ def ingest_spool(
     adds then_run tokens to the contract's. The task's input objects must
     already be committed; the task record is written if absent. A task input
     named `output` pins the acquisition: any other acquired bytes are refused.
+    `key` (the launch's spool HMAC key; never stored) makes every line's mac
+    mandatory; `expected_session_dir` (the launch's sessions dir) bounds where
+    ObservationPack archives are read from.
     """
     check_safe_id(run_id, "run id")
     cfg = _run_config(config)
-    spool = _read_spool(Path(spool_dir))
+    spool = _read_spool(Path(spool_dir), key)
     if store.has_record("run", run_id):
         run = store.run_record(run_id)
         if (
@@ -1016,7 +1066,9 @@ def ingest_spool(
             return _result(store, run_id, noop=True)
     else:
         run = None
-    archive = _read_archive(spool.start)
+    archive = _read_archive(
+        spool.start, Path(expected_session_dir) if expected_session_dir is not None else None
+    )
     analysis = _analyze(spool, archive, task, cfg)
     sol_pi_config = _sol_pi_config(cfg)
     for name, digest in task.inputs.items():
@@ -1072,7 +1124,7 @@ def run_claim(store: Store, run_id: str) -> Claim | None:
     return Claim.model_validate_json(store.get_bytes(claims[-1].payload_refs["claim"]))
 
 
-def _turn(message: Any, replay_key: str | None) -> ScriptTurn:
+def _turn(message: Any, replay_key: str | None, cost_usd: str | None) -> ScriptTurn:
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, str):
         content = [{"type": "text", "text": content}]
@@ -1090,28 +1142,44 @@ def _turn(message: Any, replay_key: str | None) -> ScriptTurn:
                 }
             )
         # thinking blocks are provider-internal and not part of a scripted turn
-    return ScriptTurn.model_validate({"content": blocks, "expect_replay_key": replay_key})
+    turn: dict[str, Any] = {"content": blocks, "expect_replay_key": replay_key}
+    if cost_usd is not None and Decimal(cost_usd) != 0:
+        turn["usage_cost"] = cost_usd  # the recorded (synthetic) cost, so a cost cap replays
+    return ScriptTurn.model_validate(turn)
 
 
 def recorded_script(store: Store, run_id: str) -> Script:
     """Rebuild the scripted-provider input from an ingested run's responses.
 
-    One turn per answered agent request, in journal order, each expecting the
-    recorded request's replay key; reducer requests become `reducer_turns`.
-    Replaying it re-runs Pi under the recorded responses and fails closed on
-    any context drift (A34).
+    One turn per answered request, in journal order, each expecting the
+    recorded request's replay key: agent requests become `turns`, reducer
+    requests `reducer_turns`, compaction-summary requests `summary_turns`. An
+    error or aborted response is not a turn: the script ends there instead,
+    which reproduces the recorded ending (the provider failing at that
+    request). Replaying it re-runs Pi under the recorded responses and fails
+    closed on any context drift (A34).
     """
     store.run_record(run_id)
-    turns: list[ScriptTurn] = []
-    reducer: list[ScriptTurn] = []
+    by_role: dict[str, list[ScriptTurn]] = {"agent": [], "reducer": [], "compaction-summary": []}
     for event in store.events(run_id):
         if event.type != "invocation.committed":
             continue
         receipt = store.receipt(event.payload["invocation_id"])
         if receipt.invocation_kind != "decision" or "message" not in receipt.outputs:
             continue
-        turn = _turn(store.get_json(receipt.outputs["message"]), receipt.metadata["replay_key"])
-        (reducer if receipt.metadata["role"] == "reducer" else turns).append(turn)
+        if receipt.metadata.get("stop_reason") in ("error", "aborted"):
+            continue
+        turn = _turn(
+            store.get_json(receipt.outputs["message"]),
+            receipt.metadata["replay_key"],
+            receipt.usage.cost_usd,
+        )
+        by_role[receipt.metadata["role"]].append(turn)
     return Script.model_validate(
-        {"source": f"replay:{run_id}", "turns": turns, "reducer_turns": reducer}
+        {
+            "source": f"replay:{run_id}",
+            "turns": by_role["agent"],
+            "reducer_turns": by_role["reducer"],
+            "summary_turns": by_role["compaction-summary"],
+        }
     )

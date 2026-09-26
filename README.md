@@ -76,7 +76,7 @@ onoda pi evaluate s0 --store ./store-a --evaluator-store ./evaluator
 onoda pi replay s0 --store ./store-a --work-dir ./replay   # fails closed on any drift
 # A live run needs every setting stated (none is authorized yet, A35):
 onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
-  --max-requests 20 --max-cost-usd 5
+  --max-requests 20 --max-cost-usd 5   # S2b/S3 add --reducer-provider R --reducer-model RM
 ```
 
 ## Layout
@@ -171,10 +171,20 @@ belong to later milestones.
 - The advisory ladder and allowed documentation are unresolved (A33): S1
   onward refuse to run without an operator-supplied ladder. S1r (RLM) always
   refuses in M3.
-- The Pi agent's `bash` tool is not sandboxed; the gateway policy limits which
-  tools run, not what a shell command can reach.
-- Fork and resume of Pi runs are not implemented (A36). A real reducer
-  provider's calls would not be spooled (see `docs/ADAPTER_SEAM.md` §2).
+- Pi's `bash` tool and Action Fusion's `then_run` are unsandboxed (A38): the
+  gateway limits which tools run and the request/cost budgets, not what a
+  shell command can reach, and its `then_run` token filter is not a boundary.
+  A sandbox (no solver on PATH, no scheduler, no network) is required before
+  any live run.
+- The spool's HMAC chain is tamper evidence against the agent's own tools
+  rewriting the spool casually, not a sandbox: a process that can read the Pi
+  process's memory can forge it, and dropping trailing lines only makes the
+  run incomplete.
+- `onoda pi replay` executes the recorded tool calls, so it refuses runs that
+  arrived through import; replay only runs you recorded yourself.
+- Fork and resume of Pi runs are not implemented (A36). A real (live)
+  provider's reducer and compaction-summary calls are not spooled (see
+  `docs/ADAPTER_SEAM.md` §2).
 - Scientific tolerances, task membership, and the expert convergence check are
   unresolved; see [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). Upstream
   revisions are pinned in [`provenance/sources.json`](provenance/sources.json).

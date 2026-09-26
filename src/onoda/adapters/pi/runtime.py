@@ -13,9 +13,15 @@ both come back as data on `LaunchResult`.
 
 Extension load order is part of the contract (`contract.py`): the task
 extension first, SoL-Pi next when the variant has mechanisms, the scripted
-provider next when running scripted, the recorder last. Scripted mode also
-strips provider API-key environment variables from the child process so a
-scripted run can never reach a real provider by accident.
+provider next when running scripted, the recorder last.
+
+The child environment is built from an allowlist (`_ENV_ALLOWLIST`), never
+copied from `os.environ`: only the Pi/onoda settings the runtime sets, and in
+live mode the one variable named by `credential_env`, reach Pi. The recorder
+then removes the ONODA_PI_* variables before any tool runs. Each launch gets
+a fresh random spool HMAC key, handed to the Pi process through a 0600 file
+it unlinks at load and kept in memory on `Launch`/`LaunchResult` for ingest;
+it is never written to the store.
 """
 
 from __future__ import annotations
@@ -23,9 +29,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +42,7 @@ from onoda.adapters.pi.contract import (
     ENV_RUN_INFO,
     ENV_SCRIPT,
     ENV_SPOOL,
+    ENV_SPOOL_KEY,
     ENV_TASK,
     EXTENSIONS_DIR,
     PI_PACKAGE,
@@ -59,18 +67,22 @@ from onoda.errors import CapabilityError, OnodaError
 
 _MIN_NODE = (22, 19, 0)
 
-# Env var name prefixes/suffixes that carry provider credentials; scripted
-# mode strips these so a scripted run cannot reach a real provider even if
-# the operator's shell exports them.
-_PROVIDER_KEY_PREFIXES = ("ANTHROPIC_", "OPENAI_", "GEMINI_", "GOOGLE_")
-
-
-def _strip_provider_credentials(env: dict[str, str]) -> dict[str, str]:
-    return {
-        k: v
-        for k, v in env.items()
-        if not k.endswith("_API_KEY") and not k.startswith(_PROVIDER_KEY_PREFIXES)
-    }
+# The only variables the child inherits from this process. Everything else
+# (credentials, tokens, unrelated settings) stays out; a live run adds exactly
+# the variable its `credential_env` names.
+_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TMPDIR",
+    "TZ",
+)
 
 
 def _node_version() -> str | None:
@@ -210,6 +222,8 @@ class Launch:
     agent_dir: Path
     policy_path: Path
     run_info_path: Path
+    # The spool HMAC key: in memory only (the Pi process unlinks its copy).
+    spool_key: bytes = field(default=b"", repr=False)
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -229,10 +243,15 @@ def build_launch(
 ) -> Launch:
     """Stage one run of `variant_id` against the bundle at `bundle_dir` under
     `work_dir`. Exactly one of `script` (offline, deterministic) or `live` (a
-    real provider) must be given.
+    real provider) must be given; a live run's `max_requests` must equal its
+    own `live.max_requests`.
     """
     if (script is None) == (live is None):
         raise OnodaError("build_launch requires exactly one of script or live")
+    if live is not None and live.max_requests is not None and max_requests != live.max_requests:
+        raise OnodaError(
+            f"max_requests {max_requests} conflicts with the live setting {live.max_requests}"
+        )
 
     variant = VARIANTS[variant_id]
     if variant.rlm:
@@ -281,11 +300,16 @@ def build_launch(
         allowed_tools=variant.tools(),
         max_requests=max_requests,
         max_acquisitions=max_acquisitions,
+        max_cost_usd=live.max_cost_usd if live is not None else None,
         path_aliases={
             str(workspace_dir): "$WORKSPACE",
             str(RUNTIME_DIR): "$PI_RUNTIME",
+            str(RUNTIME_DIR.resolve()): "$PI_RUNTIME",
+            # pi/node_modules may be a symlink into another checkout.
+            str((RUNTIME_DIR / "node_modules").resolve()): "$PI_RUNTIME/node_modules",
             str(bundle_dir): "$BUNDLE",
             str(spool_dir): "$SPOOL",
+            str(sessions_dir): "$SESSIONS",
         },
     )
     policy_path.write_text(policy.model_dump_json(by_alias=True))
@@ -312,9 +336,20 @@ def build_launch(
         extensions.append(str(EXTENSIONS_DIR / SCRIPTED_EXTENSION))
     extensions.append(str(EXTENSIONS_DIR / RECORDER_EXTENSION))
 
-    env = dict(os.environ)
+    spool_key = secrets.token_bytes(32)
+    key_path = work_dir / "spool.key"
+    key_path.unlink(missing_ok=True)  # a stale key from an earlier staging of this work dir
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(fd, spool_key)
+    finally:
+        os.close(fd)
+
+    env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
+    if live is not None:
+        assert live.credential_env is not None  # validate() checked it
+        env[live.credential_env] = os.environ[live.credential_env]
     if script is not None:
-        env = _strip_provider_credentials(env)
         script_path = work_dir / "script.json"
         script_path.write_text(script.model_dump_json(by_alias=True))
         env[ENV_SCRIPT] = str(script_path)
@@ -324,6 +359,7 @@ def build_launch(
             "PI_TELEMETRY": "0",
             "PI_SKIP_VERSION_CHECK": "1",
             ENV_SPOOL: str(spool_dir),
+            ENV_SPOOL_KEY: str(key_path),
             ENV_TASK: str(bundle_dir),
             ENV_POLICY: str(policy_path),
             ENV_RUN_INFO: str(run_info_path),
@@ -368,6 +404,7 @@ def build_launch(
         agent_dir=agent_dir,
         policy_path=policy_path,
         run_info_path=run_info_path,
+        spool_key=spool_key,
     )
 
 
@@ -379,6 +416,7 @@ class LaunchResult:
     spool_dir: Path
     session_dir: Path
     timed_out: bool
+    spool_key: bytes = field(default=b"", repr=False)
 
 
 def launch(launch: Launch, *, timeout_s: float) -> LaunchResult:
@@ -406,7 +444,15 @@ def launch(launch: Launch, *, timeout_s: float) -> LaunchResult:
             if isinstance(exc.stderr, str)
             else (exc.stderr or b"").decode(errors="replace")
         )
-        return LaunchResult(-1, stdout, stderr, launch.spool_dir, launch.session_dir, True)
+        return LaunchResult(
+            -1, stdout, stderr, launch.spool_dir, launch.session_dir, True, launch.spool_key
+        )
     return LaunchResult(
-        proc.returncode, proc.stdout, proc.stderr, launch.spool_dir, launch.session_dir, False
+        proc.returncode,
+        proc.stdout,
+        proc.stderr,
+        launch.spool_dir,
+        launch.session_dir,
+        False,
+        launch.spool_key,
     )

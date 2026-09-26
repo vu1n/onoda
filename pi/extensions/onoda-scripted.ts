@@ -2,24 +2,37 @@
  * onoda scripted provider (A32): serves a `Script`'s pre-written turns to the
  * real Pi process, offline. Its outputs are synthetic, never model results.
  *
- * Model `scripted` serves `turns`, `scripted-reducer` serves `reducer_turns`,
- * each strictly in order. Every request is spooled (`source:
- * scripted-provider`) with the context it received after all `context` hooks
- * and `before_provider_request` payload rewrites, before any reply is produced.
- * It fails closed: a turn whose `expect_replay_key` differs from the actual key
- * spools `replay.mismatch` and errors; an exhausted script errors. There is no
- * default reply.
+ * Each request has a purpose: `reducer` (model `scripted-reducer`, SoL-Pi's
+ * reducer) is served from `reducer_turns`; `summary` (a compaction summary:
+ * Pi calls the provider without `options.onPayload`, which the agent loop
+ * always passes) from `summary_turns`; `agent` from `turns`; each strictly in
+ * order. Every request is spooled (`source: scripted-provider`, with its
+ * `purpose`) with the context it received after all `context` hooks and
+ * `before_provider_request` payload rewrites, before any reply is produced.
+ * Reducer and summary responses are spooled here too (they fire no
+ * message_end). It fails closed: a turn whose `expect_replay_key` differs from
+ * the actual key spools `replay.mismatch` and errors; an exhausted script
+ * errors. There is no default reply.
+ *
+ * A reducer or summary request made once `max_requests` requests were sent is
+ * refused before it is sent (not spooled, not counted): the reply is an error,
+ * SoL-Pi falls back to the unreduced output, and the run ends budget-exhausted.
+ * A turn's `usage_cost` is a synthetic cost reported as Pi's cost estimate, so
+ * tests and replays can drive `max_cost_usd`.
  */
 
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, MessageEndEvent, ProviderConfig } from "@earendil-works/pi-coding-agent";
-import { type EndStatus, mainRequestSent, requestEnd } from "./onoda-recorder.ts";
+import { mainRequestSent, requestEnd } from "./onoda-recorder.ts";
 import {
+	addCost,
 	counters,
 	ENV_POLICY,
 	ENV_SCRIPT,
+	type EndStatus,
 	type GatewayPolicy,
 	readJsonEnv,
+	replayAliases,
 	replayKey,
 	SCRIPTED_MODEL,
 	SCRIPTED_PROVIDER,
@@ -45,7 +58,10 @@ type Block =
 interface ScriptTurn {
 	content: Block[];
 	expect_replay_key?: string | null;
+	usage_cost?: string | null;
 }
+
+type Purpose = "agent" | "reducer" | "summary";
 
 interface Script {
 	schema: "onoda.pi-script/1";
@@ -53,6 +69,7 @@ interface Script {
 	source: string;
 	turns: ScriptTurn[];
 	reducer_turns?: ScriptTurn[];
+	summary_turns?: ScriptTurn[];
 }
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -73,8 +90,14 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 	const w = spool();
 	if (!w) throw new Error("onoda-scripted: ONODA_PI_SPOOL is not set");
 	const script = loadScript();
-	const aliases = readJsonEnv<GatewayPolicy>(ENV_POLICY)?.path_aliases ?? {};
-	const cursor = { [SCRIPTED_MODEL]: 0, [SCRIPTED_REDUCER_MODEL]: 0 } as Record<string, number>;
+	const policy = readJsonEnv<GatewayPolicy>(ENV_POLICY);
+	const aliases = replayAliases(); // shared: the recorder adds the session id at session_start
+	const cursor: Record<Purpose, number> = { agent: 0, reducer: 0, summary: 0 };
+	const turnsFor: Record<Purpose, ScriptTurn[]> = {
+		agent: script?.turns ?? [],
+		reducer: script?.reducer_turns ?? [],
+		summary: script?.summary_turns ?? [],
+	};
 
 	const reply = (model: Model, context: Context, options?: SimpleStreamOptions): EventStream => {
 		const stream = createAssistantMessageEventStream() as unknown as EventStream;
@@ -88,18 +111,20 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
+		const purpose: Purpose =
+			model.id === SCRIPTED_REDUCER_MODEL ? "reducer" : options?.onPayload ? "agent" : "summary";
 		let index: number | undefined;
-		// Reducer calls go through complete(), which fires no message_end, so the
-		// recorder never sees their responses; spool them here instead.
+		// Reducer and summary calls fire no message_end, so the recorder never
+		// sees their responses; spool them here instead.
 		const finish = (event: Parameters<EventStream["push"]>[0]) => {
-			if (index !== undefined && model.id === SCRIPTED_REDUCER_MODEL) {
+			if (index !== undefined && purpose !== "agent") {
 				w.line({
 					type: "provider.response",
 					request_index: index,
 					message: w.putJson(out),
 					stop_reason: out.stopReason,
 					usage_tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-					cost_usd: "0",
+					cost_usd: addCost(out.usage.cost.total),
 				});
 			}
 			stream.push(event);
@@ -115,8 +140,12 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 		void (async () => {
 			try {
 				const payload = ((await options?.onPayload?.(context, model)) ?? context) as Context;
+				if (purpose !== "agent" && policy && counters().requests >= policy.max_requests) {
+					// Refused before it is sent: nothing to spool, nothing counted.
+					return fail("budget-exhausted", `${purpose} request refused: max_requests ${policy.max_requests} reached`);
+				}
 				index = counters().requests++;
-				if (model.id !== SCRIPTED_REDUCER_MODEL) mainRequestSent(index);
+				if (purpose === "agent") mainRequestSent(index);
 				const key = replayKey(payload, aliases);
 				w.line({
 					type: "provider.request",
@@ -125,10 +154,10 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 					context: w.putJson(payload),
 					source: "scripted-provider",
 					replay_key: key,
+					purpose,
 				});
-				const turns = model.id === SCRIPTED_REDUCER_MODEL ? (script?.reducer_turns ?? []) : (script?.turns ?? []);
-				const turn = turns[cursor[model.id]++];
-				if (!turn) return fail("script-exhausted", `script exhausted at request ${index} (model ${model.id})`);
+				const turn = turnsFor[purpose][cursor[purpose]++];
+				if (!turn) return fail("script-exhausted", `script exhausted at request ${index} (${purpose}, model ${model.id})`);
 				if (turn.expect_replay_key && turn.expect_replay_key !== key) {
 					w.line({ type: "replay.mismatch", request_index: index, expected: turn.expect_replay_key, actual: key });
 					return fail("replay-mismatch", `replay key mismatch at request ${index}`);
@@ -137,6 +166,7 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 					out.stopReason = "aborted";
 					return finish({ type: "error", reason: "aborted", error: out });
 				}
+				if (turn.usage_cost != null) out.usage.cost.total = Number(turn.usage_cost);
 				stream.push({ type: "start", partial: out });
 				for (const b of turn.content) {
 					const contentIndex = out.content.length;
