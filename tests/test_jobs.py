@@ -100,3 +100,38 @@ def test_scheduler_submission_is_idempotent_by_key(make_env):
         "k1", "fixture-calc", {"params": env.store.get_bytes(params.digest)}, {}
     )
     assert a == b and env.scheduler.executions == 1
+
+
+def test_crash_between_receipt_and_journal_does_not_redecide(make_env, monkeypatch):
+    env = make_env()
+    env.controller.start_fixture_run("r")
+    env.controller.advance("r", until="diagnostics-committed")
+    original = env.controller._journal_commit
+
+    def dies(run, step_key, inv_id, reservation):
+        if step_key == "decide:r1":
+            raise Crash("died after the receipt was committed")
+        return original(run, step_key, inv_id, reservation)
+
+    monkeypatch.setattr(env.controller, "_journal_commit", dies)
+    with pytest.raises(Crash):
+        env.controller.advance("r")
+
+    calls = []
+    fresh = env.reopen()
+    provider = fresh.controller._provider(fresh.controller.run_record("r"))
+    real_decide = provider.decide
+
+    def counting(request, evidence, **kw):
+        calls.append(request.evidence["observation"])
+        return real_decide(request, evidence, **kw)
+
+    monkeypatch.setattr(provider, "decide", counting)
+    assert fresh.controller.resume("r").done
+    decide_r1 = [
+        e.payload["invocation_id"]
+        for e in fresh.store.events("r")
+        if e.type == "invocation.committed" and e.payload["step_key"] == "decide:r1"
+    ]
+    assert decide_r1 == ["r.i003"]
+    assert len(calls) == 1  # only round 2 asked the provider; round 1 was recovered

@@ -124,7 +124,11 @@ class RecordedDecisionProvider:
         self._by_request: dict[str, list[InvocationReceipt]] = {}
         for inv_id in store.list_record_ids("invocation"):
             rec = store.receipt(inv_id)
+            # Replayed decisions are reuse, not recordings; indexing them would make
+            # every later replay of the same request ambiguous.
             if rec.invocation_kind != "decision" or rec.derived_from is not None:
+                continue
+            if rec.metadata.get("replayed_from") is not None:
                 continue
             if run_ids is not None and rec.run_id not in run_ids:
                 continue
