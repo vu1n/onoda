@@ -1,7 +1,7 @@
 /**
  * onoda RLM extension (M4, arm S1r): a persistent `ipython` tool backed by the
  * stdlib-only kernel `pi/rlm/onoda_rlm_kernel.py`, with `rlm()` spawning a
- * child Pi process and `commit_state()` externalizing state (A39).
+ * child Pi process and `commit_state()` externalizing state (A43).
  *
  * Load order: after the task extension and SoL-Pi, before the scripted
  * provider and the recorder. Every setting is read at load, before the
@@ -18,7 +18,7 @@
  * and prompt, and its own spool at
  * `<spool>/children/<nnnn>` keyed with `SpoolWriter.childKey`. Its policy caps
  * `max_requests` at the parent's remaining budget, and its spooled requests
- * (grandchildren included) are charged back to the parent (A40). A call past
+ * (grandchildren included) are charged back to the parent (A44). A call past
  * max depth, max children, or the budget is refused before any process starts
  * and spooled as `rlm.child.refused`.
  */

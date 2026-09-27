@@ -30,7 +30,7 @@ journal event that cites them:
   first). Each `rlm.state` value is an `rlm-state` artifact cited by an
   `rlm.state` event, and every later checkpoint carries `CTX_RLM_STATE`
   (name -> digest, latest value per name), so a checkpoint relies on committed
-  state, never on kernel memory (A39). Each child spool under
+  state, never on kernel memory (A43). Each child spool under
   `children/<nnnn>/` is ingested first as its own run `<run_id>.rlm-<nnnn>`
   (keyed with `derive_child_key`, same task, config plus `parent_run`,
   `child_index`, `depth`), then the parent's `rlm.child` event cites it and,

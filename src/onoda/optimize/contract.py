@@ -10,7 +10,7 @@ claims, and at least one efficiency metric strictly better.
 The optimizer sees only the acceptance slice of a `SplitAssignment`; the
 final slice is never evaluated during a search. Every candidate and decision
 is kept as a `CandidateRecord`. GEPA's own `gepa_state.bin` in its run dir is
-operational scratch (A42): never imported, exported, or authoritative.
+operational scratch (A46): never imported, exported, or authoritative.
 
 Metric values are decimal text; nothing here is a float.
 """
@@ -86,7 +86,7 @@ class OutcomeVector(_Frozen):
 
 
 class GateSpec(_Frozen):
-    """SoL-Pi's promotion gates with operator-set tolerances (A18, A43).
+    """SoL-Pi's promotion gates with operator-set tolerances (A18, A47).
 
     Every capability metric needs a tolerance (decimal text, >= 0): a
     candidate may fall at most that far below its parent. `None` means the
@@ -107,7 +107,7 @@ class GateSpec(_Frozen):
             raise ValueError(f"a tolerance is required for each of {', '.join(CAPABILITY_METRICS)}")
         unset = sorted(k for k, x in v.items() if x is None)
         if unset:
-            raise ValueError(f"gate tolerance unresolved for {', '.join(unset)} (A43)")
+            raise ValueError(f"gate tolerance unresolved for {', '.join(unset)} (A47)")
         for k, x in v.items():
             assert x is not None
             if not DECIMAL_RE.match(x) or Decimal(x) < 0:
@@ -126,7 +126,7 @@ class SplitAssignment(_Frozen):
     """Which cases the optimizer may use (acceptance) and which it never sees (final).
 
     Stored once as an immutable artifact; a search cites its digest. While
-    any case is pending human review the split is `exploratory` (A44).
+    any case is pending human review the split is `exploratory` (A48).
     """
 
     schema_: Literal["onoda.split/1"] = Field("onoda.split/1", alias="schema")

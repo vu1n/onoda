@@ -784,7 +784,7 @@ def _check_sol_pi(value: str) -> None:
             raise ValueError(f"sol_pi.config.{k} must be true or false")
 
 
-# The optimizer's whole reach (A41). Anything else (evaluator, parsers,
+# The optimizer's whole reach (A45). Anything else (evaluator, parsers,
 # gateway, budgets, splits) is not a component and cannot be proposed.
 COMPONENT_VALIDATORS: dict[str, Callable[[str], None]] = {
     "rlm.system_prompt": lambda v: _check_text("rlm.system_prompt", v),
@@ -923,7 +923,7 @@ SEED_PROVENANCE = {
     "rlm.tool_doc": "onoda",
     "rlm.child_prompt": "onoda",
     "rlm.helpers": "onoda",
-    "rlm.limits": "onoda defaults, not tuned (A41)",
+    "rlm.limits": "onoda defaults, not tuned (A45)",
 }
 
 

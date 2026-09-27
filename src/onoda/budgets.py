@@ -80,7 +80,7 @@ def cost_views(store: Store, run_id: str) -> dict[str, Any]:
     """Cost views of one run; a Pi RLM run's marginal cost includes its child runs.
 
     An `rlm()` child is ingested as its own run and linked by the parent's
-    `rlm.child` event (A40: the parent pays). Every descendant's own
+    `rlm.child` event (A44: the parent pays). Every descendant's own
     receipts are charged to the ancestor's marginal and full-path views,
     each counted once, and listed under `child_runs`/`children`; a run
     without children gets exactly the pre-M4 views.

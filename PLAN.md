@@ -72,13 +72,13 @@ Other files:
   - `CandidateRecord`.
 - Pin `gepa==0.1.4` with no extras in `pyproject.toml`/`uv.lock`.
 - Add S17 (GEPA wheel) and S18 (DSPy, reference only) to `provenance/sources.json`.
-- Assumptions A39–A44:
-  - A39: kernel state is externalized as JSON only.
-  - A40: children share the parent's request budget.
-  - A41: the candidate component allowlist.
-  - A42: GEPA's `gepa_state.bin` is operational scratch. It is never imported, exported, or authoritative.
-  - A43: the gate tolerances are unresolved. The loop refuses to run until an operator sets every tolerance.
-  - A44: the split over the six pending-review cases is labelled exploratory until the cases are reviewed.
+- Assumptions A43–A48 (renumbered from A39–A44 after M3b took those):
+  - A43: kernel state is externalized as JSON only.
+  - A44: children share the parent's request budget.
+  - A45: the candidate component allowlist.
+  - A46: GEPA's `gepa_state.bin` is operational scratch. It is never imported, exported, or authoritative.
+  - A47: the gate tolerances are unresolved. The loop refuses to run until an operator sets every tolerance.
+  - A48: the split over the six pending-review cases is labelled exploratory until the cases are reviewed.
 
 ```yaml
 id: M4-001
@@ -317,5 +317,5 @@ flowchart TD
   - A fifth line type, `rlm.child.refused`, records refusals (the M4-003 gate
     requires them spooled).
   - Footprint widened to `onoda-recorder.ts` and `onoda-scripted.ts`: their
-    budget checks now use `requestsUsed()` (own + child requests, A40).
+    budget checks now use `requestsUsed()` (own + child requests, A44).
     `spool.end.requests` still counts the process's own requests.
