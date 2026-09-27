@@ -328,7 +328,7 @@ def cmd_pi_variants(a) -> Any:
 
 
 def cmd_pi_run(a) -> Any:
-    from onoda.adapters.pi.contract import Script
+    from onoda.adapters.pi.contract import HarnessCandidate, Script
     from onoda.adapters.pi.run import DEFAULT_INSTRUCTION, run_case
     from onoda.adapters.pi.runtime import LiveSettings
 
@@ -367,6 +367,11 @@ def cmd_pi_run(a) -> Any:
         max_acquisitions=a.max_acquisitions,
         reducer=(a.reducer_provider, a.reducer_model) if a.reducer_provider else None,
         timeout_s=a.timeout,
+        candidate=(
+            HarnessCandidate.model_validate_json(Path(a.candidate).read_text())
+            if a.candidate
+            else None
+        ),
     )
     r = pi.ingest
     return {
@@ -558,7 +563,7 @@ def build_parser() -> argparse.ArgumentParser:
     ce.add_argument("--cases-root")
     ce.set_defaults(func=cmd_case_evaluate)
 
-    pi = sub.add_parser("pi", help="Pi agent runs, SoL-Pi variants S0-S3 (M3)")
+    pi = sub.add_parser("pi", help="Pi agent runs: variants S0-S3 and the RLM arm S1r")
     pi = pi.add_subparsers(dest="pi_command", required=True)
     pi.add_parser("doctor", help="check the pinned Pi/SoL-Pi install").set_defaults(
         func=cmd_pi_doctor
@@ -586,6 +591,10 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--instruction")
     pr.add_argument("--timeout", type=float, default=300)
     pr.add_argument("--cases-root")
+    pr.add_argument(
+        "--candidate",
+        help="HarnessCandidate JSON ({\"components\": {...}}); RLM variants default to the seed",
+    )
     pr.set_defaults(func=cmd_pi_run)
     rp2 = pi.add_parser("replay", help="re-run a scripted run; fails closed on any drift")
     rp2.add_argument("run_id")
