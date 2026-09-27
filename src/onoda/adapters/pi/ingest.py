@@ -75,7 +75,6 @@ from onoda.adapters.pi.contract import (
     CTX_VARIANT,
     DECIMAL_RE,
     MAC_RE,
-    MECHANISMS,
     PI_CAPABILITIES,
     PI_EXPERIMENT,
     PI_PACKAGE,
@@ -112,6 +111,7 @@ from onoda.adapters.pi.contract import (
     canonical_state_json,
     derive_child_key,
     parse_spool_line,
+    with_mechanisms,
 )
 from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
@@ -1233,12 +1233,7 @@ def _run_config(config: dict[str, Any]) -> dict[str, Any]:
 def _effective_variant(config: dict[str, Any]) -> Variant:
     """The run's variant, with a candidate's `sol_pi.config` mechanisms if it set one
     (as `runtime.build_launch` launched it)."""
-    variant = VARIANTS[config["variant"]]
-    override = config.get("sol_pi_config_override")
-    if override is None:
-        return variant
-    mechanisms = tuple(m for m in MECHANISMS if override.get(m, False))
-    return variant.model_copy(update={"mechanisms": mechanisms})
+    return with_mechanisms(VARIANTS[config["variant"]], config.get("sol_pi_config_override"))
 
 
 def _sol_pi_config(config: dict[str, Any]) -> dict[str, Any] | None:

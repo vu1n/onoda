@@ -811,6 +811,22 @@ REQUIRED_COMPONENTS = (
 )
 
 
+def mechanisms_on(sol_pi_config: dict[str, bool]) -> tuple[Mechanism, ...]:
+    """The mechanisms a `sol_pi.config` object turns on, in `MECHANISMS` order.
+
+    A mechanism the object leaves out is off: the component replaces the
+    variant's mechanisms, it does not patch them.
+    """
+    return tuple(m for m in MECHANISMS if sol_pi_config.get(m, False))
+
+
+def with_mechanisms(variant: Variant, sol_pi_config: dict[str, bool] | None) -> Variant:
+    """`variant` as a candidate's `sol_pi.config` (when set) launches it."""
+    if sol_pi_config is None:
+        return variant
+    return variant.model_copy(update={"mechanisms": mechanisms_on(sol_pi_config)})
+
+
 class HarnessCandidate(_Frozen):
     """A named set of text components: the unit GEPA proposes and the gates judge.
 
@@ -842,13 +858,20 @@ class HarnessCandidate(_Frozen):
     def limits(self) -> RlmLimits:
         return RlmLimits.model_validate_json(self.components["rlm.limits"])
 
+    def sol_pi_override(self) -> dict[str, bool] | None:
+        """The `sol_pi.config` booleans, or None when the component is not set."""
+        raw = self.components.get("sol_pi.config")
+        return None if raw is None else json.loads(raw)
+
     def sol_pi_mechanisms(self) -> tuple[Mechanism, ...] | None:
         """The mechanisms `sol_pi.config` turns on, or None when it is not set."""
-        raw = self.components.get("sol_pi.config")
-        if raw is None:
-            return None
-        data = json.loads(raw)
-        return tuple(m for m in MECHANISMS if data.get(m, False))
+        override = self.sol_pi_override()
+        return None if override is None else mechanisms_on(override)
+
+    def ladder_bytes(self) -> bytes | None:
+        """The advisory ladder this candidate stages instead of the bundle's, if any."""
+        ladder = self.components.get("ladder")
+        return None if ladder is None else ladder.encode()
 
     def rlm_components(self) -> RlmComponents:
         c = self.components
@@ -923,6 +946,15 @@ SEED_CANDIDATE = HarnessCandidate(
         ).model_dump_json(),
     }
 )
+
+
+def candidate_for(variant_id: str, candidate: HarnessCandidate | None) -> HarnessCandidate | None:
+    """The candidate a run launches with: the given one, else the seed for an RLM variant."""
+    if candidate is None and VARIANTS[variant_id].rlm:
+        return SEED_CANDIDATE
+    return candidate
+
+
 SEED_PROVENANCE = {
     "rlm.system_prompt": "adapted from dspy 3.4.0 dspy/predict/rlm.py "
     "ACTION_INSTRUCTIONS_TEMPLATE (MIT, provenance S18)",

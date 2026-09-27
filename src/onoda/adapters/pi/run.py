@@ -21,18 +21,17 @@ The spool HMAC key of each launch stays in memory and is handed to ingest
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from onoda.adapters.pi.contract import (
-    SEED_CANDIDATE,
     SPOOL_EVENTS,
     VARIANTS,
     HarnessCandidate,
     Script,
+    candidate_for,
     derive_child_key,
 )
 from onoda.adapters.pi.ingest import IngestResult, _read_spool, ingest_spool, recorded_script
@@ -157,8 +156,7 @@ def run_case(
         raise OnodaError(f"unknown variant {variant_id!r}; see `onoda pi variants`")
     if store.has_record("run", run_id):
         raise OnodaError(f"run {run_id} already exists")
-    if candidate is None and VARIANTS[variant_id].rlm:
-        candidate = SEED_CANDIDATE
+    candidate = candidate_for(variant_id, candidate)
     if live is not None:
         if max_requests is not None and max_requests != live.max_requests:
             raise OnodaError(
@@ -169,8 +167,8 @@ def run_case(
         max_requests = 16
     work_dir = Path(work_dir)
     bundle_dir = work_dir / "bundle"
-    candidate_ladder = candidate.components.get("ladder") if candidate is not None else None
-    effective_ladder = candidate_ladder.encode() if candidate_ladder is not None else ladder
+    candidate_ladder = candidate.ladder_bytes() if candidate is not None else None
+    effective_ladder = candidate_ladder if candidate_ladder is not None else ladder
     stage_bundle(
         case,
         bundle_dir,
@@ -215,9 +213,9 @@ def run_case(
         ).digest
         if candidate_ladder is not None:
             config["ladder_source"] = "candidate"
-        sol_pi_override = candidate.components.get("sol_pi.config")
+        sol_pi_override = candidate.sol_pi_override()
         if sol_pi_override is not None:
-            config["sol_pi_config_override"] = json.loads(sol_pi_override)
+            config["sol_pi_config_override"] = sol_pi_override
     if script is not None:
         config["script"] = store.put_json(
             script.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]

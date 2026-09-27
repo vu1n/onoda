@@ -348,11 +348,11 @@ def test_rlm_components_file_and_run_info_carry_the_candidate(tmp_path):
         max_requests=5,
         max_acquisitions=1,
     )
-    assert launch_obj.rlm_work_dir == work_dir / "rlm"
-    assert launch_obj.rlm_work_dir.is_dir()
-    assert launch_obj.rlm_components_path == work_dir / "rlm-components.json"
+    assert launch_obj.rlm.work_dir == work_dir / "rlm"
+    assert launch_obj.rlm.work_dir.is_dir()
+    assert launch_obj.rlm.components_path == work_dir / "rlm-components.json"
     assert (
-        launch_obj.rlm_components_path.read_text()
+        launch_obj.rlm.components_path.read_text()
         == SEED_CANDIDATE.rlm_components().model_dump_json(by_alias=True)
     )
     run_info = json.loads(launch_obj.run_info_path.read_text())
@@ -376,7 +376,7 @@ def test_rlm_components_file_reflects_an_explicit_candidate(tmp_path):
         max_acquisitions=1,
         candidate=candidate,
     )
-    written = RlmComponents.model_validate_json(launch_obj.rlm_components_path.read_text())
+    written = RlmComponents.model_validate_json(launch_obj.rlm.components_path.read_text())
     assert written == candidate.rlm_components()
     run_info = json.loads(launch_obj.run_info_path.read_text())
     assert run_info["candidate_digest"] == candidate.digest()
@@ -394,11 +394,11 @@ def test_rlm_env_vars_and_path_alias(tmp_path):
         max_acquisitions=1,
     )
     assert launch_obj.env[ENV_RLM_DEPTH] == "0"
-    assert launch_obj.env[ENV_RLM_COMPONENTS] == str(launch_obj.rlm_components_path)
-    assert launch_obj.env[ENV_RLM_WORK] == str(launch_obj.rlm_work_dir)
+    assert launch_obj.env[ENV_RLM_COMPONENTS] == str(launch_obj.rlm.components_path)
+    assert launch_obj.env[ENV_RLM_WORK] == str(launch_obj.rlm.work_dir)
     assert launch_obj.env[ENV_RLM_PYTHON] == sys.executable
     policy = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text())
-    assert policy.path_aliases[str(launch_obj.rlm_work_dir)] == "$RLM_WORK"
+    assert policy.path_aliases[str(launch_obj.rlm.work_dir)] == "$RLM_WORK"
 
 
 def test_non_rlm_variant_has_no_rlm_env_or_alias(tmp_path):
@@ -413,8 +413,7 @@ def test_non_rlm_variant_has_no_rlm_env_or_alias(tmp_path):
     )
     for env_name in (ENV_RLM_DEPTH, ENV_RLM_COMPONENTS, ENV_RLM_WORK, ENV_RLM_PYTHON):
         assert env_name not in launch_obj.env
-    assert launch_obj.rlm_work_dir is None
-    assert launch_obj.rlm_components_path is None
+    assert launch_obj.rlm is None
     policy = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text())
     assert not any(v == "$RLM_WORK" for v in policy.path_aliases.values())
     run_info = json.loads(launch_obj.run_info_path.read_text())
@@ -508,8 +507,7 @@ def test_golden_s0_scripted_argv_env_run_info_unchanged_without_candidate(tmp_pa
     }
     rlm_env_keys = {ENV_RLM_DEPTH, ENV_RLM_COMPONENTS, ENV_RLM_WORK, ENV_RLM_PYTHON}
     assert not (rlm_env_keys & launch_obj.env.keys())
-    assert launch_obj.rlm_work_dir is None
-    assert launch_obj.rlm_components_path is None
+    assert launch_obj.rlm is None
 
 
 def test_golden_s3_scripted_argv_env_run_info_unchanged_without_candidate(tmp_path):
@@ -543,8 +541,7 @@ def test_golden_s3_scripted_argv_env_run_info_unchanged_without_candidate(tmp_pa
     assert "rlm_limits" not in run_info
     rlm_env_keys = {ENV_RLM_DEPTH, ENV_RLM_COMPONENTS, ENV_RLM_WORK, ENV_RLM_PYTHON}
     assert not (rlm_env_keys & launch_obj.env.keys())
-    assert launch_obj.rlm_work_dir is None
-    assert launch_obj.rlm_components_path is None
+    assert launch_obj.rlm is None
 
 
 def test_live_refused_for_missing_setting(tmp_path, monkeypatch):
