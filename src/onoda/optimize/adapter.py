@@ -23,7 +23,7 @@ higher-is-better with M3b's directions ("lower" metrics negated); an
 unreported value is `-inf`.
 
 Reflective dataset. Built only from trace steps whose source is `agent` or
-`raw_tool`, plus the verdict words per claim tag. Reducer receipts and
+`raw_tool`, plus the verdict word and reason class (A53) per claim tag. Reducer receipts and
 evaluator references are dropped here, whatever the runner sent: the adapter
 does not trust the runner to have filtered them. Nothing else from a trial
 (run ids aside) reaches reflection or the optimization store.
@@ -60,6 +60,17 @@ from onoda.store import Store, check_safe_id
 
 AGENT_VISIBLE_SOURCES = ("agent", "raw_tool")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._?-]{0,63}$")
+# What each verdict word means, and the evaluator's reason classes (A53). Fixed
+# text about the grading rule, never a reference value: reflection learns why a
+# claim failed, not what the right answer was.
+VERDICT_MEANINGS = {
+    "supported": "matches the output",
+    "contradicted": "the state exists in the output but the reported value differs",
+    "unsupported": "the output has no state with this (multiplicity, root) identity",
+    "missing": "a requested state that was not reported",
+    "unresolved": "the output does not attribute this state's identity",
+}
+REASON_CLASSES = {"unit": "reported in a different unit than the output prints"}
 _GRADED = ("count.supported", "count.missing", "count.contradicted", "count.unsupported")
 
 
@@ -79,6 +90,17 @@ class Trial(_Frozen):
     outcome: OutcomeVector
     steps: tuple[TraceStep, ...] = ()
     verdicts: dict[str, str] = Field(default_factory=dict)  # claim tag -> verdict word only
+    reasons: dict[str, str] = Field(default_factory=dict)  # claim tag -> REASON_CLASSES key
+
+    @field_validator("reasons")
+    @classmethod
+    def _reasons(cls, v: dict[str, str]) -> dict[str, str]:
+        for tag, reason in v.items():
+            if not _TAG_RE.match(tag):
+                raise ValueError(f"reason tag {tag!r} is not a claim tag")
+            if reason not in REASON_CLASSES:
+                raise ValueError(f"reason {reason!r} for {tag} is not a known reason class")
+        return v
 
     @field_validator("verdicts")
     @classmethod
@@ -175,6 +197,7 @@ class Rollout:
     outcome_ref: str | None  # store digest of the outcome JSON
     score: Decimal
     verdicts: dict[str, str] = field(default_factory=dict)
+    reasons: dict[str, str] = field(default_factory=dict)
     steps: tuple[TraceStep, ...] = ()  # sources in AGENT_VISIBLE_SOURCES only
     failed: str | None = None
     repeats: tuple[Rollout, ...] = ()  # further trials of the same case and candidate
@@ -447,8 +470,9 @@ class OnodaAdapter:
             trial.outcome,
             ref,
             score,
-            dict(trial.verdicts),
-            steps,
+            verdicts=dict(trial.verdicts),
+            reasons=dict(trial.reasons),
+            steps=steps,
         )
 
     def evaluate(
@@ -489,18 +513,51 @@ class OnodaAdapter:
         eval_batch: EvaluationBatch[Rollout, Rollout],
         components_to_update: list[str],
     ) -> dict[str, list[dict[str, Any]]]:
-        records = [reflective_record(x) for r in eval_batch.trajectories or [] for x in r.runs]
+        records = [reflective_record(r) for r in eval_batch.trajectories or []]
         return {name: [dict(rec) for rec in records] for name in components_to_update}
 
 
-def reflective_record(r: Rollout) -> dict[str, Any]:
-    """One example for reflection: agent-visible steps and verdict words only."""
-    steps = [s for s in r.steps if s.source in AGENT_VISIBLE_SOURCES]  # re-filter: never trust
+def _verdict_feedback(r: Rollout) -> tuple[str, set[str], set[str]]:
+    """One run's feedback line, and the failing verdict words and reason classes it used."""
     if r.failed is not None:
-        feedback = f"The run failed ({r.failed}); no claims were graded."
+        return f"The run failed ({r.failed}); no claims were graded.", set(), set()
+    verdicts = (
+        ", ".join(
+            f"{t}={w}" + (f" ({r.reasons[t]})" if t in r.reasons else "")
+            for t, w in sorted(r.verdicts.items())
+        )
+        or "none"
+    )
+    line = f"Claim score {r.score:f}. Evaluator verdicts per claim: {verdicts}."
+    return line, {w for w in r.verdicts.values() if w != "supported"}, set(r.reasons.values())
+
+
+def reflective_record(r: Rollout) -> dict[str, Any]:
+    """One example for reflection: agent-visible steps, verdict words and reason classes (A53).
+
+    With repeats, the trace shown is the lowest-scoring run's (one trace per
+    case keeps the prompt within the model's context) and the feedback lists
+    every run.
+    """
+    worst = min(r.runs, key=lambda x: (x.failed is None, x.score))
+    steps = [s for s in worst.steps if s.source in AGENT_VISIBLE_SOURCES]  # re-filter
+    lines, words, reasons = [], set(), set()
+    for x in r.runs:
+        line, w, c = _verdict_feedback(x)
+        lines.append(line)
+        words |= w
+        reasons |= c
+    if len(lines) == 1:
+        feedback = lines[0]
     else:
-        verdicts = ", ".join(f"{t}={w}" for t, w in sorted(r.verdicts.items())) or "none"
-        feedback = f"Claim score {r.score:f}. Evaluator verdicts per claim: {verdicts}."
+        feedback = (
+            f"{len(lines)} runs of this case; the trace is the lowest-scoring run's. "
+            + " ".join(f"Run {i}: {line}" for i, line in enumerate(lines, 1))
+        )
+    legend = [f"{w}: {VERDICT_MEANINGS[w]}" for w in sorted(words) if w in VERDICT_MEANINGS]
+    legend += [f"({c}): {REASON_CLASSES[c]}" for c in sorted(reasons)]
+    if legend:
+        feedback += f" Meaning: {'; '.join(legend)}."
     return {
         "Inputs": {"case": r.case_id},
         "Generated Outputs": "\n".join(f"[{s.source} {s.kind}] {s.text}" for s in steps)

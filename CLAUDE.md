@@ -68,8 +68,8 @@ VCS is plain git. No project board; work items come from issues or goals.
   Pi run is ingested as its own run before the parent cites it, and its
   requests and cost are charged to the parent's budget and metrics.
 - Optimizer: trials run on acceptance cases only, never the final split;
-  reflection sees agent traces, never reducer receipts or evaluator
-  references; a candidate is accepted only on an `eligible` gate verdict, so
+  reflection sees agent traces plus verdict words and reason classes (A53),
+  never reducer receipts or evaluator references; a candidate is accepted only on an `eligible` gate verdict, so
   an unresolved capability gate never accepts; candidates change only the
   allowlisted components (A45).
 

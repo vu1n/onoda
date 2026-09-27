@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,11 +31,13 @@ from onoda.clock import LogicalClock
 from onoda.errors import OnodaError
 from onoda.optimize.adapter import (
     OnodaAdapter,
+    Rollout,
     SearchLedger,
     TraceStep,
     Trial,
     claim_score,
     objective_scores,
+    reflective_record,
 )
 from onoda.optimize.contract import CandidateRecord, GateSpec, SplitAssignment
 from onoda.optimize.gates import SolPiGates, gate_decision, non_dominated
@@ -502,6 +505,33 @@ def test_scores_and_objectives_are_exact_until_the_gepa_boundary():
     ] == float("-inf")
     with pytest.raises(ValueError):
         Trial(case_id="c", run_id="r", outcome=vec(), verdicts={"m1.r1": "probably"})
+
+
+def test_reflection_feedback_names_reason_classes_and_verdict_meanings():
+    r = Rollout(
+        "c",
+        "t1",
+        "d",
+        vec(),
+        None,
+        Decimal("0.5"),
+        verdicts={"m1.r1": "contradicted", "m3.r6": "unsupported", "m1.r2": "supported"},
+        reasons={"m1.r1": "unit"},
+    )
+    feedback = reflective_record(r)["Feedback"]
+    assert "m1.r1=contradicted (unit)" in feedback and "m3.r6=unsupported (" not in feedback
+    assert "unsupported: the output has no state with this (multiplicity, root)" in feedback
+    assert "(unit): reported in a different unit" in feedback
+    assert "supported: matches" not in feedback  # only failing verdicts are explained
+    # With repeats: one trace (the worst run's), feedback for every run.
+    good = replace(r, trial_id="t2", score=Decimal(1), verdicts={"m1.r1": "supported"}, reasons={})
+    good = replace(good, steps=(TraceStep(kind="response", source="agent", text="GOOD RUN"),))
+    both = replace(r, repeats=(good,))
+    rec = reflective_record(both)
+    assert "Run 1: Claim score 0.5" in rec["Feedback"] and "Run 2: Claim score 1" in rec["Feedback"]
+    assert "GOOD RUN" not in rec["Generated Outputs"]
+    with pytest.raises(ValueError):
+        Trial(case_id="c", run_id="r", outcome=vec(), reasons={"m1.r1": "the answer is 0.19"})
 
 
 def test_failed_trials_are_charged_and_their_text_not_kept(tmp_path):

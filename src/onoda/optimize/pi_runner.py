@@ -9,7 +9,7 @@ model's responses (`agent`), each tool call's input (`agent`), and each tool's
 raw result (`raw_tool`). Where SoL-Pi's reducer rewrote a result, the rewritten
 text is tagged `reducer`, so the adapter drops it (the evaluator and the
 optimizer never learn from reducer receipts, A15). Nothing from the evaluator
-store reaches a trace but the verdict word per claim tag.
+store reaches a trace but the verdict word and reason class per claim tag (A53).
 
 Scripted mode needs one script per case: its outputs are synthetic, so a search
 over scripted trials exercises the loop, not a harness improvement (A32).
@@ -147,4 +147,9 @@ class PiRunner:
             outcome=outcome_vector(self.store, evaluation, arm=self.variant_id),
             steps=trace(self.store, trial_id),
             verdicts=dict(evaluation.assignments),
+            reasons={
+                tag: evaluation.metrics[f"state.{tag}.reason"]
+                for tag in evaluation.assignments
+                if f"state.{tag}.reason" in evaluation.metrics
+            },
         )
