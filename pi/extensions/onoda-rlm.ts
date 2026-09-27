@@ -44,6 +44,7 @@ import {
 	type KernelReply,
 	type KernelRequest,
 	type RlmComponents,
+	sumDecimals,
 	TOOL_IPYTHON,
 } from "./lib/rlm-protocol.ts";
 import {
@@ -173,7 +174,7 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 	}
 	const agentRequests = new Set<number>();
 	let requests = 0;
-	let cost = 0;
+	const costs: string[] = [];
 	let costKnown = true;
 	let endStatus: string | null = null;
 	let lastAgentMessage: string | undefined;
@@ -187,13 +188,13 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 				break;
 			case "provider.response":
 				if (line.cost_usd == null) costKnown = false;
-				else cost += Number(line.cost_usd);
+				else costs.push(line.cost_usd as string);
 				if (agentRequests.has(line.request_index as number)) lastAgentMessage = line.message as string;
 				break;
 			case "rlm.child.end":
 				requests += line.requests as number;
 				if (line.cost_usd == null) costKnown = false;
-				else cost += Number(line.cost_usd);
+				else costs.push(line.cost_usd as string);
 				break;
 			case "spool.end":
 				endStatus = line.status as string;
@@ -210,7 +211,7 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 			.map((b) => b.text ?? "")
 			.join("\n");
 	}
-	return { endStatus, requests, costUsd: costKnown ? String(cost) : null, answer };
+	return { endStatus, requests, costUsd: costKnown ? sumDecimals(costs) : null, answer };
 }
 
 class Kernel {
@@ -222,6 +223,8 @@ class Kernel {
 	private nextId = 0;
 	private readonly pending = new Map<number, (reply: KernelExecReply, raw: string) => void>();
 	private ready: Promise<void> | undefined;
+	private rejectReady: ((err: Error) => void) | undefined;
+	private dead: string | undefined; // set once the kernel is gone; every later cell fails with it
 
 	constructor(
 		private readonly python: string,
@@ -230,6 +233,7 @@ class Kernel {
 
 	start(helpers: string, maxOutputChars: number): Promise<void> {
 		this.ready ??= new Promise<void>((resolve, reject) => {
+			this.rejectReady = reject;
 			// A short path: unix socket paths are limited to ~100 bytes.
 			this.sockDir = mkdtempSync(join(tmpdir(), "onoda-rlm-"));
 			const path = join(this.sockDir, "k.sock");
@@ -251,16 +255,21 @@ class Kernel {
 			this.server.listen(path, () => {
 				this.proc = spawn(this.python, [KERNEL_PATH, "--connect", path], { stdio: ["ignore", "ignore", "inherit"] });
 				this.proc.on("error", (err) => reject(new Error(`onoda-rlm: kernel failed to start: ${err.message}`)));
-				this.proc.on("exit", (code) => {
-					const error = `kernel exited (${code})`;
-					for (const [, done] of this.pending) {
-						done({ op: "exec.reply", id: -1, stdout: "", stderr: "", error, truncated: false }, "");
-					}
-					this.pending.clear();
-				});
+				this.proc.on("exit", (code) => this.fail(`kernel exited (${code})`));
 			});
 		});
 		return this.ready;
+	}
+
+	/** The kernel is unusable: reject a pending start and fail every open and later cell. */
+	private fail(error: string): void {
+		this.dead ??= error;
+		this.rejectReady?.(new Error(`onoda-rlm: ${this.dead}`));
+		for (const [, done] of this.pending) {
+			done({ op: "exec.reply", id: -1, stdout: "", stderr: "", error: this.dead, truncated: false }, "");
+		}
+		this.pending.clear();
+		this.sock?.destroy();
 	}
 
 	private send(msg: KernelRequest): void {
@@ -272,9 +281,14 @@ class Kernel {
 		for (let nl = this.buffer.indexOf("\n"); nl >= 0; nl = this.buffer.indexOf("\n")) {
 			const raw = this.buffer.slice(0, nl);
 			this.buffer = this.buffer.slice(nl + 1);
-			const msg = JSON.parse(raw) as KernelReply;
+			let msg: KernelReply;
+			try {
+				msg = JSON.parse(raw) as KernelReply;
+			} catch {
+				return this.fail(`kernel sent a line that is not JSON: ${raw.slice(0, 200)}`);
+			}
 			if (msg.op === "ready") {
-				if (msg.protocol !== KERNEL_PROTOCOL) throw new Error(`onoda-rlm: kernel speaks ${msg.protocol}`);
+				if (msg.protocol !== KERNEL_PROTOCOL) return this.fail(`kernel speaks ${msg.protocol}`);
 				onReady();
 			} else if (msg.op === "exec.reply") {
 				const done = this.pending.get(msg.id);
@@ -293,7 +307,11 @@ class Kernel {
 	exec(code: string): Promise<{ reply: KernelExecReply; raw: string }> {
 		return new Promise((resolve) => {
 			const id = this.nextId++;
-			this.pending.set(id, (reply, raw) => resolve({ reply, raw: raw || JSON.stringify(reply) }));
+			const done = (reply: KernelExecReply, raw: string) => resolve({ reply, raw: raw || JSON.stringify(reply) });
+			if (this.dead) {
+				return done({ op: "exec.reply", id, stdout: "", stderr: "", error: this.dead, truncated: false }, "");
+			}
+			this.pending.set(id, done);
 			this.send({ op: "exec", id, code });
 		});
 	}

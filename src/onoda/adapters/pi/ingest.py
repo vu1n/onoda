@@ -1108,7 +1108,7 @@ class _Writer:
         code = self.obj(
             line.code, "text/x-python", ["rlm-cell-code", *self.synthetic], encoding="utf-8"
         )
-        output = self.obj(line.output, "application/json", ["rlm-cell-output"])
+        output = self.obj(line.output, "application/json", ["rlm-cell-output", *self.synthetic])
         self.cells[line.tool_call_id] = (line, code, output)
 
     def on_state(self, line: RlmState) -> None:

@@ -374,6 +374,8 @@ def build_launch(
     }
     if live is not None:
         run_info["max_cost_usd"] = live.max_cost_usd
+    # Recorded for any variant: a candidate can also change `sol_pi.config` and
+    # the ladder, so a non-RLM run under one is still that candidate's run.
     if rlm_candidate is not None:
         run_info["candidate_digest"] = rlm_candidate.digest()
         run_info["rlm_limits"] = rlm_candidate.limits.model_dump()

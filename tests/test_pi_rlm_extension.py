@@ -280,3 +280,19 @@ def test_output_is_capped_and_components_reach_the_prompt(tmp_path):
     first = parent.first("provider.request", request_index=0)
     context = parent.obj(first.context).decode()
     assert "Python REPL (ipython tool)" in context  # the seed system prompt component
+
+
+def test_a_dead_kernel_fails_this_and_every_later_cell(tmp_path):
+    proc, parent = run_rlm(
+        tmp_path,
+        [
+            turn(ipython("c1", "import os; os._exit(3)")),
+            turn(ipython("c2", "print('after')")),
+            turn(text("done")),
+        ],
+    )
+    assert parent.lines[-1].status == "settled", proc.stderr.decode()
+    first, second = parent.of("rlm.cell")
+    assert first.is_error and second.is_error
+    for cell in (first, second):
+        assert json.loads(parent.obj(cell.output))["error"] == "kernel exited (3)"

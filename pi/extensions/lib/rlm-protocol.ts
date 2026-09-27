@@ -159,3 +159,26 @@ export function childTag(index: number): string {
 export function childSubdir(index: number): string {
 	return `children/${childTag(index)}`;
 }
+
+/**
+ * Exact sum of decimal texts (`1.5`, `-2`, `3e-7`), so a child's summed cost
+ * carries no float artifacts into `rlm.child.end.cost_usd` (no floats in records).
+ */
+export function sumDecimals(values: readonly string[]): string {
+	const DEC = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+	const parts = values.map((v) => {
+		const m = DEC.exec(v);
+		if (!m || (m[2] === "" && (m[3] ?? "") === "")) throw new Error(`not decimal text: ${v}`);
+		const frac = m[3] ?? "";
+		const n = BigInt(`${m[1]}${m[2] || "0"}${frac}`);
+		return { n, scale: frac.length - Number(m[4] ?? 0) };
+	});
+	const scale = Math.max(0, ...parts.map((p) => p.scale));
+	let total = 0n;
+	for (const p of parts) total += p.n * 10n ** BigInt(scale - p.scale);
+	const neg = total < 0n;
+	const digits = (neg ? -total : total).toString().padStart(scale + 1, "0");
+	let text = scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits;
+	if (scale) text = text.replace(/\.?0+$/, "");
+	return `${neg ? "-" : ""}${text}`;
+}
