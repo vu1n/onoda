@@ -80,7 +80,7 @@ onoda case ingest orca6-water-mp2 --run-id live --store ./orca-a --execute --cas
 
 say "M3: the pinned Pi agent on a case, offline under a scripted provider (synthetic)"
 if onoda pi doctor >/dev/null 2>&1; then
-  onoda pi variants | jq -c '.[] | {id, ladder, mechanisms, runnable_in_m3}'
+  onoda pi variants | jq -c '.[] | {id, ladder, rlm, mechanisms}'
   "$PY" - <<'PYEOF' > script.json
 import json
 from onoda.science.contract import case_manifests, load_case

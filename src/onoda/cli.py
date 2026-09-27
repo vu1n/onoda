@@ -321,7 +321,6 @@ def cmd_pi_variants(a) -> Any:
             "ladder": v.ladder,
             "rlm": v.rlm,
             "mechanisms": list(v.mechanisms),
-            "runnable_in_m3": not v.rlm,
         }
         for v in VARIANTS.values()
     ]
