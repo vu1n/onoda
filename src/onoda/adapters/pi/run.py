@@ -27,7 +27,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from onoda.adapters.pi.contract import SPOOL_EVENTS, VARIANTS, HarnessCandidate, Script
+from onoda.adapters.pi.contract import (
+    SEED_CANDIDATE,
+    SPOOL_EVENTS,
+    VARIANTS,
+    HarnessCandidate,
+    Script,
+    derive_child_key,
+)
 from onoda.adapters.pi.ingest import IngestResult, _read_spool, ingest_spool, recorded_script
 from onoda.adapters.pi.runtime import LiveSettings, build_launch, launch
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
@@ -134,9 +141,11 @@ def run_case(
     refused. `reducer` = (provider, model) names the reducer for S2b/S3
     (scripted runs default to the scripted reducer).
 
-    `candidate` (M4) is threaded through to `build_launch`. With none given,
-    every argv/env/run_info/config value stays exactly what M3 produced. When
-    given, its components file is committed to the store (labelled
+    `candidate` (M4) is threaded through to `build_launch`. An RLM variant
+    without one runs `SEED_CANDIDATE`, recorded like any other candidate, so
+    its replay never depends on the seed staying the same. Otherwise, with none
+    given, every argv/env/run_info/config value stays exactly what M3 produced.
+    When given, its components file is committed to the store (labelled
     `harness-candidate`); its `ladder` component, when set, replaces the
     ladder bytes staged into the bundle (recorded as `ladder_source:
     "candidate"`), and its `sol_pi.config`, when set, is recorded as
@@ -147,6 +156,8 @@ def run_case(
         raise OnodaError(f"unknown variant {variant_id!r}; see `onoda pi variants`")
     if store.has_record("run", run_id):
         raise OnodaError(f"run {run_id} already exists")
+    if candidate is None and VARIANTS[variant_id].rlm:
+        candidate = SEED_CANDIDATE
     if live is not None:
         if max_requests is not None and max_requests != live.max_requests:
             raise OnodaError(
@@ -249,6 +260,47 @@ def _recorded_requests(store: Store, run_id: str) -> dict[str, list[str]]:
     return out
 
 
+def _unkeyed_turn(script: Script) -> bool:
+    turns = (*script.turns, *script.reducer_turns, *script.summary_turns)
+    return any(t.expect_replay_key is None for t in turns) or any(
+        _unkeyed_turn(c) for c in script.children
+    )
+
+
+def _check_children(store: Store, run_id: str, spool_dir: Path, key: bytes) -> None:
+    """Every recorded RLM child replayed to the same end with the same agent requests.
+
+    The child spools of a replay sit where the recording's did
+    (`children/<nnnn>`, keyed from the launch key), so each is compared with
+    its recorded child run, recursively; a child the replay did not spawn, or
+    spawned without a spool, is a mismatch.
+    """
+    for e in store.events(run_id):
+        child = e.payload.get("child_run") if e.type == "rlm.child" else None
+        if child is None:
+            continue
+        index = e.payload["child_index"]
+        child_dir = spool_dir / "children" / f"{index:04d}"
+        if not (child_dir / SPOOL_EVENTS).is_file():
+            raise ReplayMismatch(f"replay of {run_id}: child {index:04d} was not spawned")
+        child_key = derive_child_key(key, index)
+        lines = _read_spool(child_dir, child_key).lines
+        ends = [x for x in store.events(child) if x.type == "pi.spool-end"]
+        recorded_end = ends[-1].payload["status"] if ends else None
+        replayed_end = lines[-1].status if lines[-1].type == "spool.end" else None
+        if replayed_end != recorded_end:
+            raise ReplayMismatch(
+                f"replay of {run_id}: child {index:04d} ended {replayed_end}, "
+                f"the recording ended {recorded_end}"
+            )
+        keys = [
+            ln.replay_key for ln in lines if ln.type == "provider.request" and ln.purpose == "agent"
+        ]
+        if keys != _recorded_requests(store, child)["agent"]:
+            raise ReplayMismatch(f"replay of {run_id}: child {index:04d} request keys differ")
+        _check_children(store, child, child_dir, child_key)
+
+
 def replay_run_pi(
     store: Store, run_id: str, case: LoadedCase, *, work_dir: Path, timeout_s: float = 300
 ) -> dict[str, Any]:
@@ -277,11 +329,13 @@ def replay_run_pi(
     ladder = store.get_bytes(task.inputs["ladder"]) if "ladder" in task.inputs else None
     ladder_labels = store.descriptor(task.inputs["ladder"]).labels if ladder else []
     script = recorded_script(store, run_id)
-    if any(
-        t.expect_replay_key is None
-        for t in (*script.turns, *script.reducer_turns, *script.summary_turns)
-    ):
+    if _unkeyed_turn(script):
         raise CapabilityError(f"run {run_id} has a recorded turn without a replay key")
+    candidate = (
+        HarnessCandidate(components=store.get_json(cfg["candidate"]))
+        if "candidate" in cfg
+        else None
+    )
     recorded = _recorded_requests(store, run_id)
     work_dir = Path(work_dir)
     stage_bundle(
@@ -299,6 +353,7 @@ def replay_run_pi(
         script=script,
         max_requests=cfg["max_requests"],
         max_acquisitions=cfg["max_acquisitions"],
+        candidate=candidate,
     )
     result = launch(prepared, timeout_s=timeout_s)
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
@@ -321,6 +376,7 @@ def replay_run_pi(
             raise ReplayMismatch(
                 f"replay of {run_id}: {n} {role} requests, the recording has {len(recorded[role])}"
             )
+    _check_children(store, run_id, result.spool_dir, result.spool_key)
     claims = [ln.claim for ln in lines if ln.type == "task.claim"]
     recorded_claims = [e for e in store.events(run_id) if e.type == "pi.claim"]
     replayed_claim = "sha256:" + claims[-1] if claims else None

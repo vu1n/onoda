@@ -37,6 +37,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from onoda.canonical import digest_of
+
 # ------------------------------------------------------------------ runtime pins
 
 PI_PACKAGE = "@earendil-works/pi-coding-agent"
@@ -828,9 +830,8 @@ class HarnessCandidate(_Frozen):
         return v
 
     def digest(self) -> str:
-        """sha256 of the components as sorted-key JSON: the candidate's identity."""
-        body = json.dumps(self.components, sort_keys=True, ensure_ascii=False)
-        return "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+        """The candidate's identity: the store digest of `put_json(components)`."""
+        return digest_of(self.components)
 
     @property
     def limits(self) -> RlmLimits:
