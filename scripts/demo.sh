@@ -5,7 +5,8 @@
 # -> compare lineage and costs -> grade in a protected evaluator store.
 # M2 then records authentic ORCA outputs, exports and imports them, and grades
 # the ORCA 6.0 TD-DFT case against ORCA 5.0 with the discrepancy left unresolved.
-# M3 runs the pinned Pi agent on a case under a scripted provider (synthetic).
+# M3 runs the pinned Pi agent on a case under a scripted provider (synthetic),
+# and M3b runs the SoL-Pi add-one ablation over those arms (synthetic).
 # Every command runs with networking disabled when `unshare -rn` is available.
 set -euo pipefail
 
@@ -105,6 +106,10 @@ PYEOF
   say "a live Pi run needs every live setting"
   onoda pi run orca6-water-mp2 --variant S0 --run-id live --store ./pi-store --work-dir ./pi-live \
     --live --provider anthropic || echo "(refused as expected)"
+  say "M3b: SoL-Pi add-one ablation, S1 vs S2a-d vs S3 (synthetic; not a mechanism verdict)"
+  onoda ablation run "$ROOT/tests/ablation_fixtures/spec.yaml" --store ./abl-store \
+    --evaluator-store ./abl-evaluator --work-dir ./abl-work \
+    | jq -c '{evidence, verdicts, non_dominated}'
 else
   echo "(skipped: run scripts/pi-setup.sh once to install the pinned Pi runtime)"
 fi

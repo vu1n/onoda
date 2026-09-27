@@ -6,7 +6,7 @@ a run can be exported, imported on another machine, inspected offline,
 partially recomputed from raw bytes, and branched from an explicit checkpoint
 without losing lineage or cost accounting.
 
-This is milestones **M0–M3** of the handoff in [`docs/handoff/`](docs/handoff/)
+This is milestones **M0–M3b** of the handoff in [`docs/handoff/`](docs/handoff/)
 (v0.2; [`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
 text, so Pi is the first agent adapter). M0–M1 run on a **completely synthetic
 fixture**. M2 adds scientific smoke tests over **authentic ORCA outputs** that
@@ -16,6 +16,9 @@ chemistry experiment has been reproduced. M3 runs the real pinned **Pi coding
 agent** (0.85.1, optionally with **SoL-Pi** at a pinned commit) on those cases
 and records each run portably; with no model credentials authorized, every
 Pi run so far was driven by a **scripted provider** and is labelled synthetic.
+M3b adds the SoL-Pi add-one ablation (S1 baseline, each mechanism alone,
+S3) with SoL-Pi's two promotion gates; over scripted runs its report is a
+harness exercise, not a verdict about any mechanism.
 
 ## Quick start
 
@@ -79,6 +82,14 @@ onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
   --max-requests 20 --max-cost-usd 5   # S2b/S3 add --reducer-provider R --reducer-model RM
 ```
 
+M3b ablation (spec format: `tests/ablation_fixtures/spec.yaml`; tolerances are
+operator-declared and none are chosen yet, A18/A39):
+
+```bash
+onoda ablation run spec.yaml --store ./store-a --evaluator-store ./evaluator --work-dir ./abl
+onoda ablation show sha256:... --evaluator-store ./evaluator   # the whole report
+```
+
 ## Layout
 
 | Module | Responsibility |
@@ -108,6 +119,10 @@ onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
 | `adapters.pi.task` | Task bundle staging and claim grading against the deterministic parser, in the evaluator store |
 | `adapters.pi.run` | One run end to end, and replay under recorded responses |
 | `pi/extensions/` | onoda's Pi extensions (TypeScript): task tools, scripted provider, recorder writing the fsynced spool |
+| `ablation.contract` | M3b contract: arms, spec, outcome vector, metric names and directions, tolerances, gate result |
+| `ablation.metrics` | One run's outcome vector from the agent store and its claim evaluation; the A15 reducer-loss probe |
+| `ablation.gates` | Two-gate comparison, non-dominated set, S3-vs-sum-of-S2 interaction (pure, `Decimal`) |
+| `ablation.run` | Runs every arm on every case and writes the report to the evaluator store |
 | `science.runner` | Records a case as a run (acquired or executed), parses it, and evaluates it in a separate store |
 
 ## Capability matrix
@@ -126,6 +141,7 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Fork | Quiescent checkpoints; policy, parser, input, calc-config and memory interventions with invalidation | T03, T05, T07; `tests/test_forks.py` |
 | Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. No model has been called | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
 | Replay an agent run | Re-runs Pi under the recorded responses and fails closed on any change to what the model was shown | `tests/test_pi_end_to_end.py` |
+| Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because no tolerances are chosen (A39). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
 | Repeat experiment | Not implemented | — |
 
 ## Acceptance tests
@@ -207,10 +223,17 @@ belong to later milestones.
 - A live run's timeout kills the ORCA process group, but ORCA itself has only
   been simulated by a stand-in executable here.
 
-## Next: M3b and the RLM extension
+- An ablation report over scripted runs is synthetic (A40): every arm replays
+  the same turns, so capability is identical by construction, and tokens and
+  cost are the script's. Its `context_bytes` are measured payload sizes, a
+  traffic proxy, not tokens. S2c's compaction does not trigger on runs this
+  short. Capability gates stay `unresolved` until tolerances are chosen (A39).
+  The reducer-loss probe (A15) has only seen scripted receipts.
 
-SoL-Pi add-one ablation (S2a–d vs S1 vs S3) once a model and budget are
-authorized, with capability-gate tolerances predeclared (A18); the RLM Pi
-extension (S1r); semantic restart of Pi runs (A36). Before comparisons: a human
+## Next: live ablation and the RLM extension
+
+Run the M3b ablation on a real model once a model and budget are authorized,
+with capability-gate tolerances predeclared (A18, A39) and long-horizon cases
+(SOL_PI_DELTA §5); the RLM Pi extension (S1r); semantic restart of Pi runs (A36). Before comparisons: a human
 review of the M2 cases, an ORCA run on licensed hardware, and justified
 tolerances (A6, A18).

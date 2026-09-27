@@ -1,0 +1,9 @@
+# Test fixture values, not a register decision (A39): zero worsening allowed on
+# every capability metric except count.unresolved, left undeclared on purpose.
+schema: onoda.ablation-tolerances/1
+justification: "test fixture only; A18 is not chosen (A39)"
+capability:
+  count.supported: "0"
+  count.contradicted: "0"
+  count.unsupported: "0"
+  count.missing: "0"

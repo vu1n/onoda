@@ -16,6 +16,8 @@ first agent adapter; Prime is an optional comparison arm).
   `pi/package-lock.json` once (network). Suites marked `requires_pi` launch
   that real Pi offline under a scripted provider and skip without it.
   TypeScript check: `cd pi && npx tsc -p .`
+- Ablation (M3b): `onoda ablation run spec.yaml` runs arms × cases on the real
+  Pi; fixture spec in `tests/ablation_fixtures/`.
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
   `onoda case list` shows them. Vendored bytes under `cases/` are never edited.
 
@@ -53,6 +55,10 @@ VCS is plain git. No project board; work items come from issues or goals.
   `then_run` never reaches a solver, scripted runs are labelled synthetic, and
   the evaluator grades claims from the deterministic parser, never from
   reducer receipts.
+- Ablations: reports live in the evaluator store only; a capability metric
+  without a declared tolerance is `unresolved`; the false-success tolerance is
+  zero; cases outside `development`/`acceptance` splits are refused; reports
+  over scripted runs say they are synthetic and not a mechanism verdict.
 
 Read `docs/ASSUMPTIONS.md` before changing scientific behavior, and record
 new assumptions there instead of inventing thresholds or API methods.

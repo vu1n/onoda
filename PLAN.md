@@ -170,3 +170,12 @@ flowchart TD
 ```
 
 ## Deviations
+
+- **ABL-004 (outside its footprint):** `onoda.adapters.pi.run._commit_task`
+  derived the task id from the staged inputs alone, but the manifest also
+  records the variant, so a second arm on the same case in one store failed
+  with "task ... already exists with different content". The id now hashes the
+  inputs and the variant; `test_two_variants_on_one_case_share_a_store` covers
+  it. Existing records keep their ids (nothing is rewritten).
+- **ABL-002:** the run's checkpoints carry the sol-pi.json itself, so the
+  outcome vector's `mechanism_config` is `digest_of` that dict.

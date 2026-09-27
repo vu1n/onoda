@@ -420,6 +420,37 @@ def cmd_pi_evaluate(a) -> Any:
     }
 
 
+def cmd_ablation_run(a) -> Any:
+    from onoda.ablation.run import run_ablation
+    from onoda.science.contract import CASES_ROOT
+
+    report = run_ablation(
+        a.spec,
+        store=_store(a.store),
+        evaluator_store=_store(a.evaluator_store, evaluator=True),
+        work_dir=Path(a.work_dir),
+        cases_root=Path(a.cases_root) if a.cases_root else CASES_ROOT,
+        timeout_s=a.timeout,
+    )
+    if a.full:
+        return report
+    return {
+        "report": report["report"],
+        "ablation_id": report["ablation_id"],
+        "evidence": report["evidence"],
+        "caveat": report["caveat"],
+        "verdicts": {c["arm"]: c["verdict"] for c in report["comparisons"]},
+        "non_dominated": report["non_dominated"],
+    }
+
+
+def cmd_ablation_show(a) -> Any:
+    store = _store(a.evaluator_store, evaluator=True)
+    if "ablation-report" not in store.descriptor(a.report).labels:
+        raise OnodaError(f"{a.report} is not an ablation report")
+    return store.get_json(a.report)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="onoda", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -569,6 +600,22 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--evaluator-store", required=True)
     pe.add_argument("--cases-root")
     pe.set_defaults(func=cmd_pi_evaluate)
+
+    ab = sub.add_parser("ablation", help="SoL-Pi add-one ablation over Pi arms (M3b)")
+    ab = ab.add_subparsers(dest="ablation_command", required=True)
+    ar = ab.add_parser("run", help="run every arm on every case and write the report")
+    ar.add_argument("spec", help="onoda.ablation-spec/1 YAML")
+    ar.add_argument("--store", required=True)
+    ar.add_argument("--evaluator-store", required=True)
+    ar.add_argument("--work-dir", required=True)
+    ar.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
+    ar.add_argument("--cases-root")
+    ar.add_argument("--full", action="store_true", help="print the whole report")
+    ar.set_defaults(func=cmd_ablation_run)
+    ash = ab.add_parser("show", help="print a stored ablation report")
+    ash.add_argument("report", help="report digest (sha256:...)")
+    ash.add_argument("--evaluator-store", required=True)
+    ash.set_defaults(func=cmd_ablation_show)
     return p
 
 

@@ -574,3 +574,18 @@ def test_spool_rewritten_after_the_run_is_refused(tmp_path, monkeypatch):
             script=script("test_tamper"),
         )  # fmt: skip
     assert not store.has_record("run", "t")
+
+
+def test_two_variants_on_one_case_share_a_store(tmp_path):
+    # Every ablation arm stages the same case into one store; the task id must
+    # not collide across variants (their manifests differ in profile_versions).
+    store, _ = stores(tmp_path)
+    for variant in ("S0", "S2d"):
+        r = pi_run.run_case(
+            store, case(), run_id=f"v-{variant}", variant_id=variant,
+            work_dir=tmp_path / variant, script=script(f"test_{variant}"),
+            ladder=LADDER if variant != "S0" else None, synthetic_ladder=variant != "S0",
+        )  # fmt: skip
+        assert r.ingest.status == "settled"
+    tasks = {store.run_record(f"v-{v}").task for v in ("S0", "S2d")}
+    assert len(tasks) == 2

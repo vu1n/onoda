@@ -1,0 +1,9 @@
+# Synthetic ablation fixture: the default arms (S1 baseline, S2a-d, S3) on one case.
+schema: onoda.ablation-spec/1
+ablation_id: fixture
+cases:
+  - case_id: orca6-water-mp2
+    script: water.script.json
+ladder: ladder.md
+synthetic_ladder: true
+tolerances: tolerances.yaml

@@ -91,8 +91,11 @@ def _commit_task(
             media_type="text/markdown",
             labels=["advisory-ladder", *(["synthetic"] if synthetic_ladder else [])],
         ).digest
+    # The variant is part of the task (profile_versions), so it is part of the id:
+    # every arm of an ablation stages the same inputs into one store.
+    task_key = sha256_digest(canonical_bytes({"inputs": inputs, "variant": variant_id}))
     task = TaskManifest.new(
-        task_id=f"pi-{m.case_id}-{sha256_digest(canonical_bytes(inputs))[7:19]}",
+        task_id=f"pi-{m.case_id}-{task_key[7:19]}",
         inputs=inputs,
         permitted_context=["task-input", "orca-output", "allowed-documentation", "advisory-ladder"],
         split=m.split,

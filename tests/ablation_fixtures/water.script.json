@@ -1,0 +1,89 @@
+{
+  "schema": "onoda.pi-script/1",
+  "source": "tests/ablation_fixtures (synthetic; exercises ObservationPack, the reducer, and Action Fusion)",
+  "turns": [
+    {
+      "content": [
+        {
+          "type": "toolCall",
+          "id": "c1",
+          "name": "case_input",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "toolCall",
+          "id": "c2",
+          "name": "orca_run",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "toolCall",
+          "id": "c3",
+          "name": "write",
+          "arguments": {
+            "path": "notes.txt",
+            "content": "synthetic note\n",
+            "then_run": {
+              "command": "python3 -c 1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "toolCall",
+          "id": "c4",
+          "name": "bash",
+          "arguments": {
+            "command": "make --version >/dev/null 2>&1; python3 -c \"print('synthetic reducer log line\\n' * 200, end='')\""
+          }
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "toolCall",
+          "id": "c5",
+          "name": "report_states",
+          "arguments": {
+            "final_energy": {
+              "text": "-74.999374598107",
+              "unit": "Eh"
+            },
+            "states": [],
+            "notes": "synthetic scripted claim"
+          }
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "reported"
+        }
+      ]
+    }
+  ],
+  "reducer_turns": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"schema\": \"sol-pi-evidence-receipt/1\", \"source_sha256\": \"962ab1378cd78b2153395fbf36d3d6a1e36d65485c1bd56dff2a5067abf15a8a\", \"status\": \"success\", \"uncertain\": false, \"evidence\": [{\"kind\": \"summary\", \"quote\": \"synthetic reducer log line\"}]}"
+        }
+      ]
+    }
+  ]
+}
