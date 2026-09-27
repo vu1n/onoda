@@ -424,6 +424,157 @@ def cmd_pi_evaluate(a) -> Any:
     }
 
 
+def _read_model(cls, path: str):
+    text = Path(path).read_text()
+    data = yaml.safe_load(text) if path.endswith((".yaml", ".yml")) else json.loads(text)
+    try:
+        return cls.model_validate(data)
+    except ValueError as exc:
+        raise OnodaError(f"{path}: {exc}") from exc
+
+
+def cmd_optimize_seed(a) -> Any:
+    from onoda.adapters.pi.contract import SEED_CANDIDATE, SEED_PROVENANCE
+
+    return {
+        "components": SEED_CANDIDATE.components,
+        "digest": SEED_CANDIDATE.digest(),
+        "provenance": SEED_PROVENANCE,
+    }
+
+
+def cmd_optimize_split(a) -> Any:
+    from onoda.optimize.contract import SplitAssignment
+    from onoda.science.contract import CASES_ROOT, case_manifests, load_case
+
+    manifests = case_manifests(Path(a.cases_root) if a.cases_root else CASES_ROOT)
+    ids = a.case or sorted(manifests)
+    for cid in ids:
+        if cid not in manifests:
+            raise OnodaError(f"unknown case {cid!r}; see `onoda case list`")
+    reviewed = all(load_case(manifests[c]).manifest.review.status == "reviewed" for c in ids)
+    split = SplitAssignment.derive(
+        ids, seed=a.seed, final_count=a.final_count, exploratory=not reviewed
+    )
+    return split.model_dump(mode="json", by_alias=True)
+
+
+def cmd_optimize_run(a) -> Any:
+    from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate, Script
+    from onoda.optimize.contract import GateSpec, SplitAssignment
+    from onoda.optimize.loop import run_optimization
+    from onoda.optimize.pi_runner import PiRunner
+    from onoda.science.contract import CASES_ROOT, case_manifests, load_case
+
+    # A live search needs a live agent and a live reflection model; neither is
+    # authorized (A11, A35), so only the scripted mode exists.
+    if a.live:
+        raise OnodaError(
+            "a live optimization needs live agent and reflection settings; none are "
+            "authorized (A11, A35), so only --scripts runs"
+        )
+    if not (a.scripts and a.reflection_script):
+        raise OnodaError("give --scripts and --reflection-script (the offline, synthetic mode)")
+    gates = _read_model(GateSpec, a.gates)  # refuses unset tolerances (A47)
+    split = _read_model(SplitAssignment, a.split)
+    cases_root = Path(a.cases_root) if a.cases_root else CASES_ROOT
+    manifests = case_manifests(cases_root)
+    for cid in (*split.acceptance, *split.final):
+        if cid not in manifests:
+            raise OnodaError(f"split names unknown case {cid!r}")
+    pending = [
+        c for c in split.acceptance if load_case(manifests[c]).manifest.review.status != "reviewed"
+    ]
+    if pending and not split.exploratory:
+        raise OnodaError(
+            f"cases {', '.join(pending)} are not reviewed; the split must be exploratory (A48)"
+        )
+    scripts = {}
+    for cid in split.acceptance:
+        path = Path(a.scripts) / f"{cid}.json"
+        if not path.is_file():
+            raise OnodaError(f"no script for acceptance case {cid!r} at {path}")
+        scripts[cid] = Script.model_validate_json(path.read_text())
+    replies = json.loads(Path(a.reflection_script).read_text())
+    if not (isinstance(replies, list) and all(isinstance(r, str) for r in replies)):
+        raise OnodaError("--reflection-script must be a JSON list of strings (synthetic)")
+    served = iter(replies)
+
+    def reflect(prompt: str) -> str:
+        try:
+            return next(served)
+        except StopIteration:
+            raise OnodaError("the reflection script is exhausted") from None
+
+    seed = _read_model(HarnessCandidate, a.seed) if a.seed else SEED_CANDIDATE
+    runner = PiRunner(
+        store=_store(a.store),
+        evaluator_store=_store(a.evaluator_store, evaluator=True),
+        work_dir=Path(a.work_dir) / "trials",
+        variant_id=a.variant,
+        scripts=scripts,
+        ladder=Path(a.ladder).read_bytes() if a.ladder else None,
+        synthetic_ladder=a.synthetic_ladder,
+        max_requests=a.max_requests,
+        timeout_s=a.timeout,
+        cases_root=cases_root,
+    )
+    result = run_optimization(
+        runner=runner,
+        seed=seed,
+        split=split,
+        gates=gates,
+        reflect=reflect,
+        store=_store(a.optimizer_store),
+        search_id=a.search_id,
+        run_dir=Path(a.work_dir) / "gepa",
+        max_trials=a.max_trials,
+        max_reflections=a.max_reflections,
+        minibatch_size=a.minibatch_size,
+    )
+    return {
+        "search_id": result.search_id,
+        "evidence": "synthetic",  # scripted trials and a scripted reflection (A32)
+        "exploratory_split": split.exploratory,
+        "seed": result.seed,
+        "accepted": [r.candidate for r in result.accepted],
+        "non_dominated": sorted(result.non_dominated),
+        "stop_reason": result.stop_reason,
+        "trials": result.trials,
+        "reflections": result.reflections,
+    }
+
+
+def cmd_optimize_status(a) -> Any:
+    from onoda.optimize.contract import CandidateRecord
+
+    store = _store(a.optimizer_store)
+    events = store.events(a.search_id)
+    if not events:
+        raise OnodaError(f"no search {a.search_id!r} in {a.optimizer_store}")
+    candidates = []
+    for e in events:
+        if e.type == "optimizer.candidate":
+            rec = CandidateRecord.model_validate(store.get_json(e.payload_refs["record"]))
+            candidates.append(
+                {
+                    "iteration": rec.iteration,
+                    "candidate": rec.candidate,
+                    "origin": rec.origin,
+                    "decision": rec.decision,
+                    "reasons": list(rec.reasons),
+                }
+            )
+    finals = [e.payload_refs["final"] for e in events if e.type == "optimizer.final"]
+    return {
+        "search_id": a.search_id,
+        "trials": sum(e.type == "optimizer.trial" for e in events),
+        "reflections": sum(e.type == "optimizer.reflection" for e in events),
+        "candidates": candidates,
+        "final": store.get_json(finals[-1]) if finals else None,
+    }
+
+
 def cmd_ablation_run(a) -> Any:
     from onoda.ablation.run import run_ablation
     from onoda.science.contract import CASES_ROOT
@@ -624,6 +775,46 @@ def build_parser() -> argparse.ArgumentParser:
     ash.add_argument("report", help="report digest (sha256:...)")
     ash.add_argument("--evaluator-store", required=True)
     ash.set_defaults(func=cmd_ablation_show)
+
+    op = sub.add_parser(
+        "optimize", help="GEPA search over harness candidates with SoL-Pi gates (M4)"
+    )
+    op = op.add_subparsers(dest="optimize_command", required=True)
+    op.add_parser("seed", help="print the seed candidate and its provenance").set_defaults(
+        func=cmd_optimize_seed
+    )
+    osp = op.add_parser("split", help="derive an acceptance/final split (deterministic)")
+    osp.add_argument("--case", action="append", help="case id (default: every case)")
+    osp.add_argument("--seed", type=int, required=True)
+    osp.add_argument("--final-count", type=int, required=True)
+    osp.add_argument("--cases-root")
+    osp.set_defaults(func=cmd_optimize_split)
+    orun = op.add_parser("run", help="search from the seed over the acceptance slice")
+    orun.add_argument("--split", required=True, help="onoda.split/1 JSON")
+    orun.add_argument("--gates", required=True, help="onoda.gate-spec/2 YAML/JSON")
+    orun.add_argument("--search-id", required=True)
+    orun.add_argument("--store", required=True, help="agent store for the trial runs")
+    orun.add_argument("--evaluator-store", required=True)
+    orun.add_argument("--optimizer-store", required=True)
+    orun.add_argument("--work-dir", required=True)
+    orun.add_argument("--scripts", help="dir of <case_id>.json scripts (offline; synthetic)")
+    orun.add_argument("--reflection-script", help="JSON list of reflection replies (synthetic)")
+    orun.add_argument("--live", action="store_true", help="refused: no live search is authorized")
+    orun.add_argument("--seed", help="HarnessCandidate JSON (default: the seed candidate)")
+    orun.add_argument("--variant", default="S1r")
+    orun.add_argument("--ladder")
+    orun.add_argument("--synthetic-ladder", action="store_true")
+    orun.add_argument("--max-trials", type=int, required=True, help="Pi runs, failed ones too")
+    orun.add_argument("--max-reflections", type=int, required=True)
+    orun.add_argument("--minibatch-size", type=int, default=2)
+    orun.add_argument("--max-requests", type=int)
+    orun.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
+    orun.add_argument("--cases-root")
+    orun.set_defaults(func=cmd_optimize_run)
+    ost = op.add_parser("status", help="candidates, decisions and the final set of a search")
+    ost.add_argument("--optimizer-store", required=True)
+    ost.add_argument("--search-id", required=True)
+    ost.set_defaults(func=cmd_optimize_status)
     return p
 
 
