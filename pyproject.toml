@@ -5,6 +5,7 @@ description = "Portable, forkable run records for scientific-agent experiments (
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "gepa==0.1.4",
     "pydantic>=2.9,<3",
     "pyyaml>=6",
     "rfc8785==0.1.4",

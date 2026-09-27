@@ -19,6 +19,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import type { RlmLine } from "./rlm-protocol.ts";
 
 export const ENV_SPOOL = "ONODA_PI_SPOOL";
 export const ENV_SCRIPT = "ONODA_PI_SCRIPT";
@@ -164,6 +165,20 @@ export class SpoolWriter {
 		return this.putObject(JSON.stringify(value));
 	}
 
+	/**
+	 * A child spool's HMAC key (contract.py `derive_child_key`), or undefined
+	 * when this spool is unkeyed.
+	 */
+	childKey(childIndex: number): Buffer | undefined {
+		if (!this.key) return undefined;
+		return createHmac("sha256", this.key).update(`onoda.pi-rlm-child/${String(childIndex).padStart(4, "0")}`, "utf8").digest();
+	}
+
+	/** Append an rlm.* line (rlm-protocol.ts shapes). */
+	rlmLine(fields: RlmLine): number {
+		return this.line(fields as unknown as Record<string, unknown>);
+	}
+
 	/** Append one line; `seq` (and `mac`, when keyed) are assigned here. Returns the seq. */
 	line(fields: Record<string, unknown>): number {
 		const seq = this.seq++;
@@ -211,7 +226,10 @@ export function readJsonEnv<T>(name: string): T | undefined {
 
 /** Shared mutable run counters (request index, acquisitions) across onoda extensions. */
 export interface RunCounters {
+	/** This process's own provider requests (the next request_index). */
 	requests: number;
+	/** Requests spent by RLM child processes, charged to this run's budget. */
+	childRequests: number;
 	acquisitions: number;
 	/** Sum of every spooled response's cost (Pi's estimate, or a script's synthetic usage_cost). */
 	costUsd: number;
@@ -224,8 +242,14 @@ const COUNTERS = Symbol.for("onoda.pi.counters");
 
 export function counters(): RunCounters {
 	const g = globalThis as Record<symbol, RunCounters | undefined>;
-	g[COUNTERS] ??= { requests: 0, acquisitions: 0, costUsd: 0, costUnknown: false, ended: false };
+	g[COUNTERS] ??= { requests: 0, childRequests: 0, acquisitions: 0, costUsd: 0, costUnknown: false, ended: false };
 	return g[COUNTERS];
+}
+
+/** Requests charged against `max_requests`: this process's own plus its RLM children's. */
+export function requestsUsed(): number {
+	const c = counters();
+	return c.requests + c.childRequests;
 }
 
 /** Why the cost cap stops the run, or undefined while it may continue. */

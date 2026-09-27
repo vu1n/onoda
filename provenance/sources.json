@@ -195,6 +195,28 @@
       "status": "pinned",
       "license": null,
       "reason": "pinned in uv.lock; integrity is the sdist's sha256 from uv.lock/PyPI"
+    },
+    {
+      "id": "S17",
+      "name": "GEPA (PyPI gepa, the harness optimizer, src/onoda/optimize/)",
+      "url": "https://pypi.org/project/gepa/",
+      "kind": "pypi",
+      "revision": "0.1.4",
+      "integrity": "sha256:12b971039599625c156d2231f6d72a29c31a22e9c237689459b5f1a3c353f532",
+      "status": "pinned",
+      "license": "MIT",
+      "reason": "pinned in uv.lock with no extras (the core has no runtime dependencies); integrity is the wheel's sha256 from uv.lock/PyPI; the repository revision reviewed for its API is S8"
+    },
+    {
+      "id": "S18",
+      "name": "DSPy (RLM module design and seed prompt reference only; not a dependency)",
+      "url": "https://pypi.org/project/dspy/",
+      "kind": "pypi",
+      "revision": "3.4.0",
+      "integrity": "sha256:36de329ecdaf18e31977e26c61b587caa470a34f574f2fe6cb7f4c82bcbf97cc",
+      "status": "pinned",
+      "license": "MIT",
+      "reason": "wheel downloaded 2026-09-27 to read dspy/predict/rlm.py; SEED_CANDIDATE's rlm.system_prompt adapts its ACTION_INSTRUCTIONS_TEMPLATE; nothing from DSPy is installed or imported"
     }
   ]
 }

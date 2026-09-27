@@ -304,4 +304,18 @@ flowchart TD
 
 ## Deviations
 
-None yet.
+- **M4-001 (contract).** Three changes from the task text, all inside the contract:
+  - `ENV_RLM_CHILD_SCRIPTS` is replaced by `ENV_RLM_WORK` (a scratch dir for the
+    kernel socket and child staging) and `ENV_RLM_PYTHON` (the kernel's
+    interpreter). The extension reads `Script.children` from its own script and
+    stages each child's script, policy, run info and key file under
+    `ENV_RLM_WORK`, so a grandchild works the same way as a child. M4-004
+    therefore stages no child-scripts dir; it sets the four `ENV_RLM_*`
+    variables and writes the components file.
+  - Child spool keys are derived, never stored: `derive_child_key` (HMAC of the
+    parent key and the child index), mirrored by `SpoolWriter.childKey`.
+  - A fifth line type, `rlm.child.refused`, records refusals (the M4-003 gate
+    requires them spooled).
+  - Footprint widened to `onoda-recorder.ts` and `onoda-scripted.ts`: their
+    budget checks now use `requestsUsed()` (own + child requests, A40).
+    `spool.end.requests` still counts the process's own requests.

@@ -34,6 +34,7 @@ import {
 	readJsonEnv,
 	replayAliases,
 	replayKey,
+	requestsUsed,
 	SCRIPTED_MODEL,
 	SCRIPTED_PROVIDER,
 	SCRIPTED_REDUCER_MODEL,
@@ -140,7 +141,7 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 		void (async () => {
 			try {
 				const payload = ((await options?.onPayload?.(context, model)) ?? context) as Context;
-				if (purpose !== "agent" && policy && counters().requests >= policy.max_requests) {
+				if (purpose !== "agent" && policy && requestsUsed() >= policy.max_requests) {
 					// Refused before it is sent: nothing to spool, nothing counted.
 					return fail("budget-exhausted", `${purpose} request refused: max_requests ${policy.max_requests} reached`);
 				}

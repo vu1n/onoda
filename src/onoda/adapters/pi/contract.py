@@ -26,7 +26,12 @@ Nothing here launches a process or writes to a store.
 
 from __future__ import annotations
 
+import ast
+import hashlib
+import hmac
+import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -49,8 +54,13 @@ SOL_PI_ENTRY = Path("node_modules/sol-pi/src/sol-pi/index.ts")  # relative to RU
 # raw tool-result tap sees results before SoL-Pi's reducer rewrites them; the
 # recorder loads last so it records exactly what the model is shown.
 TASK_EXTENSION = "onoda-task.ts"
+# M4: loads after SoL-Pi and before the scripted provider and recorder, so the
+# recorder still sees the `ipython` results exactly as the model does.
+RLM_EXTENSION = "onoda-rlm.ts"
 SCRIPTED_EXTENSION = "onoda-scripted.ts"
 RECORDER_EXTENSION = "onoda-recorder.ts"
+# The RLM kernel: stdlib-only Python, one persistent namespace per Pi process.
+RLM_KERNEL = RUNTIME_DIR / "rlm" / "onoda_rlm_kernel.py"
 
 # ------------------------------------------------------------ environment
 
@@ -65,6 +75,13 @@ ENV_RUN_INFO = "ONODA_PI_RUN_INFO"  # SpoolStart fields the recorder copies verb
 # environment so tool subprocesses inherit none of them.
 ENV_SPOOL_KEY = "ONODA_PI_SPOOL_KEY"
 
+# RLM (M4). The extension reads all four at load (before the recorder scrubs
+# ONODA_PI_*) and hands a child Pi process its own values explicitly.
+ENV_RLM_DEPTH = "ONODA_PI_RLM_DEPTH"  # "0" for the top-level run; a child is its parent's + 1
+ENV_RLM_COMPONENTS = "ONODA_PI_RLM_COMPONENTS"  # RlmComponents JSON path
+ENV_RLM_WORK = "ONODA_PI_RLM_WORK"  # scratch dir: kernel socket, child staging (never the spool)
+ENV_RLM_PYTHON = "ONODA_PI_RLM_PYTHON"  # interpreter that runs RLM_KERNEL
+
 SCRIPTED_PROVIDER = "onoda-scripted"
 SCRIPTED_MODEL = "scripted"
 SCRIPTED_REDUCER_MODEL = "scripted-reducer"
@@ -74,6 +91,7 @@ SCRIPTED_REDUCER_MODEL = "scripted-reducer"
 TOOL_CASE_INPUT = "case_input"  # read the staged ORCA input (read-only)
 TOOL_ORCA_RUN = "orca_run"  # acquire the pinned output; recorded as acquired, never executed
 TOOL_REPORT = "report_states"  # the agent's final claim
+TOOL_IPYTHON = "ipython"  # RLM variants only: a persistent Python kernel with rlm()
 TASK_TOOLS = (TOOL_CASE_INPUT, TOOL_ORCA_RUN, TOOL_REPORT)
 BASE_TOOLS = ("read", "bash", "edit", "write")
 MECHANISM_TOOLS = {"observationPack": ("obs_recall",), "onlineContextCompact": ("update_plan",)}
@@ -105,7 +123,7 @@ class Variant(_Frozen):
     id: str
     question: str
     ladder: bool  # requires an operator-supplied advisory ladder document
-    rlm: bool  # requires the RLM extension (not built in M3; refused)
+    rlm: bool  # loads the RLM extension (`RLM_EXTENSION`, M4) and its `ipython` tool
     mechanisms: tuple[Mechanism, ...] = ()
 
     def sol_pi_config(
@@ -125,7 +143,8 @@ class Variant(_Frozen):
 
     def tools(self) -> tuple[str, ...]:
         extra = tuple(t for m in self.mechanisms for t in MECHANISM_TOOLS.get(m, ()))
-        return (*TASK_TOOLS, *BASE_TOOLS, *extra)
+        rlm = (TOOL_IPYTHON,) if self.rlm else ()
+        return (*TASK_TOOLS, *BASE_TOOLS, *extra, *rlm)
 
 
 # S2 letters follow SOL_PI_DELTA §2's mechanism order (assumptions register A31).
@@ -332,6 +351,9 @@ class Script(_Frozen):
     # Served to compaction-summary requests: Pi calls the provider without
     # `onPayload` for them (the agent loop always passes it).
     summary_turns: tuple[ScriptTurn, ...] = ()
+    # RLM: the scripts of the child Pi processes this run's rlm() calls spawn,
+    # by child index (children/0000 gets children[0]); each nests its own.
+    children: tuple[Script, ...] = ()
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -452,6 +474,62 @@ class ReplayMismatchLine(_Line):
     actual: Sha256
 
 
+class RlmCell(_Line):
+    """One `ipython` cell, spooled after the kernel replied and before Pi hands
+    the tool result on. `output` is the kernel's `exec.reply` JSON (as sent)."""
+
+    type: Literal["rlm.cell"]
+    tool_call_id: str
+    cell_index: int = Field(ge=0)
+    code: Sha256  # the cell's source text (UTF-8)
+    output: Sha256
+    is_error: bool
+    truncated: bool
+
+
+class RlmChildStart(_Line):
+    """Written before the child process is spawned."""
+
+    type: Literal["rlm.child.start"]
+    tool_call_id: str  # the ipython call whose cell called rlm()
+    child_index: int = Field(ge=0)
+    depth: int = Field(ge=1)  # the child's depth
+    spool_subdir: str = Field(pattern=r"^children/[0-9]{4}$")
+    prompt: Sha256  # the child's `-p` instruction after the child_prompt template
+    max_requests: int = Field(gt=0)  # the parent's remaining request budget at spawn
+
+
+class RlmChildEnd(_Line):
+    """Written after the child process exited, before the kernel gets the answer."""
+
+    type: Literal["rlm.child.end"]
+    child_index: int = Field(ge=0)
+    exit_code: int | None  # None: killed or timed out
+    end_status: str | None  # the child's spool.end status; None if it wrote none
+    requests: int = Field(ge=0)  # provider requests the child spooled (charged to the parent)
+    cost_usd: str | None  # decimal text summed from the child's responses; None if any unknown
+    answer: Sha256 | None  # the answer text handed back to the cell; None on failure
+    error: str | None = None
+
+
+class RlmChildRefused(_Line):
+    """An rlm() call refused before any process was spawned."""
+
+    type: Literal["rlm.child.refused"]
+    tool_call_id: str
+    reason: Literal["max-depth", "max-children", "budget"]
+    detail: str
+
+
+class RlmState(_Line):
+    """A `commit_state` value, spooled before the kernel is acknowledged."""
+
+    type: Literal["rlm.state"]
+    tool_call_id: str
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+    value: Sha256  # canonical JSON (sorted keys, no NaN/Infinity) of the value
+
+
 class SpoolEnd(_Line):
     type: Literal["spool.end"]
     status: Literal[
@@ -476,6 +554,11 @@ SpoolLine = Annotated[
     | TaskClaim
     | Compaction
     | ReplayMismatchLine
+    | RlmCell
+    | RlmChildStart
+    | RlmChildEnd
+    | RlmChildRefused
+    | RlmState
     | SpoolEnd,
     Field(discriminator="type"),
 ]
@@ -490,6 +573,357 @@ def parse_spool_line(data: dict[str, Any]) -> Any:
     return _LineAdapter.model_validate({"line": data}).line
 
 
+# ------------------------------------------------------------------- RLM (M4)
+
+# The kernel protocol: JSON Lines over one AF_UNIX stream socket. The host
+# (onoda-rlm.ts) listens; the kernel connects, sends `ready`, and then both
+# sides may send at any time. Host -> kernel: `init` (once, first), `exec`,
+# `call.reply`, `shutdown`. Kernel -> host: `ready`, `exec.reply`, `call`.
+# While a cell runs, the kernel may send `call` (rlm / commit_state) and
+# blocks that cell until the matching `call.reply`. Ids are per-sender
+# integers from 0; a reply carries the id of what it answers. Mirrored by
+# `pi/extensions/lib/rlm-protocol.ts` and `pi/rlm/onoda_rlm_kernel.py`.
+KERNEL_PROTOCOL = "onoda.rlm-kernel/1"
+# Appended to a stream's captured output when it exceeds max_output_chars
+# (`{limit}` is the cap, `{total}` the uncapped length).
+TRUNCATION_MARKER = "\n[onoda-rlm: output truncated at {limit} of {total} chars]"
+# Modules neither the kernel source nor the `rlm.helpers` component may import.
+RLM_FORBIDDEN_IMPORTS = ("pickle", "marshal", "shelve", "subprocess", "urllib", "http", "ssl")
+
+
+class KernelInit(_Frozen):
+    op: Literal["init"]
+    id: int = Field(ge=0)
+    protocol: Literal["onoda.rlm-kernel/1"]
+    helpers: str  # Python source exec'd into the namespace before any cell
+    max_output_chars: int = Field(gt=0)
+
+
+class KernelExec(_Frozen):
+    op: Literal["exec"]
+    id: int = Field(ge=0)
+    code: str
+
+
+class KernelCallReply(_Frozen):
+    """The host's answer to a kernel `call`. `ok: false` raises `RlmError(error)` in the cell."""
+
+    op: Literal["call.reply"]
+    id: int = Field(ge=0)  # the kernel call's id
+    ok: bool
+    value: str | None = None  # rlm: the child's answer text; commit_state: the value's digest
+    error: str | None = None
+
+
+class KernelShutdown(_Frozen):
+    op: Literal["shutdown"]
+    id: int = Field(ge=0)
+
+
+class KernelReady(_Frozen):
+    op: Literal["ready"]
+    protocol: Literal["onoda.rlm-kernel/1"]
+    pid: int
+
+
+class KernelExecReply(_Frozen):
+    """A finished cell. stdout ends with repr() of a trailing expression, as a REPL prints it.
+
+    `error` is the formatted exception (traceback) of a raising cell, else
+    None; the kernel keeps running either way. `stdout`/`stderr` are each
+    already capped at max_output_chars with TRUNCATION_MARKER; `truncated`
+    says whether either was. A reply to `init` has the same shape (the
+    helpers' output and error).
+    """
+
+    op: Literal["exec.reply"]
+    id: int = Field(ge=0)  # the exec (or init) request's id
+    stdout: str
+    stderr: str
+    error: str | None
+    truncated: bool
+
+
+class KernelCall(_Frozen):
+    """A call from inside a running cell.
+
+    Args: rlm {prompt, context}; commit_state {name, value}.
+    """
+
+    op: Literal["call"]
+    id: int = Field(ge=0)
+    fn: Literal["rlm", "commit_state"]
+    args: dict[str, Any]
+
+
+KernelRequest = Annotated[
+    KernelInit | KernelExec | KernelCallReply | KernelShutdown, Field(discriminator="op")
+]
+KernelReply = Annotated[KernelReady | KernelExecReply | KernelCall, Field(discriminator="op")]
+
+
+class _KernelAdapter(BaseModel):
+    request: KernelRequest | None = None
+    reply: KernelReply | None = None
+
+
+def parse_kernel_message(data: dict[str, Any]) -> Any:
+    """Validate one decoded protocol message in either direction."""
+    key = "request" if data.get("op") in ("init", "exec", "call.reply", "shutdown") else "reply"
+    return getattr(_KernelAdapter.model_validate({key: data}), key)
+
+
+def derive_child_key(key: bytes, child_index: int) -> bytes:
+    """A child spool's HMAC key: HMAC-SHA256(parent key, "onoda.pi-rlm-child/<nnnn>").
+
+    Mirrored by `SpoolWriter.childKey` in `spool.ts`; applied recursively for
+    grandchildren. No child key is ever written to a file the host keeps, and
+    ingest can still verify each child spool from the one in-memory launch key.
+    """
+    msg = f"onoda.pi-rlm-child/{child_index:04d}".encode()
+    return hmac.new(key, msg, hashlib.sha256).digest()
+
+
+def canonical_state_json(value: Any) -> str:
+    """The bytes an `rlm.state` object holds: sorted keys, compact, no NaN/Infinity.
+
+    Mirrors the kernel's own serialization, so the digest the host acknowledges
+    is the digest ingest sees.
+    """
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+class RlmLimits(_Frozen):
+    max_depth: int = Field(ge=0, le=4)  # deepest child allowed; 0 disables rlm()
+    max_children: int = Field(ge=0, le=64)  # rlm() spawns per process (refusals not counted)
+    max_output_chars: int = Field(gt=0, le=1_000_000)  # per stream, per cell
+
+
+class RlmComponents(_Frozen):
+    """What `ENV_RLM_COMPONENTS` points at: the candidate's RLM components, parsed."""
+
+    schema_: Literal["onoda.pi-rlm-components/1"] = Field(
+        "onoda.pi-rlm-components/1", alias="schema"
+    )
+    system_prompt: str  # appended to Pi's system prompt at before_agent_start
+    tool_doc: str  # the ipython tool's description
+    child_prompt: str  # template with {prompt} and {context}; the child's `-p` text
+    helpers: str  # Python source exec'd into the kernel namespace at start
+    limits: RlmLimits
+    candidate_digest: str  # HarnessCandidate.digest(), for the record
+
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+
+COMPONENT_MAX_CHARS = 65536
+
+
+def _check_text(name: str, value: str) -> None:
+    if not value.strip():
+        raise ValueError(f"{name} is empty")
+    if len(value) > COMPONENT_MAX_CHARS:
+        raise ValueError(f"{name} is longer than {COMPONENT_MAX_CHARS} chars")
+
+
+def forbidden_imports(tree: ast.AST) -> list[str]:
+    """Imports in `tree` of an RLM_FORBIDDEN_IMPORTS module, plus any __import__ call."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or ""]
+        elif isinstance(node, ast.Call) and getattr(node.func, "id", None) == "__import__":
+            found.append("__import__")
+        found += [n for n in names if n.split(".")[0] in RLM_FORBIDDEN_IMPORTS]
+    return found
+
+
+def _check_helpers(value: str) -> None:
+    _check_text("rlm.helpers", value)
+    try:
+        tree = ast.parse(value)
+    except SyntaxError as exc:
+        raise ValueError(f"rlm.helpers is not valid Python: {exc}") from exc
+    bad = forbidden_imports(tree)
+    if bad:
+        raise ValueError(f"rlm.helpers may not import {', '.join(bad)}")
+
+
+def _check_child_prompt(value: str) -> None:
+    _check_text("rlm.child_prompt", value)
+    if "{prompt}" not in value:
+        raise ValueError("rlm.child_prompt must contain {prompt}")
+    try:
+        rendered = value.format(prompt="p", context="c")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(f"rlm.child_prompt is not a template: {exc}") from exc
+    if rendered.startswith(("@", "-")):
+        raise ValueError("rlm.child_prompt must not start with '@' or '-'")
+
+
+def _check_limits(value: str) -> None:
+    RlmLimits.model_validate_json(value)
+
+
+def _check_sol_pi(value: str) -> None:
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"sol_pi.config is not JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("sol_pi.config must be a JSON object")
+    for k, v in data.items():
+        if k not in MECHANISMS:
+            raise ValueError(f"sol_pi.config may only toggle the four mechanisms, not {k!r}")
+        if not isinstance(v, bool):
+            raise ValueError(f"sol_pi.config.{k} must be true or false")
+
+
+# The optimizer's whole reach (A41). Anything else (evaluator, parsers,
+# gateway, budgets, splits) is not a component and cannot be proposed.
+COMPONENT_VALIDATORS: dict[str, Callable[[str], None]] = {
+    "rlm.system_prompt": lambda v: _check_text("rlm.system_prompt", v),
+    "rlm.tool_doc": lambda v: _check_text("rlm.tool_doc", v),
+    "rlm.child_prompt": _check_child_prompt,
+    "rlm.helpers": _check_helpers,
+    "rlm.limits": _check_limits,
+    "ladder": lambda v: _check_text("ladder", v),  # replaces the bundle's advisory ladder
+    "sol_pi.config": _check_sol_pi,  # overrides the variant's mechanism booleans
+}
+REQUIRED_COMPONENTS = (
+    "rlm.system_prompt",
+    "rlm.tool_doc",
+    "rlm.child_prompt",
+    "rlm.helpers",
+    "rlm.limits",
+)
+
+
+class HarnessCandidate(_Frozen):
+    """A named set of text components: the unit GEPA proposes and the gates judge.
+
+    `components` is GEPA's `dict[str, str]`. Every name must be in
+    `COMPONENT_VALIDATORS`, every `REQUIRED_COMPONENTS` name present, and each
+    value pass its validator; `ladder` and `sol_pi.config` are optional.
+    """
+
+    components: dict[str, str]
+
+    @field_validator("components")
+    @classmethod
+    def _components(cls, v: dict[str, str]) -> dict[str, str]:
+        unknown = sorted(set(v) - set(COMPONENT_VALIDATORS))
+        if unknown:
+            raise ValueError(f"undeclared components: {', '.join(unknown)}")
+        missing = [n for n in REQUIRED_COMPONENTS if n not in v]
+        if missing:
+            raise ValueError(f"missing components: {', '.join(missing)}")
+        for name, value in v.items():
+            COMPONENT_VALIDATORS[name](value)
+        return v
+
+    def digest(self) -> str:
+        """sha256 of the components as sorted-key JSON: the candidate's identity."""
+        body = json.dumps(self.components, sort_keys=True, ensure_ascii=False)
+        return "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+
+    @property
+    def limits(self) -> RlmLimits:
+        return RlmLimits.model_validate_json(self.components["rlm.limits"])
+
+    def sol_pi_mechanisms(self) -> tuple[Mechanism, ...] | None:
+        """The mechanisms `sol_pi.config` turns on, or None when it is not set."""
+        raw = self.components.get("sol_pi.config")
+        if raw is None:
+            return None
+        data = json.loads(raw)
+        return tuple(m for m in MECHANISMS if data.get(m, False))
+
+    def rlm_components(self) -> RlmComponents:
+        c = self.components
+        return RlmComponents(
+            system_prompt=c["rlm.system_prompt"],
+            tool_doc=c["rlm.tool_doc"],
+            child_prompt=c["rlm.child_prompt"],
+            helpers=c["rlm.helpers"],
+            limits=self.limits,
+            candidate_digest=self.digest(),
+        )
+
+
+# Adapted from DSPy's RLM action instructions (dspy 3.4.0,
+# dspy/predict/rlm.py ACTION_INSTRUCTIONS_TEMPLATE, MIT; provenance S18):
+# llm_query -> rlm(), SUBMIT -> report_states, and the REPL is a Pi tool.
+_SEED_SYSTEM_PROMPT = """\
+## Python REPL (ipython tool) and recursive calls
+
+You have an `ipython` tool: a persistent Python REPL. Write Python code and it \
+will be executed; you see its output, then write more code based on what you \
+learned. This is an iterative process. Variables persist between cells.
+
+Available inside the REPL:
+- `rlm(prompt, context=None)` - ask a sub-agent (a fresh Pi session with the \
+same task tools) a focused question; returns its answer as a string. Calls \
+are limited and draw from your own request budget.
+- `commit_state(name, value)` - record a JSON value you will rely on later. \
+Anything not committed lives only in the REPL and may be lost.
+- `print()` - ALWAYS print to see results.
+
+1. EXPLORE FIRST - Look at your data before processing it. Print samples, \
+check types/lengths, understand the structure.
+2. ITERATE - Write small code snippets, observe outputs, then decide next \
+steps. State persists between cells.
+3. VERIFY BEFORE REPORTING - If results seem wrong (zeros, empty, unexpected), \
+reconsider your approach.
+4. USE rlm() FOR SEMANTICS - String matching finds WHERE things are; a \
+sub-agent can judge WHAT they mean.
+5. MINIMIZE RETYPING - When values are long, precise, or error-prone (numbers, \
+units, identifiers), carry them in variables and parse them in code instead \
+of retyping. Copy reported values exactly as printed.
+6. REPORT ONLY AFTER SEEING OUTPUTS - report_states records your final \
+answer. Inspect printed output first, then report in a later step."""
+
+_SEED_TOOL_DOC = (
+    "Run Python code in a persistent REPL. Returns stdout, stderr and the repr of a "
+    "trailing expression. Inside the REPL, rlm(prompt, context=None) asks a sub-agent "
+    "and returns its answer; commit_state(name, value) records a JSON value durably."
+)
+
+_SEED_CHILD_PROMPT = (
+    "You are a sub-agent answering one focused question for a parent agent. "
+    "Answer in plain text; your final message is returned to the parent verbatim.\n\n"
+    "Question: {prompt}\n\nContext:\n{context}"
+)
+
+_SEED_HELPERS = (
+    "def lines_matching(text, needle):\n"
+    '    """(line number, line) pairs of `text` whose line contains `needle`."""\n'
+    "    return [(n, ln) for n, ln in enumerate(text.splitlines(), 1) if needle in ln]\n"
+)
+
+SEED_CANDIDATE = HarnessCandidate(
+    components={
+        "rlm.system_prompt": _SEED_SYSTEM_PROMPT,
+        "rlm.tool_doc": _SEED_TOOL_DOC,
+        "rlm.child_prompt": _SEED_CHILD_PROMPT,
+        "rlm.helpers": _SEED_HELPERS,
+        "rlm.limits": RlmLimits(
+            max_depth=1, max_children=4, max_output_chars=10000
+        ).model_dump_json(),
+    }
+)
+SEED_PROVENANCE = {
+    "rlm.system_prompt": "adapted from dspy 3.4.0 dspy/predict/rlm.py "
+    "ACTION_INSTRUCTIONS_TEMPLATE (MIT, provenance S18)",
+    "rlm.tool_doc": "onoda",
+    "rlm.child_prompt": "onoda",
+    "rlm.helpers": "onoda",
+    "rlm.limits": "onoda defaults, not tuned (A41)",
+}
+
+
 # ------------------------------------------------------------ record mapping
 
 # Checkpoint.context keys for a Pi run (PORTABLE_RUN_SPEC checkpoint contents
@@ -500,6 +934,7 @@ CTX_RUNTIME = "pi.runtime"  # {"pi": PI_VERSION, "sol_pi": commit or None}
 CTX_OBSERVATION_PACK = "pi.observation_pack"  # {obs_id: store digest} for archived outputs
 CTX_COMPACTIONS = "pi.compactions"  # [{"seq", "phase", "details"}]
 CTX_REQUESTS = "pi.requests"
+CTX_RLM_STATE = "pi.rlm_state"  # {name: store digest} of committed state; never kernel memory
 
 PI_CAPABILITIES = {
     "inspect": "supported",

@@ -36,6 +36,7 @@ import {
 	readJsonEnv,
 	replayAliases,
 	replayKey,
+	requestsUsed,
 	SCRIPTED_PROVIDER,
 	SPOOL_SCHEMA,
 	type SpoolWriter,
@@ -89,8 +90,9 @@ const REJECTED_BEFORE_TOOL_CALL = "rejected by Pi before tool_call";
 /** Blocking reason for a call under `policy`, or undefined when it may run. */
 function gatewayDecision(policy: GatewayPolicy, toolName: string, input: Record<string, unknown>): string | undefined {
 	const c = counters();
-	// Calls proposed by a request past the budget (reducer requests count too).
-	if (c.requests > policy.max_requests) return `request budget exhausted (${c.requests} > ${policy.max_requests})`;
+	// Calls proposed by a request past the budget (reducer and RLM child requests count too).
+	const used = requestsUsed();
+	if (used > policy.max_requests) return `request budget exhausted (${used} > ${policy.max_requests})`;
 	const cost = costExhausted(policy);
 	if (cost) return cost;
 	if (!policy.allowed_tools.includes(toolName)) return `tool ${toolName} is not allowed by the gateway policy`;
@@ -246,7 +248,7 @@ export default function onodaRecorder(pi: ExtensionAPI): void {
 	});
 
 	pi.on("turn_start", (_event, ctx) => {
-		if (counters().requests >= policy.max_requests) {
+		if (requestsUsed() >= policy.max_requests) {
 			requestEnd("budget-exhausted", `max_requests ${policy.max_requests} reached`);
 		}
 		const cost = costExhausted(policy);
