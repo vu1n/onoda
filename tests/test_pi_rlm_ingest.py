@@ -171,10 +171,24 @@ class RlmSpool:
             child_index=index,
             exit_code=0 if end else None,
             end_status=end["status"] if end else None,
-            requests=child.requests,
-            cost_usd=None,
+            **child.charge(),
             answer=self.put(answer.encode()) if answer is not None else None,
         )
+
+    def charge(self) -> dict[str, object]:
+        """What this spool charges its parent, as the extension sums it."""
+        requests, costs = 0, []
+        for x in self.lines:
+            if x["type"] == "provider.request":
+                requests += 1
+            elif x["type"] in ("provider.response", "rlm.child.end"):
+                requests += x.get("requests", 0) if x["type"] == "rlm.child.end" else 0
+                costs.append(x["cost_usd"])
+        known = all(c is not None for c in costs)
+        return {
+            "requests": requests,
+            "cost_usd": str(sum(map(Decimal, costs), Decimal(0))) if known else None,
+        }
 
     def end(self, status: str = "settled") -> None:
         self.line("spool.end", status=status, requests=self.requests)
@@ -599,3 +613,14 @@ def test_child_config_keys_are_reserved(tmp_path):
         ingest_spool(
             store, sb.dir, run_id="pi-run", task=task, config={**CONFIG, "parent_run": "x"}
         )
+
+
+def test_a_child_charge_that_disagrees_with_its_spool_is_refused(tmp_path):
+    sb = tree(tmp_path / "w")
+    (end,) = [x for x in sb.lines if x["type"] == "rlm.child.end" and x["child_index"] == 0]
+    end["requests"] -= 1  # the parent was charged less than its child spent
+    sb.write(KEY)
+    store, task = make_store(tmp_path / "store")
+    with pytest.raises(IntegrityError, match="was charged"):
+        ingest(store, task, sb.dir)
+    _assert_nothing_recorded(store)

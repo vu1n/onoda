@@ -64,6 +64,8 @@ import {
 	type SpoolWriter,
 } from "./lib/spool.ts";
 
+// RlmState.name's pattern; checked here too, since cell code can speak the protocol directly.
+const STATE_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/;
 const KERNEL_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "rlm", "onoda_rlm_kernel.py");
 const CHILD_TIMEOUT_MS = 600_000;
 const KERNEL_START_TIMEOUT_MS = 30_000;
@@ -199,9 +201,15 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 				acquisitions++;
 				break;
 			case "rlm.child.start":
-				acquisitions += readChildSpool(join(dir, line.spool_subdir as string)).acquisitions;
+				if (typeof line.spool_subdir !== "string" || !/^children\/\d{4}$/.test(line.spool_subdir)) {
+					throw new Error(`bad spool_subdir ${JSON.stringify(line.spool_subdir)}`);
+				}
+				acquisitions += readChildSpool(join(dir, line.spool_subdir)).acquisitions;
 				break;
 			case "rlm.child.end":
+				if (!Number.isInteger(line.requests) || (line.requests as number) < 0) {
+					throw new Error(`bad requests ${JSON.stringify(line.requests)}`);
+				}
 				requests += line.requests as number;
 				if (line.cost_usd == null) costKnown = false;
 				else costs.push(line.cost_usd as string);
@@ -213,6 +221,7 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 	}
 	let answer: string | null = null;
 	if (lastAgentMessage) {
+		if (!/^[0-9a-f]{64}$/.test(lastAgentMessage)) throw new Error("bad message digest");
 		const message = JSON.parse(readFileSync(join(dir, "objects", lastAgentMessage), "utf8")) as {
 			content?: { type: string; text?: string }[];
 		};
@@ -442,7 +451,15 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 				resolve(code);
 			});
 		});
-		const out = readChildSpool(childSpool);
+		rmSync(join(stage, "spool.key"), { force: true }); // the child unlinks it at load, unless it died first
+		let out: ReturnType<typeof readChildSpool>;
+		try {
+			out = readChildSpool(childSpool);
+		} catch {
+			// The child (same uid, unsandboxed, A38) left a spool the host cannot read:
+			// charge everything it was granted; ingest refuses the spool anyway.
+			out = { endStatus: null, requests: remaining, costUsd: null, acquisitions: Math.max(0, acquisitionsLeft), answer: null };
+		}
 		const c = counters();
 		c.childRequests += out.requests;
 		c.acquisitions += out.acquisitions;
@@ -479,8 +496,13 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 			}
 			return runChild(args.prompt, (args.context as string | null) ?? null);
 		}
-		if (typeof args.name !== "string" || typeof args.json !== "string") {
-			return { ok: false, error: "commit_state() needs a name and a JSON value" };
+		if (typeof args.name !== "string" || typeof args.json !== "string" || !STATE_NAME_RE.test(args.name)) {
+			return { ok: false, error: "commit_state() needs a valid name and a JSON value" };
+		}
+		try {
+			JSON.parse(args.json);
+		} catch {
+			return { ok: false, error: "commit_state() value is not JSON" };
 		}
 		return commitState(args.name, args.json);
 	});

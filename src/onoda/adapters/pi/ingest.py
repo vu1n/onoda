@@ -1255,6 +1255,23 @@ def _sol_pi_config(config: dict[str, Any]) -> dict[str, Any] | None:
     return _decimalize(cfg)
 
 
+def _charge(spool: _Spool) -> tuple[int, Decimal | None]:
+    """What a child spool charges its parent: its requests and summed cost (its own
+    responses plus its children's `rlm.child.end` lines), as the extension computes it."""
+    requests, costs, known = 0, [], True
+    for line in spool.lines:
+        if isinstance(line, ProviderRequest):
+            requests += 1
+        elif isinstance(line, (ProviderResponse, RlmChildEnd)):
+            if isinstance(line, RlmChildEnd):
+                requests += line.requests
+            if line.cost_usd is None:
+                known = False
+            else:
+                costs.append(Decimal(line.cost_usd))
+    return requests, sum(costs, Decimal(0)) if known else None
+
+
 @dataclass(frozen=True)
 class _Plan:
     """One spool read and validated, with its children's plans: nothing written yet."""
@@ -1361,6 +1378,13 @@ def _prepare(
                     f"child {index}: the parent recorded end status {end.end_status!r}, "
                     f"its spool says {child_end.status if child_end else None!r}"
                 )
+            if end is not None:
+                cost = None if end.cost_usd is None else Decimal(end.cost_usd)
+                if _charge(plan.spool) != (end.requests, cost):
+                    raise IntegrityError(
+                        f"child {index}: the parent was charged {end.requests} requests and "
+                        f"{end.cost_usd} USD, its spool says {_charge(plan.spool)}"
+                    )
         children[index] = _Child(start, end, child_run, plan)
     return _Plan(run_id, cfg, spool, run, False, archive, analysis, sol_pi_config, children)
 
