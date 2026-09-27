@@ -18,6 +18,10 @@ first agent adapter; Prime is an optional comparison arm).
   TypeScript check: `cd pi && npx tsc -p .`
 - Ablation (M3b): `onoda ablation run spec.yaml` runs arms × cases on the real
   Pi; fixture spec in `tests/ablation_fixtures/`.
+- RLM and optimizer (M4): `pi/extensions/onoda-rlm.ts` plus the stdlib-only
+  kernel `pi/rlm/onoda_rlm_kernel.py` make variant S1r; `onoda optimize
+  seed|split|run|status` runs GEPA (pinned `gepa==0.1.4`) over
+  `HarnessCandidate` components, offline under scripts only.
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
   `onoda case list` shows them. Vendored bytes under `cases/` are never edited.
 
@@ -59,6 +63,15 @@ VCS is plain git. No project board; work items come from issues or goals.
   without a declared tolerance is `unresolved`; the false-success tolerance is
   zero; cases outside `development`/`acceptance` splits are refused; reports
   over scripted runs say they are synthetic and not a mechanism verdict.
+- RLM: kernel state enters the record only through `commit_state` (JSON,
+  spooled as the exact bytes before the kernel gets its digest); every child
+  Pi run is ingested as its own run before the parent cites it, and its
+  requests and cost are charged to the parent's budget and metrics.
+- Optimizer: trials run on acceptance cases only, never the final split;
+  reflection sees agent traces, never reducer receipts or evaluator
+  references; a candidate is accepted only on an `eligible` gate verdict, so
+  an unresolved capability gate never accepts; candidates change only the
+  allowlisted components (A45).
 
 Read `docs/ASSUMPTIONS.md` before changing scientific behavior, and record
 new assumptions there instead of inventing thresholds or API methods.

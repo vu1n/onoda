@@ -6,7 +6,7 @@ a run can be exported, imported on another machine, inspected offline,
 partially recomputed from raw bytes, and branched from an explicit checkpoint
 without losing lineage or cost accounting.
 
-This is milestones **M0–M3b** of the handoff in [`docs/handoff/`](docs/handoff/)
+This is milestones **M0–M4** of the handoff in [`docs/handoff/`](docs/handoff/)
 (v0.2; [`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
 text, so Pi is the first agent adapter). M0–M1 run on a **completely synthetic
 fixture**. M2 adds scientific smoke tests over **authentic ORCA outputs** that
@@ -18,7 +18,12 @@ and records each run portably; with no model credentials authorized, every
 Pi run so far was driven by a **scripted provider** and is labelled synthetic.
 M3b adds the SoL-Pi add-one ablation (S1 baseline, each mechanism alone,
 S3) with SoL-Pi's two promotion gates; over scripted runs its report is a
-harness exercise, not a verdict about any mechanism.
+harness exercise, not a verdict about any mechanism. M4 adds onoda's own RLM
+Pi extension (a persistent `ipython` tool, `rlm()` child Pi runs recorded as
+their own runs, JSON state committed through the recorder; variant S1r) and a
+GEPA search over the harness's prompts, tool docs, helpers and limits behind
+the same two gates. So far that search has only run on scripted trials with a
+scripted reflection, so it exercises the loop and proves no improvement.
 
 ## Quick start
 
@@ -90,6 +95,26 @@ onoda ablation run spec.yaml --store ./store-a --evaluator-store ./evaluator --w
 onoda ablation show sha256:... --evaluator-store ./evaluator   # the whole report
 ```
 
+M4 RLM and optimizer (the gates file is a `GateSpec`: every capability
+tolerance declared, none chosen yet, A47; a split over unreviewed cases is
+exploratory, A48):
+
+```bash
+onoda pi run orca6-water-mp2 --variant S1r --ladder ladder.md --candidate cand.json ...  # default: the seed
+onoda optimize seed > seed.json          # the seed candidate and its provenance
+onoda optimize split --seed 1 --final-count 1 > split.json
+onoda optimize run --split split.json --gates gates.yaml --variant S1r --ladder ladder.md \
+  --scripts ./scripts --reflection-script replies.json \
+  --search-id s1 --store ./store-a --evaluator-store ./evaluator \
+  --optimizer-store ./optimizer --work-dir ./opt --max-trials 12 --max-reflections 2
+onoda optimize status --search-id s1 --optimizer-store ./optimizer
+```
+
+`--scripts` holds one scripted-provider script per acceptance case
+(`<case_id>.json`) and `--reflection-script` a JSON list of the reflection
+model's replies; both are synthetic. A live search (`--live`) refuses: no
+agent or reflection model is authorized (A11, A35).
+
 ## Layout
 
 | Module | Responsibility |
@@ -142,6 +167,8 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. No model has been called | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
 | Replay an agent run | Re-runs Pi under the recorded responses and fails closed on any change to what the model was shown | `tests/test_pi_end_to_end.py` |
 | Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because no tolerances are chosen (A39). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
+| RLM extension (S1r) | Real Pi with `ipython` cells, committed JSON state, a child Pi run recorded as its own run and charged to the parent, replay of the whole tree; scripted provider only | `tests/test_pi_rlm_extension.py`, `tests/test_rlm_end_to_end.py` |
+| Harness optimization (M4) | GEPA proposes candidate components from agent traces; SoL-Pi's gates accept or reject each on acceptance cases only. A scripted two-proposal search on real Pi rejects one (a false success) and accepts one (fewer context bytes). Synthetic, not an improvement (A32) | `tests/test_optimize*.py`, `scripts/demo.sh` |
 | Repeat experiment | Not implemented | — |
 
 ## Acceptance tests
@@ -185,8 +212,8 @@ belong to later milestones.
   in the tests are synthetic, and no model result exists. Live runs are built
   and refuse to start without every live setting (A35).
 - The advisory ladder and allowed documentation are unresolved (A33): S1
-  onward refuse to run without an operator-supplied ladder. S1r (RLM) always
-  refuses in M3.
+  onward, the RLM arm S1r included, refuse to run without an operator-supplied
+  ladder.
 - Pi's `bash` tool and Action Fusion's `then_run` are unsandboxed (A38): the
   gateway limits which tools run and the request/cost budgets, not what a
   shell command can reach, and its `then_run` token filter is not a boundary.
@@ -230,12 +257,22 @@ belong to later milestones.
   short. Capability gates stay `unresolved` until tolerances are chosen (A39).
   The reducer-loss probe (A15) has only seen scripted receipts.
 - Ablations do not resume: one that stops partway keeps its runs, and a rerun
-  needs a new `ablation_id` (A41).
+  needs a new `ablation_id` (A41). Ablations do not run RLM arms yet.
+- RLM kernel state is recorded only as JSON committed with `commit_state`
+  (A43); anything left only in kernel memory is lost with the process, and
+  restarting from committed state is not implemented (A36). The kernel runs
+  with the same lack of sandbox as Pi's `bash` (A38).
+- The optimizer only runs scripted trials with a scripted reflection, so an
+  accepted candidate says the loop works, not that the harness improved
+  (A32). Its gates need every capability tolerance declared and none is
+  chosen (A47); the only cases are unreviewed, so every split is exploratory
+  (A48). GEPA's own state file is scratch, not the record (A46).
 
-## Next: live ablation and the RLM extension
+## Next: live runs
 
-Run the M3b ablation on a real model once a model and budget are authorized,
-with capability-gate tolerances predeclared (A18, A39) and long-horizon cases
-(SOL_PI_DELTA §5); the RLM Pi extension (S1r); semantic restart of Pi runs (A36). Before comparisons: a human
-review of the M2 cases, an ORCA run on licensed hardware, and justified
-tolerances (A6, A18).
+Run the M3b ablation and an M4 search on a real model once a model and
+budget are authorized, with capability-gate tolerances predeclared (A18, A39,
+A47) and long-horizon cases (SOL_PI_DELTA §5); RLM arms in ablations;
+semantic restart of Pi runs from committed state (A36); a sandbox for `bash`
+and the kernel (A38). Before comparisons: a human review of the M2 cases, an
+ORCA run on licensed hardware, and justified tolerances (A6, A18).

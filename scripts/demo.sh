@@ -6,7 +6,8 @@
 # M2 then records authentic ORCA outputs, exports and imports them, and grades
 # the ORCA 6.0 TD-DFT case against ORCA 5.0 with the discrepancy left unresolved.
 # M3 runs the pinned Pi agent on a case under a scripted provider (synthetic),
-# and M3b runs the SoL-Pi add-one ablation over those arms (synthetic).
+# and M3b runs the SoL-Pi add-one ablation over those arms (synthetic). M4 runs
+# the RLM arm S1r and a two-trial-batch GEPA search, both scripted (synthetic).
 # Every command runs with networking disabled when `unshare -rn` is available.
 set -euo pipefail
 
@@ -110,6 +111,50 @@ PYEOF
   onoda ablation run "$ROOT/tests/ablation_fixtures/spec.yaml" --store ./abl-store \
     --evaluator-store ./abl-evaluator --work-dir ./abl-work \
     | jq -c '{evidence, verdicts, non_dominated}'
+  say "M4: the RLM arm S1r (ipython tool, seed candidate; synthetic)"
+  onoda pi run orca6-water-mp2 --variant S1r --run-id pi-s1r --store ./pi-store --work-dir ./pi-work-s1r \
+    --script script.json --ladder ladder.md --synthetic-ladder | jq -c '{status, complete, invocations}'
+  onoda pi replay pi-s1r --store ./pi-store --work-dir ./pi-replay-s1r | jq -c '{status, requests}'
+  say "M4: GEPA search behind the SoL-Pi gates (scripted trials and reflection; synthetic)"
+  onoda optimize seed | jq -c '{digest, components: (.components | keys)}'
+  onoda optimize split --case orca6-water-mp2 --case orca6-dvb-tddft --case orca5-dvb-tddft \
+    --seed 1 --final-count 1 --cases-root "$ROOT/cases" > split.json
+  jq -c '{acceptance, final, exploratory}' split.json
+  mkdir -p opt-scripts
+  "$PY" - <<'PYEOF'
+import json
+from onoda.ablation.contract import CAPABILITY_METRICS
+from onoda.science.contract import case_manifests, load_case
+from onoda.science.orca_parser import parse_orca_output
+call = lambda i, name, **a: {"type": "toolCall", "id": f"c{i}", "name": name, "arguments": a}
+for cid in ("orca6-water-mp2", "orca6-dvb-tddft", "orca5-dvb-tddft"):
+    ((_, out),) = load_case(case_manifests()[cid]).output_bytes.items()
+    e = parse_orca_output(out).final_energy
+    turns = [[call(1, "case_input")], [call(2, "orca_run")],
+             [call(3, "report_states", final_energy={"text": e.value, "unit": e.units})],
+             [{"type": "text", "text": "reported"}]]
+    with open(f"opt-scripts/{cid}.json", "w") as f:
+        json.dump({"schema": "onoda.pi-script/1", "source": "scripts/demo.sh",
+                   "turns": [{"content": t} for t in turns]}, f)
+# Demo fixture: zero tolerance on every capability metric, chosen by nobody (A47).
+with open("gates.json", "w") as f:
+    json.dump({"tolerances": {"capability": {m: "0" for m in CAPABILITY_METRICS},
+                              "justification": "scripts/demo.sh fixture, not operator-chosen"},
+               "efficiency_gate": ["context_bytes.total"]}, f)
+with open("replies.json", "w") as f:  # the scripted reflection model's one reply
+    json.dump(["```\nUse the ipython REPL; copy every value exactly as printed.\n```"], f)
+PYEOF
+  onoda optimize run --split split.json --gates gates.json --variant S1r \
+    --ladder ladder.md --synthetic-ladder --scripts opt-scripts --reflection-script replies.json --cases-root "$ROOT/cases" \
+    --search-id demo-search --store ./opt-store --evaluator-store ./opt-evaluator \
+    --optimizer-store ./optimizer --work-dir ./opt-work --max-trials 8 --max-reflections 1 \
+    | jq -c '{evidence, exploratory_split, accepted: (.accepted | length), stop_reason, trials}'
+  onoda optimize status --search-id demo-search --optimizer-store ./optimizer \
+    | jq -c '.candidates[] | {origin, decision, reasons}'
+  say "a live search is refused"
+  onoda optimize run --split split.json --gates gates.json --live --search-id x --store ./x \
+    --evaluator-store ./x-e --optimizer-store ./x-o --work-dir ./x-w --max-trials 1 \
+    --max-reflections 1 || echo "(refused as expected)"
 else
   echo "(skipped: run scripts/pi-setup.sh once to install the pinned Pi runtime)"
 fi

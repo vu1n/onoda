@@ -72,7 +72,7 @@ format is fixed in `src/onoda/adapters/pi/contract.py`.
 | `render_context` | `context` event (messages after every extension's transform) and `before_provider_request` (the provider payload). A custom provider's `streamSimple(model, context)` receives `{systemPrompt, messages, tools}` directly. | The recorder loads last, so it spools exactly what the model is shown. The scripted provider spools its own request with a replay key (timestamps dropped, absolute paths aliased; A34). |
 | `propose_action` | `tool_call` event, fired before the tool executes; returning `{block: true, reason}` stops it and `event.input` is the call's arguments. | The recorder spools every call (allowed or blocked) before it runs and enforces the gateway policy there: tool allowlist, request and acquisition budgets, and no fused `then_run` that could reach a solver. |
 | `capture` | Assistant `message_end` carries the final message with `usage` (input, output, cacheRead, cacheWrite, totalTokens, cost). No request id is surfaced to extensions. | Spooled as `provider.response`; tokens as integers, Pi's cost estimate as decimal text. |
-| RLM kernel externalization | Not a Pi feature. | Not built in M3; variant S1r refuses to run. |
+| RLM kernel externalization | Not a Pi feature; an extension registers the `ipython` tool and appends to the system prompt at `before_agent_start`. | `onoda-rlm.ts` (M4, §3); variant S1r. |
 | SoL-Pi mechanism toggles | SoL-Pi reads `$PI_CODING_AGENT_DIR/sol-pi.json` at `session_start` and registers only enabled mechanisms. It uses `context`, `before_provider_request`, `tool_result`, `turn_end`, `agent_settled`, `session_before_tree`, the compaction events, `registerTool`, and `ExtensionContext.compact()` (per its `docs/compatibility.md`, and exercised here). | The runtime writes one `sol-pi.json` per variant into an isolated agent dir. ObservationPack archives under the session dir; ingest imports each archived object into the store and maps `obs_id` to its digest. |
 
 Findings that differ from the M0 sketch:
@@ -108,27 +108,48 @@ Findings that differ from the M0 sketch:
 - SoL-Pi's reducer only rewrites output of commands it recognizes as build or
   test logs, so on the task tools (`case_input`, `orca_run`) S2b is inert.
 
-## 3. How RLM kernel state is externalized through the gateway
+## 3. How RLM kernel state is externalized through the gateway (built in M4)
 
 BUILD_SPEC §4 (as revised by SOL_PI_DELTA §3): a persistent REPL is a
-working convenience, never the record. The design rule for the RLM
-extension is:
+working convenience, never the record. `pi/extensions/onoda-rlm.ts` (loaded
+after SoL-Pi and before the scripted provider and the recorder) implements
+that rule as follows:
 
-- Every value a later step depends on — a variable the recursive `rlm()`
-  call produced, a partial computation the persistent `ipython` tool holds
-  — is committed as an artifact or checkpoint field through the gateway
-  *before* any subsequent step may reference it. "Committed" means: written
-  to `core/artifacts` (content-addressed), or included in the checkpoint's
-  `context` / `visible` fields (`onoda.records.Checkpoint`).
-- A checkpoint's `capabilities` field (already in `onoda.records.Checkpoint`)
-  states `{"semantic_restart": "supported", "native_resume": "unsupported"}`
-  for any Pi/RLM-backed run: resuming means replaying committed state into
-  a fresh kernel, never reattaching to the original process (assumptions
-  register A10, A24).
-- Recursive child calls (`rlm()`) are themselves `ProposedAction` /
-  `CallRecord` pairs with `parents` set (mirroring
-  `InvocationReceipt.parents`), so a subagent tree is visible in the run
-  record instead of living only inside the parent's kernel memory.
+- **The kernel.** The `ipython` tool runs cells in `pi/rlm/onoda_rlm_kernel.py`,
+  a stdlib-only Python process speaking `onoda.rlm-kernel/1` (JSONL over an
+  AF_UNIX socket the host listens on). Every cell is spooled as `rlm.cell`
+  (code and output) joined to its `ipython` tool call; a cell that raises
+  makes the tool call fail, so the error is fed back to the model.
+- **Committed state.** Kernel variables are not the record. A value a later
+  step depends on is committed with `commit_state(name, value)`: the kernel
+  sends the JSON text, the host spools those exact bytes as `rlm.state` and
+  replies with `sha256:<hex>`. Only JSON commits (A43). Ingest stores each
+  value as an `rlm-state` artifact, and every later checkpoint carries the
+  latest digest per name under `context["pi.rlm_state"]`. Checkpoint
+  capabilities still say `semantic_restart: unsupported` for Pi runs: the
+  state a restart would replay is recorded, the restart itself is later
+  work (A36).
+- **Recursive children.** `rlm(prompt)` inside a cell spawns a child Pi
+  process with the parent's argv (its own session dir and prompt), the same
+  tools and the same recorder. Its spool is `<spool>/children/<nnnn>`, keyed
+  by `HMAC(parent key, "onoda.pi-rlm-child/<nnnn>")`, and its sessions live
+  under the parent's session dir. The parent spools `rlm.child.start` and
+  `rlm.child.end`; ingest records the child as its own run
+  `<run_id>.rlm-<nnnn>` first, then the parent's `rlm.child` event cites it
+  (commit before visible). Depth, child count and the parent's remaining
+  request budget are checked before a spawn; a refusal is spooled as
+  `rlm.child.refused` with its reason. A child's requests and cost are
+  charged to the parent (A44): `requestsUsed()` includes them, and
+  `budgets.cost_views` and the ablation's efficiency metrics sum descendant
+  runs.
+- **Replay.** `onoda pi replay` rebuilds the recorded candidate and each
+  child's recorded script, re-runs the whole tree, and fails closed if any
+  child's status or anything the model was shown changes.
+- **What is tunable.** The system prompt, tool doc, child prompt, preloaded
+  helper code and limits are a `HarnessCandidate`'s components (allowlist,
+  A45), staged as `rlm-components.json` and recorded by digest in
+  `spool.start`; `onoda optimize` searches over them with GEPA behind the
+  SoL-Pi promotion gates.
 
 ## 4. Where SoL-Pi mechanisms attach as toggleable, recorded treatments
 
@@ -196,3 +217,6 @@ live without installing either harness.
 - Prime's base Pi version and SoL-Pi compatibility (A17), needed only for
   Route B.
 - The auto-research loop behind SoL-Pi (A19).
+- The RLM extension under a real model: every `rlm()` child and `ipython`
+  cell so far ran under the scripted provider, and no GEPA reflection has
+  called a model (A32, A35).
