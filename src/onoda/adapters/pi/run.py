@@ -38,6 +38,7 @@ from onoda.adapters.pi.contract import (
 from onoda.adapters.pi.ingest import IngestResult, _read_spool, ingest_spool, recorded_script
 from onoda.adapters.pi.runtime import LiveSettings, build_launch, launch
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
+from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
 from onoda.errors import CapabilityError, OnodaError, ReplayMismatch
 from onoda.portability import imported_runs
@@ -275,11 +276,9 @@ def _check_children(store: Store, run_id: str, spool_dir: Path, key: bytes) -> N
     its recorded child run, recursively; a child the replay did not spawn, or
     spawned without a spool, is a mismatch.
     """
-    for e in store.events(run_id):
-        child = e.payload.get("child_run") if e.type == "rlm.child" else None
+    for index, child in child_links(store, run_id):
         if child is None:
             continue
-        index = e.payload["child_index"]
         child_dir = spool_dir / "children" / f"{index:04d}"
         if not (child_dir / SPOOL_EVENTS).is_file():
             raise ReplayMismatch(f"replay of {run_id}: child {index:04d} was not spawned")

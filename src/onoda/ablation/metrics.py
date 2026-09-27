@@ -25,7 +25,7 @@ from decimal import Decimal
 from onoda.ablation.contract import ACTIVATION_METRICS, CAPABILITY_METRICS, OutcomeVector
 from onoda.adapters.pi.contract import CTX_MECHANISMS
 from onoda.adapters.pi.task import CLAIM_EVALUATOR
-from onoda.budgets import descendant_runs
+from onoda.budgets import descendant_receipts
 from onoda.canonical import digest_of
 from onoda.errors import OnodaError
 from onoda.records import Evaluation, Event, InvocationReceipt
@@ -91,15 +91,11 @@ def _with_children(
     receipts: list[InvocationReceipt],
 ) -> tuple[list[InvocationReceipt], list[InvocationReceipt]]:
     """Add every RLM child run's receipts: the parent pays for its children (A44)."""
-    decisions, receipts = list(decisions), list(receipts)
-    for child in descendant_runs(store, run_id):
-        for e in store.events(child):
-            if e.type == "invocation.committed":
-                r = store.receipt(e.payload["invocation_id"])
-                receipts.append(r)
-                if r.invocation_kind == "decision":
-                    decisions.append(r)
-    return decisions, receipts
+    children = descendant_receipts(store, run_id)
+    return (
+        [*decisions, *(r for r in children if r.invocation_kind == "decision")],
+        [*receipts, *children],
+    )
 
 
 def _efficiency(

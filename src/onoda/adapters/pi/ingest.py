@@ -113,6 +113,7 @@ from onoda.adapters.pi.contract import (
     derive_child_key,
     parse_spool_line,
 )
+from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
 from onoda.context import decompose_fused_call, record_compaction
 from onoda.errors import CapabilityError, IntegrityError, MissingObjectError, OnodaError
@@ -1498,14 +1499,7 @@ def _result(store: Store, run_id: str, *, noop: bool) -> IngestResult:
             for e in events
             if e.type == "context.observation-archived"
         },
-        children=tuple(
-            e.payload["child_run"]
-            for e in sorted(
-                (e for e in events if e.type == "rlm.child"),
-                key=lambda e: e.payload["child_index"],
-            )
-            if e.payload["child_run"] is not None
-        ),
+        children=tuple(child for _, child in child_links(store, run_id) if child is not None),
         rlm_state={
             e.payload["name"]: e.payload_refs["value"] for e in events if e.type == "rlm.state"
         },
@@ -1587,19 +1581,7 @@ def recorded_script(store: Store, run_id: str) -> Script:
                 recorded_script(store, child)
                 if child is not None
                 else Script(source=f"replay:{run_id}:child-{index:04d}:no-spool", turns=())
-                for index, child in _child_runs(store, run_id)
+                for index, child in child_links(store, run_id)
             ],
         }
     )
-
-
-def _child_runs(store: Store, run_id: str) -> list[tuple[int, str | None]]:
-    """(child index, child run id or None) from the run's `rlm.child` events."""
-    found = sorted(
-        (e.payload["child_index"], e.payload["child_run"])
-        for e in store.events(run_id)
-        if e.type == "rlm.child"
-    )
-    if [index for index, _ in found] != list(range(len(found))):
-        raise IntegrityError(f"run {run_id} records child indices {[i for i, _ in found]}")
-    return found

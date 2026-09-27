@@ -21,7 +21,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
 
-from onoda.errors import BudgetExceeded
+from onoda.errors import BudgetExceeded, IntegrityError
 from onoda.records import Checkpoint, Event, InvocationReceipt, Run
 from onoda.store import Store
 
@@ -76,19 +76,53 @@ def inherited_invocation_ids(store: Store, run_id: str) -> list[str]:
     return [i for i in cp.frontier if i not in own]
 
 
+def child_links(store: Store, run_id: str) -> list[tuple[int, str | None]]:
+    """(child index, child run id or None) from the run's `rlm.child` events, by index.
+
+    The one reader of `rlm.child` links. A child whose spool was never written
+    has no run (None). Ingest numbers children 0..n-1, so a gap means the
+    store was altered.
+    """
+    found = sorted(
+        (e.payload["child_index"], e.payload["child_run"])
+        for e in store.events(run_id)
+        if e.type == "rlm.child"
+    )
+    if [index for index, _ in found] != list(range(len(found))):
+        raise IntegrityError(f"run {run_id} records child indices {[i for i, _ in found]}")
+    return found
+
+
 def descendant_runs(store: Store, run_id: str) -> list[str]:
-    """Every RLM child run under `run_id`, breadth first, each once (via `rlm.child` events)."""
+    """Every RLM child run under `run_id`, breadth first, each once."""
     found: list[str] = []
     seen = {run_id}
     pending = [run_id]
     while pending:
-        for e in store.events(pending.pop(0)):
-            child = e.payload.get("child_run") if e.type == "rlm.child" else None
+        for _, child in child_links(store, pending.pop(0)):
             if child is not None and child not in seen:
                 seen.add(child)
                 found.append(child)
                 pending.append(child)
     return found
+
+
+def descendant_receipts(
+    store: Store, run_id: str, *, exclude: Iterable[str] = ()
+) -> list[InvocationReceipt]:
+    """Every descendant run's own non-reuse receipts, each once, minus `exclude` ids.
+
+    What the parent pays for its children (A44), for cost views and ablation
+    metrics alike.
+    """
+    seen = set(exclude)
+    out = []
+    for child in descendant_runs(store, run_id):
+        for rec in _receipts(store, own_invocation_ids(store, child)):
+            if rec.invocation_kind != "reuse" and rec.invocation_id not in seen:
+                seen.add(rec.invocation_id)
+                out.append(rec)
+    return out
 
 
 def cost_views(store: Store, run_id: str) -> dict[str, Any]:
@@ -104,13 +138,7 @@ def cost_views(store: Store, run_id: str) -> dict[str, Any]:
     marginal = [r for r in own if r.invocation_kind != "reuse"]
     inherited = _receipts(store, inherited_invocation_ids(store, run_id))
     child_runs = descendant_runs(store, run_id)
-    seen_ids = {r.invocation_id for r in marginal}
-    children = []
-    for child in child_runs:
-        for rec in _receipts(store, own_invocation_ids(store, child)):
-            if rec.invocation_kind != "reuse" and rec.invocation_id not in seen_ids:
-                seen_ids.add(rec.invocation_id)
-                children.append(rec)
+    children = descendant_receipts(store, run_id, exclude=(r.invocation_id for r in marginal))
     views: dict[str, Any] = {
         "run_id": run_id,
         "marginal": summarize([*marginal, *children]),
