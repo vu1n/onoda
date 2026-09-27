@@ -76,6 +76,21 @@ def inherited_invocation_ids(store: Store, run_id: str) -> list[str]:
     return [i for i in cp.frontier if i not in own]
 
 
+def descendant_runs(store: Store, run_id: str) -> list[str]:
+    """Every RLM child run under `run_id`, breadth first, each once (via `rlm.child` events)."""
+    found: list[str] = []
+    seen = {run_id}
+    pending = [run_id]
+    while pending:
+        for e in store.events(pending.pop(0)):
+            child = e.payload.get("child_run") if e.type == "rlm.child" else None
+            if child is not None and child not in seen:
+                seen.add(child)
+                found.append(child)
+                pending.append(child)
+    return found
+
+
 def cost_views(store: Store, run_id: str) -> dict[str, Any]:
     """Cost views of one run; a Pi RLM run's marginal cost includes its child runs.
 
@@ -88,16 +103,7 @@ def cost_views(store: Store, run_id: str) -> dict[str, Any]:
     own = _receipts(store, own_invocation_ids(store, run_id))
     marginal = [r for r in own if r.invocation_kind != "reuse"]
     inherited = _receipts(store, inherited_invocation_ids(store, run_id))
-    child_runs: list[str] = []
-    seen_runs = {run_id}
-    pending = [run_id]
-    while pending:
-        for e in store.events(pending.pop(0)):
-            child = e.payload.get("child_run") if e.type == "rlm.child" else None
-            if child is not None and child not in seen_runs:
-                seen_runs.add(child)
-                child_runs.append(child)
-                pending.append(child)
+    child_runs = descendant_runs(store, run_id)
     seen_ids = {r.invocation_id for r in marginal}
     children = []
     for child in child_runs:

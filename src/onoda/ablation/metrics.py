@@ -5,6 +5,7 @@
 in. Capability metrics are copied straight from it; efficiency, activation,
 and the A15 reducer probe are all read back from the run's own events and
 invocation receipts, so nothing here re-derives what ingest already recorded.
+Efficiency also counts every RLM child run's receipts: the parent pays (A44).
 
 The A15 probe (`reducer_probe`) is a pure function over one tool result's raw
 and reduced JSON content blobs: it parses the raw text as ORCA output with
@@ -24,6 +25,7 @@ from decimal import Decimal
 from onoda.ablation.contract import ACTIVATION_METRICS, CAPABILITY_METRICS, OutcomeVector
 from onoda.adapters.pi.contract import CTX_MECHANISMS
 from onoda.adapters.pi.task import CLAIM_EVALUATOR
+from onoda.budgets import descendant_runs
 from onoda.canonical import digest_of
 from onoda.errors import OnodaError
 from onoda.records import Evaluation, Event, InvocationReceipt
@@ -74,12 +76,30 @@ def outcome_vector(store: Store, evaluation: Evaluation, *, arm: str) -> Outcome
         synthetic=run.config.get("mode") == "pi-scripted",
         status=ends[-1].payload["status"] if ends else None,
         capability={k: evaluation.metrics[k] for k in CAPABILITY_METRICS},
-        efficiency=_efficiency(store, decisions, receipts),
+        efficiency=_efficiency(store, *_with_children(store, run_id, decisions, receipts)),
         activation=_activation(events),
         reducer_probe=_reducer_probe_totals(store, events),
         mechanism_config=digest_of(sol_pi_config) if sol_pi_config is not None else None,
         evaluation_id=evaluation.evaluation_id,
     )
+
+
+def _with_children(
+    store: Store,
+    run_id: str,
+    decisions: list[InvocationReceipt],
+    receipts: list[InvocationReceipt],
+) -> tuple[list[InvocationReceipt], list[InvocationReceipt]]:
+    """Add every RLM child run's receipts: the parent pays for its children (A44)."""
+    decisions, receipts = list(decisions), list(receipts)
+    for child in descendant_runs(store, run_id):
+        for e in store.events(child):
+            if e.type == "invocation.committed":
+                r = store.receipt(e.payload["invocation_id"])
+                receipts.append(r)
+                if r.invocation_kind == "decision":
+                    decisions.append(r)
+    return decisions, receipts
 
 
 def _efficiency(

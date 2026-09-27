@@ -201,7 +201,8 @@ class AblationSpec(_Frozen):
             if arm not in VARIANTS:
                 raise ValueError(f"unknown arm {arm!r}")
             if VARIANTS[arm].rlm:
-                raise ValueError(f"arm {arm} needs the RLM extension, which is not built yet")
+                # M4 built the RLM arm, but ablation scripts carry no RLM children yet.
+                raise ValueError(f"arm {arm} is an RLM arm; ablations do not run RLM arms yet")
         if len(set(self.arms)) != len(self.arms):
             raise ValueError("arms repeat")
         if self.baseline not in self.arms:
