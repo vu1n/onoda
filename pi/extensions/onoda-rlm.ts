@@ -14,7 +14,8 @@
  * and `rlm.child.end` (after exit, before the cell sees the answer).
  *
  * A child is the same `pi` command line (same extensions, flags, provider,
- * model and tools) with its own session dir and prompt, and its own spool at
+ * model and tools) with its own session dir (`<session dir>/children/<nnnn>`)
+ * and prompt, and its own spool at
  * `<spool>/children/<nnnn>` keyed with `SpoolWriter.childKey`. Its policy caps
  * `max_requests` at the parent's remaining budget, and its spooled requests
  * (grandchildren included) are charged back to the parent (A40). A call past
@@ -112,6 +113,12 @@ function loadSettings(): Settings {
 		script: readJsonEnv<ScriptLike>(ENV_SCRIPT),
 		env: { ...process.env },
 	};
+}
+
+function parentSessionDir(): string {
+	const i = process.argv.indexOf("--session-dir");
+	if (i < 0 || !process.argv[i + 1]) throw new Error("onoda-rlm: parent argv has no --session-dir");
+	return process.argv[i + 1];
 }
 
 /** Parent argv with the session dir and the `-p` prompt replaced. */
@@ -327,7 +334,8 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 		const subdir = childSubdir(index);
 		const childSpool = join(s.spoolDir, subdir);
 		const stage = join(s.work, nnnn);
-		const sessions = join(stage, "sessions");
+		// Inside the parent's session dir, so ingest's session-dir bound covers the child.
+		const sessions = join(parentSessionDir(), "children", nnnn);
 		mkdirSync(sessions, { recursive: true });
 		mkdirSync(join(stage, "rlm"), { recursive: true });
 		const text = s.components.child_prompt.replaceAll("{context}", context ?? "").replaceAll("{prompt}", prompt);
