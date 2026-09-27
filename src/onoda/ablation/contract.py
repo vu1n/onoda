@@ -22,7 +22,8 @@ Nothing here launches Pi, reads a store, or writes anything.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+import re
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -96,13 +97,13 @@ ACTIVATION_METRICS: dict[str, str] = {
 REDUCER_PROBE_METRICS = ("reducer.evidence_lines", "reducer.evidence_lost")
 
 
+# ASCII digits only: Decimal() also accepts " 1_0 ", non-ASCII digits, and NaN.
+_DECIMAL = re.compile(r"[+-]?([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+)([eE][+-]?[0-9]+)?")
+
+
 def _decimal_text(v: str) -> str:
-    try:
-        d = Decimal(v)
-    except InvalidOperation as exc:
-        raise ValueError(f"not decimal text: {v!r}") from exc
-    if not d.is_finite():
-        raise ValueError(f"not a finite decimal: {v!r}")
+    if not _DECIMAL.fullmatch(v):
+        raise ValueError(f"not decimal text: {v!r}")
     return v
 
 

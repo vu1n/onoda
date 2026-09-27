@@ -88,21 +88,26 @@ def _efficiency(
     """EFFICIENCY_METRICS: payload bytes and request counts by role, tokens, cost, acquisitions."""
     context_bytes: dict[str, int] = defaultdict(int)
     requests: dict[str, int] = defaultdict(int)
-    tokens_total: int | None = None
-    cost_total: Decimal | None = None
+    # A total is only known when every response reported its part: an unknown
+    # cost is never zero, so one unpriced reducer call makes the run's cost unknown.
+    tokens_total: int | None = 0
+    cost_total: Decimal | None = Decimal(0)
+    responses = 0
     for r in decisions:
         bucket = _ROLE_BUCKET.get(r.metadata.get("role"))
         if bucket is None:
             continue
         requests[bucket] += 1
         context_bytes[bucket] += store.descriptor(r.inputs["context"]).size
-        if "message" in r.outputs:  # a response arrived; scripted runs still report figures (A32)
-            tokens = r.usage.units.get("totalTokens")
-            if tokens is not None:
-                tokens_total = tokens if tokens_total is None else tokens_total + tokens
-        if r.usage.cost_usd is not None:
-            cost = Decimal(r.usage.cost_usd)
-            cost_total = cost if cost_total is None else cost_total + cost
+        if "message" not in r.outputs:  # no response: nothing was billed or counted
+            continue
+        responses += 1
+        tokens = r.usage.units.get("totalTokens")
+        tokens_total = None if tokens is None or tokens_total is None else tokens_total + tokens
+        cost = r.usage.cost_usd
+        cost_total = None if cost is None or cost_total is None else cost_total + Decimal(cost)
+    if responses == 0:
+        tokens_total = cost_total = None
     acquisitions = sum(1 for r in receipts if "acquired" in r.labels)
     return {
         "context_bytes.total": str(sum(context_bytes.values())),

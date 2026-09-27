@@ -229,6 +229,8 @@ belong to later milestones.
   traffic proxy, not tokens. S2c's compaction does not trigger on runs this
   short. Capability gates stay `unresolved` until tolerances are chosen (A39).
   The reducer-loss probe (A15) has only seen scripted receipts.
+- Ablations do not resume: one that stops partway keeps its runs, and a rerun
+  needs a new `ablation_id` (A41).
 
 ## Next: live ablation and the RLM extension
 

@@ -17,6 +17,7 @@ def make_vector(
     efficiency: dict[str, str | None] | None = None,
     activation: dict[str, str] | None = None,
     reducer_probe: dict[str, str] | None = None,
+    status: str = "settled",
 ):
     from onoda.ablation.contract import OutcomeVector
 
@@ -26,7 +27,7 @@ def make_vector(
         case_id=case_id,
         model="mock-model",
         synthetic=True,
-        status="completed",
+        status=status,
         capability=capability
         or {
             "false_success_claims": "0",
@@ -461,3 +462,35 @@ def test_interaction_covers_capability_metric_too():
     assert terms["count.supported"].full_delta == "0"
     assert terms["count.supported"].sum_single_deltas == "0"
     assert terms["count.supported"].interaction == "0"
+
+
+def test_an_unsettled_run_leaves_the_comparison_unresolved():
+    # A run cut off by its budget shows fewer bytes only because it stopped early.
+    baseline = pool_arm("S1", ["c1"])
+    cut = pool(
+        [
+            make_vector(
+                arm="S2a",
+                case_id="c1",
+                status="budget-exhausted",
+                efficiency={"context_bytes.total": "10", "acquisitions": "0"},
+            )
+        ]
+    )
+    assert cut.unsettled == ("S2a-c1",)
+    comp = compare_arm(baseline, cut, FULL_TOL, EFFICIENCY_GATE)
+    assert (comp.capability_gate, comp.efficiency_gate, comp.verdict) == ("unresolved",) * 3
+
+
+def test_repeated_cases_must_match_in_count():
+    baseline = pool_arm("S1", ["a", "a", "b"])
+    candidate = pool_arm("S2a", ["a", "b"])
+    assert compare_arm(baseline, candidate, FULL_TOL, EFFICIENCY_GATE).verdict == "unresolved"
+
+
+def test_tolerances_must_be_plain_decimal_text():
+    import pytest
+
+    for bad in (" 1_0 ", "١", "NaN", "Infinity", "1\n"):
+        with pytest.raises(ValueError):
+            Tolerances(justification="t", capability={"count.missing": bad})

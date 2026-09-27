@@ -372,3 +372,26 @@ def test_reducer_probe_finds_nothing_lost_when_the_evidence_line_survives():
 def test_reducer_probe_over_non_orca_text_has_no_evidence():
     probe = reducer_probe(_content("synthetic reducer log line\n" * 5), _content("summary"))
     assert probe == {"reducer.evidence_lines": "0", "reducer.evidence_lost": "0"}
+
+
+def test_a_partly_unpriced_run_has_unknown_cost_and_tokens():
+    # An unknown cost is never zero: one unpriced reducer response makes the total unknown.
+    from types import SimpleNamespace as NS
+
+    from onoda.ablation.metrics import _efficiency
+
+    def decision(role, cost, tokens):
+        return NS(
+            metadata={"role": role},
+            inputs={"context": "ctx"},
+            outputs={"message": "m"},
+            usage=NS(cost_usd=cost, units={"totalTokens": tokens} if tokens else {}),
+        )
+
+    store = NS(descriptor=lambda _: NS(size=10))
+    priced = [decision("agent", "0.50", 100)]
+    out = _efficiency(store, priced, [])
+    assert (out["cost_usd"], out["tokens.total"]) == ("0.50", "100")
+    out = _efficiency(store, [*priced, decision("reducer", None, None)], [])
+    assert (out["cost_usd"], out["tokens.total"]) == (None, None)
+    assert out["context_bytes.total"] == "20"

@@ -56,6 +56,21 @@ def _load_yaml(path: Path, what: str) -> Any:
         raise OnodaError(f"cannot read {what} {path}: {exc}") from exc
 
 
+def _under(base: Path, rel: str, what: str) -> Path:
+    """`rel` resolved inside the spec's directory: a spec cannot point the agent at other files."""
+    path = (base / rel).resolve()
+    if not path.is_relative_to(base.resolve()):
+        raise OnodaError(f"{what} {rel!r} is outside the spec's directory")
+    return path
+
+
+def _read(path: Path, what: str) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise OnodaError(f"cannot read {what} {path}: {exc}") from exc
+
+
 def _validated(model: type, data: Any, what: str) -> Any:
     try:
         return model.model_validate(data)
@@ -75,25 +90,30 @@ def _prepare(
     spec: AblationSpec = _validated(AblationSpec, _load_yaml(spec_path, "spec"), "ablation spec")
     tolerances: Tolerances | None = None
     if spec.tolerances is not None:
-        tolerances = _validated(
-            Tolerances, _load_yaml(base / spec.tolerances, "tolerances"), "tolerances"
-        )
-    ladder = (base / spec.ladder).read_bytes() if spec.ladder is not None else None
+        path = _under(base, spec.tolerances, "tolerances")
+        tolerances = _validated(Tolerances, _load_yaml(path, "tolerances"), "tolerances")
+    ladder = None
+    if spec.ladder is not None:
+        ladder = _read(_under(base, spec.ladder, "ladder"), "ladder")
 
     manifests = case_manifests(cases_root)
     cases: dict[str, tuple[LoadedCase, Script]] = {}
     for c in spec.cases:
         if c.case_id not in manifests:
             raise OnodaError(f"unknown case {c.case_id!r}; see `onoda case list`")
-        case = load_case(manifests[c.case_id])
-        if case.manifest.split not in ALLOWED_SPLITS:
+        # The split comes from the manifest alone: a held-out case's output bytes
+        # are never opened, not even to verify their digest (A42).
+        split = (_load_yaml(manifests[c.case_id], "case manifest") or {}).get("split")
+        if split not in ALLOWED_SPLITS:
             raise OnodaError(
-                f"case {c.case_id} is in split {case.manifest.split!r}; an ablation reads only "
+                f"case {c.case_id} is in split {split!r}; an ablation reads only "
                 f"{', '.join(ALLOWED_SPLITS)} cases (A42)"
             )
+        case = load_case(manifests[c.case_id])
+        script_bytes = _read(_under(base, c.script, "script"), f"script for case {c.case_id}")
         try:
-            script = Script.model_validate_json((base / c.script).read_bytes())
-        except (OSError, ValueError) as exc:
+            script = Script.model_validate_json(script_bytes)
+        except ValueError as exc:
             raise OnodaError(f"invalid script for case {c.case_id}: {exc}") from exc
         cases[c.case_id] = (case, script)
     return spec, tolerances, ladder, cases
@@ -146,13 +166,28 @@ def run_ablation(
     cases_root: Path = CASES_ROOT,
     timeout_s: float = 300,
 ) -> tuple[str, dict[str, Any]]:
-    """Run every arm on every case, then write the report; returns (report digest, report)."""
+    """Run every arm on every case, then write the report; returns (report digest, report).
+
+    There is no resume: an ablation that stops partway keeps the runs it made,
+    and a rerun needs a new `ablation_id` (A41).
+    """
+    if store.root.resolve() == evaluator_store.root.resolve() or (
+        "agent" in evaluator_store.allowed_visibility
+    ):
+        raise OnodaError(
+            "the evaluator store must be a separate store that refuses agent-visible objects"
+        )
     spec, tolerances, ladder, cases = _prepare(Path(spec_path), cases_root)
     run_ids = [run_id_for(spec.ablation_id, a, c) for a in spec.arms for c in cases]
     if taken := [r for r in run_ids if store.has_record("run", r)]:
-        raise OnodaError(f"ablation {spec.ablation_id} already has runs: {', '.join(taken)}")
+        raise OnodaError(
+            f"ablation {spec.ablation_id} already has runs ({', '.join(taken)}); "
+            "ablations do not resume, so give the spec a new ablation_id"
+        )
+    work_dir = Path(work_dir) / spec.ablation_id
+    if work_dir.exists() and any(work_dir.iterdir()):
+        raise OnodaError(f"work directory {work_dir} is not empty")
 
-    work_dir = Path(work_dir)
     vectors: dict[str, list[OutcomeVector]] = {arm: [] for arm in spec.arms}
     for arm in spec.arms:
         needs_ladder = VARIANTS[arm].ladder

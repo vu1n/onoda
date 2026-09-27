@@ -179,3 +179,12 @@ flowchart TD
   it. Existing records keep their ids (nothing is rewritten).
 - **ABL-002:** the run's checkpoints carry the sol-pi.json itself, so the
   outcome vector's `mechanism_config` is `digest_of` that dict.
+- **Review:** structural pass merged the four direction rules into one
+  (`gates._gain`), moved `PooledArm`/`InteractionTerm` to frozen pydantic
+  models carrying the per-arm report facts, and split `run.build_report` out
+  so the report is testable without Pi (`run_ablation` now returns
+  `(digest, report)`). Correctness pass: the evaluator store must be separate;
+  unsettled runs and unequal case counts make a comparison `unresolved`;
+  partly unpriced runs report unknown cost and tokens; spec paths stay in the
+  spec directory; a held-out case's outputs are never opened; the work
+  directory is per ablation id; decimal text is ASCII-only.

@@ -14,6 +14,7 @@ domination cannot disagree about a metric's direction. All arithmetic is
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 
@@ -51,6 +52,7 @@ class PooledArm(_Frozen):
     arm: str
     case_ids: tuple[str, ...]
     runs: int
+    unsettled: tuple[str, ...]  # run ids whose spool did not end `settled`
     capability: dict[str, DecimalText | None]
     efficiency: dict[str, DecimalText | None]
     activation: dict[str, DecimalText | None]
@@ -93,6 +95,7 @@ def pool(vectors: Sequence[OutcomeVector]) -> PooledArm:
         arm=arm,
         case_ids=tuple(v.case_id for v in vectors),
         runs=len(vectors),
+        unsettled=tuple(v.run_id for v in vectors if v.status != "settled"),
         capability=_sum(list(CAPABILITY_METRICS), [v.capability for v in vectors]),
         efficiency=_sum(list(EFFICIENCY_METRICS), [v.efficiency for v in vectors]),
         activation=_sum(list(ACTIVATION_METRICS), [v.activation for v in vectors]),
@@ -149,11 +152,16 @@ def compare_arm(
 ) -> ArmComparison:
     """One candidate arm against the baseline under SoL-Pi's two gates.
 
-    A41: if the two arms' case sets differ, a run is missing on one side
-    for at least one case, so every check is `unresolved` and the verdict is
-    `unresolved` regardless of what the pooled sums happen to show.
+    A41: if the two arms did not run the same cases the same number of times,
+    or either arm has a run that did not settle (cut off by a budget, a
+    provider error, or never ended: its sums are partial), every check is
+    `unresolved` and so is the verdict, whatever the pooled sums show.
     """
-    mismatch = set(baseline.case_ids) != set(candidate.case_ids)
+    mismatch = (
+        Counter(baseline.case_ids) != Counter(candidate.case_ids)
+        or bool(baseline.unsettled)
+        or bool(candidate.unsettled)
+    )
     capability = tuple(
         _check(
             name,

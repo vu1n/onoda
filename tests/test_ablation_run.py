@@ -114,7 +114,9 @@ def test_an_ablation_id_is_never_rerun(tmp_path):
         ({"ladder": None}, "ladder"),
         ({"efficiency_gate": ["wall_clock"]}, "unknown efficiency metric"),
         ({"cases": [{"case_id": "no-such-case", "script": "water.script.json"}]}, "unknown case"),
-        ({"cases": [{"case_id": CASE_ID, "script": "missing.json"}]}, "invalid script"),
+        ({"cases": [{"case_id": CASE_ID, "script": "missing.json"}]}, "cannot read script"),
+        ({"cases": [{"case_id": CASE_ID, "script": "ladder.md"}]}, "invalid script"),
+        ({"ladder": "missing.md"}, "cannot read ladder"),
     ],
 )
 def test_bad_specs_are_refused_before_any_run(tmp_path, changes, match):
@@ -190,3 +192,25 @@ def test_report_is_built_offline_from_outcome_vectors():
     term = report["interaction"]["context_bytes.total"]
     assert term == {"full_delta": "-40", "sum_single_deltas": None, "interaction": None}
     assert report["arms"]["S2a"]["efficiency"]["cost_usd"] is None  # unreported by `lean`
+
+
+def test_the_evaluator_store_must_be_separate(tmp_path):
+    store = Store(tmp_path / "same", clock=LogicalClock())
+    for evaluator in (store, Store(tmp_path / "same", clock=LogicalClock())):
+        with pytest.raises(OnodaError, match="separate store"):
+            run_ablation(
+                FIXTURES / "spec.yaml", store=store, evaluator_store=evaluator, work_dir=tmp_path
+            )
+
+
+@pytest.mark.parametrize("key", ["ladder", "tolerances"])
+def test_spec_paths_stay_in_the_spec_directory(tmp_path, key):
+    (tmp_path / "outside.md").write_text("not for the agent\n")
+    store, evaluator = stores(tmp_path)
+    with pytest.raises(OnodaError, match="outside the spec"):
+        run_ablation(
+            spec_copy(tmp_path, **{key: "../outside.md"}),
+            store=store,
+            evaluator_store=evaluator,
+            work_dir=tmp_path / "w",
+        )
