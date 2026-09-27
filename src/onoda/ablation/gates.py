@@ -7,7 +7,7 @@ capability and efficiency gates from `ArmComparison`'s own docstring;
 efficiency metric; `interaction` puts S3's delta beside the sum of the S2a-d
 deltas, never as that sum (A41).
 
-Every "which way is better" judgement goes through `_gain`, so the gates and
+Every "which way is better" judgement goes through `gain`, so the gates and
 domination cannot disagree about a metric's direction. All arithmetic is
 `Decimal`; outputs are decimal text (A21).
 """
@@ -108,7 +108,7 @@ def pool(vectors: Sequence[OutcomeVector]) -> PooledArm:
 # --------------------------------------------------------------- compare_arm
 
 
-def _gain(name: str, baseline: str | None, candidate: str | None) -> Decimal | None:
+def gain(name: str, baseline: str | None, candidate: str | None) -> Decimal | None:
     """How much better `candidate` is than `baseline` on `name` (negative = worse)."""
     if baseline is None or candidate is None:
         return None
@@ -126,19 +126,19 @@ def _check(
     case_mismatch: bool,
 ) -> MetricCheck:
     """Capability passes if it worsens by at most `tolerance`; efficiency if strictly better."""
-    gain = None if case_mismatch else _gain(name, b, c)
+    g = None if case_mismatch else gain(name, b, c)
     result: CheckResult
-    if gain is None or (not efficiency and tolerance is None):
+    if g is None or (not efficiency and tolerance is None):
         result = "unresolved"
     elif efficiency:
-        result = "pass" if gain > 0 else "fail"  # a tie is not an improvement (A41)
+        result = "pass" if g > 0 else "fail"  # a tie is not an improvement (A41)
     else:
-        result = "pass" if -gain <= tolerance else "fail"
+        result = "pass" if -g <= tolerance else "fail"
     return MetricCheck(
         metric=name,
         baseline=b,
         candidate=c,
-        delta=None if gain is None else str(Decimal(c) - Decimal(b)),
+        delta=None if g is None else str(Decimal(c) - Decimal(b)),
         tolerance=None if efficiency or tolerance is None else str(tolerance),
         result=result,
     )
@@ -215,7 +215,7 @@ def compare_arm(
 
 def _dominates(other: PooledArm, arm: PooledArm, efficiency_gate: Sequence[str]) -> bool:
     """`other` is no worse than `arm` on every metric and better on one; unknown never dominates."""
-    gains = [_gain(n, arm.efficiency.get(n), other.efficiency.get(n)) for n in efficiency_gate]
+    gains = [gain(n, arm.efficiency.get(n), other.efficiency.get(n)) for n in efficiency_gate]
     if any(g is None for g in gains):
         return False
     return all(g >= 0 for g in gains) and any(g > 0 for g in gains)

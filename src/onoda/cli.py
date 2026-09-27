@@ -592,7 +592,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--cases-root")
     pr.add_argument(
         "--candidate",
-        help="HarnessCandidate JSON ({\"components\": {...}}); RLM variants default to the seed",
+        help='HarnessCandidate JSON ({"components": {...}}); RLM variants default to the seed',
     )
     pr.set_defaults(func=cmd_pi_run)
     rp2 = pi.add_parser("replay", help="re-run a scripted run; fails closed on any drift")

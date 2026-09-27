@@ -16,7 +16,7 @@ trial that failed has no vector, and a minibatch with one is rejected:
 nothing can be compared. GEPA's float scores play no part in the decision.
 
 `non_dominated` orders pool members' slice totals on every capability metric
-plus the spec's efficiency gate, with M3b's directions (`_gain`); an
+plus the spec's efficiency gate, with M3b's directions (`gain`); an
 unreported value never dominates.
 """
 
@@ -26,7 +26,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 from onoda.ablation.contract import CAPABILITY_METRICS, FALSE_SUCCESS, MetricCheck, OutcomeVector
-from onoda.ablation.gates import PooledArm, _gain, compare_arm, pool
+from onoda.ablation.gates import PooledArm, compare_arm, gain, pool
 from onoda.optimize.contract import GateSpec
 
 
@@ -81,8 +81,8 @@ def gate_decision(
 
 def _dominates(a: PooledArm, b: PooledArm, spec: GateSpec) -> bool:
     """`a` is no worse than `b` on every axis and better on one. Unknown never dominates."""
-    gains = [_gain(m, b.capability.get(m), a.capability.get(m)) for m in CAPABILITY_METRICS]
-    gains += [_gain(m, b.efficiency.get(m), a.efficiency.get(m)) for m in spec.efficiency_gate]
+    gains = [gain(m, b.capability.get(m), a.capability.get(m)) for m in CAPABILITY_METRICS]
+    gains += [gain(m, b.efficiency.get(m), a.efficiency.get(m)) for m in spec.efficiency_gate]
     if any(g is None for g in gains):
         return False
     return all(g >= 0 for g in gains) and any(g > 0 for g in gains)
