@@ -9,7 +9,9 @@ through the outputs, each side is `pool`ed into a `PooledArm`, and
 tolerances and efficiency gate. There is one implementation of the two gates
 in onoda, and it lives in `onoda.ablation.gates`.
 
-A proposal is accepted only on an `eligible` verdict. `unresolved` (an
+A proposal is accepted only on an `eligible` verdict, or, when the spec sets
+`capability_gain` (A52), on a passing capability gate with at least one
+capability metric strictly better than the parent (no efficiency gain needed). `unresolved` (an
 undeclared tolerance, an unsettled run, parent and child on different cases,
 an unreported efficiency metric with no other gain) is not acceptance. A
 trial that failed has no vector, and a minibatch with one is rejected:
@@ -46,9 +48,11 @@ def gate_decision(
 ) -> tuple[bool, tuple[str, ...]]:
     """Judge `child` against `parent` (pooled over the same cases) with `compare_arm`.
 
-    Returns (accepted, reasons). accepted iff the verdict is `eligible`. On
-    rejection or `unresolved` the reasons name every failing or unresolved
-    check; on acceptance they name the efficiency metrics that improved.
+    Returns (accepted, reasons). accepted iff the verdict is `eligible`, or
+    `spec.capability_gain` holds, the capability gate passes and a capability
+    metric strictly improved (A52). On rejection or `unresolved` the reasons
+    name every failing or unresolved check; on acceptance they name the
+    metrics that improved.
     """
     cmp = compare_arm(parent, child, spec.tolerances, spec.efficiency_gate)
     gains = tuple(
@@ -56,8 +60,15 @@ def gate_decision(
         for c in cmp.efficiency
         if c.result == "pass"
     )
+    capability_gains = tuple(
+        f"capability gain: {c.metric} {c.baseline} -> {c.candidate}"
+        for c in cmp.capability
+        if (g := gain(c.metric, c.baseline, c.candidate)) is not None and g > 0
+    )
     if cmp.verdict == "eligible":
         return True, gains
+    if spec.capability_gain and cmp.capability_gate == "pass" and capability_gains:
+        return True, capability_gains
     reasons: list[str] = []
     if sorted(parent.case_ids) != sorted(child.case_ids):
         reasons.append("parent and proposal were not run on the same cases")
@@ -99,10 +110,10 @@ def non_dominated(pooled: Mapping[str, PooledArm], spec: GateSpec) -> list[str]:
 
 
 class CarriesOutcome(Protocol):
-    """What the gates need from a GEPA output: the trial's vector, or None if it failed."""
+    """What the gates need from a GEPA output: one vector per repeat, None where a run failed."""
 
     @property
-    def outcome(self) -> OutcomeVector | None: ...
+    def outcomes(self) -> tuple[OutcomeVector | None, ...]: ...
 
 
 # (proposal, parent total, child total, accepted, reasons); totals are None
@@ -114,7 +125,7 @@ def pool_outputs(outputs: Sequence[CarriesOutcome] | None) -> PooledArm | None:
     """The pooled total of a batch's trials, or None if any failed or they span arms."""
     if not outputs:
         return None
-    vectors = [o.outcome for o in outputs]
+    vectors = [v for o in outputs for v in o.outcomes]
     if any(v is None for v in vectors):
         return None
     try:

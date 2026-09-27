@@ -52,12 +52,15 @@ class GateSpec(_Frozen):
     would leave every comparison `unresolved`, so the spec refuses to exist
     and the loop cannot run on a missing threshold. `efficiency_gate` names
     the efficiency metrics that may count as an improvement, declared before
-    the search (SOL_PI_DELTA §5).
+    the search (SOL_PI_DELTA §5). `capability_gain` (A52) lets a strict gain
+    on a capability metric count as the improvement too; off, the gates are
+    SoL-Pi's as published.
     """
 
     schema_: Literal["onoda.gate-spec/2"] = Field(GATE_SPEC_SCHEMA, alias="schema")
     tolerances: Tolerances
     efficiency_gate: tuple[str, ...] = Field(min_length=1)
+    capability_gain: bool = False
 
     @model_validator(mode="after")
     def _declared(self) -> GateSpec:

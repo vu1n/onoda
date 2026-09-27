@@ -8,6 +8,7 @@ tolerances here are test fixture values (A47), not operator-chosen ones.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -161,6 +162,27 @@ def test_gate_accepts_otherwise():
     assert any(r.startswith("no efficiency gain") for r in reasons)
 
 
+def test_capability_gain_counts_only_when_the_spec_allows_it():
+    # More claims supported, same cost: SoL-Pi's gates as published reject it.
+    parent, child = tot(supported=2, missing=1), tot(supported=3, missing=0)
+    ok, reasons = gate_decision(parent, child, SPEC)
+    assert not ok and reasons[0].startswith("no efficiency gain")
+    gain_spec = SPEC.model_copy(update={"capability_gain": True})
+    ok, reasons = gate_decision(parent, child, gain_spec)
+    assert ok and reasons == (
+        "capability gain: count.supported 2 -> 3",
+        "capability gain: count.missing 1 -> 0",
+    )
+    # A gain never buys a regression elsewhere, and no gain is still no gain.
+    ok, reasons = gate_decision(tot(supported=2, missing=1), tot(supported=3, fs=1), gain_spec)
+    assert not ok and "false-success increase: 0 -> 1" in reasons
+    ok, _ = gate_decision(tot(), tot(), gain_spec)
+    assert not ok
+    # Unresolved (different cases) is never accepted, however good the sums look.
+    ok, _ = gate_decision(parent, tot(supported=3, case="y"), gain_spec)
+    assert not ok
+
+
 def test_gate_does_not_accept_unresolved():
     # An unreported efficiency metric and no other gain: unresolved, not accepted.
     ok, reasons = gate_decision(tot(cost=None), tot(cost=None), SPEC)
@@ -197,7 +219,7 @@ def test_non_dominated_on_hand_built_frontier():
 
 
 def rollout_like(outcome):
-    return SimpleNamespace(outcome=outcome)
+    return SimpleNamespace(outcomes=(outcome,))
 
 
 def proposal(before, after):
@@ -520,3 +542,21 @@ def test_resume_from_run_dir_does_not_reevaluate_the_seed(tmp_path):
     other = SplitAssignment(seed=8, acceptance=("c1", "c2"), final=("f1",), exploratory=True)
     with pytest.raises(OnodaError, match="bound to another split"):
         optimize(tmp_path, SpyRunner(), reflect, split=other)
+
+
+def test_repeats_run_every_case_that_many_times_and_bind_the_search(tmp_path):
+    runner = SpyRunner()
+    result = optimize(
+        tmp_path, runner, ScriptedReflection(["EFFICIENT"]), max_reflections=1, repeats=2
+    )
+    per_pair = Counter((digest, case) for digest, case, _ in runner.calls)
+    assert per_pair and all(n % 2 == 0 for n in per_pair.values())
+    assert result.trials == len(runner.calls)
+    store, searches = journal(tmp_path, "optimizer.search")
+    assert [e.payload["repeats"] for e in searches] == [2]
+    # Every run of a proposal's minibatch is cited by its candidate record.
+    _, decisions = journal(tmp_path, "optimizer.decision")
+    decision = store.get_json(decisions[0].payload_refs["decision"])
+    assert len(decision["cases"]) == 2 and len(decision["child_total"]["case_ids"]) == 4
+    with pytest.raises(OnodaError, match="another repeat count"):
+        optimize(tmp_path, SpyRunner(), ScriptedReflection([]), max_reflections=2, repeats=3)

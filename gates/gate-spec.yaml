@@ -1,5 +1,6 @@
 # Optimizer promotion gates (A47, A49): the same zero tolerances as
 # gates/tolerances.yaml, and the ablation spec's default efficiency gate.
+# capability_gain (A52): a strict capability gain also counts as the improvement.
 schema: onoda.gate-spec/2
 tolerances:
   schema: onoda.ablation-tolerances/1
@@ -12,3 +13,4 @@ tolerances:
     count.missing: "0"
     count.unresolved: "0"
 efficiency_gate: [context_bytes.total, acquisitions]
+capability_gain: true

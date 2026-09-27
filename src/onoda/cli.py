@@ -524,6 +524,7 @@ def cmd_optimize_run(a) -> Any:
         max_trials=a.max_trials,
         max_reflections=a.max_reflections,
         minibatch_size=a.minibatch_size,
+        repeats=a.repeats,
         spend=spend,
     )
     return {
@@ -878,6 +879,9 @@ def build_parser() -> argparse.ArgumentParser:
     orun.add_argument("--max-trials", type=int, required=True, help="Pi runs, failed ones too")
     orun.add_argument("--max-reflections", type=int, required=True)
     orun.add_argument("--minibatch-size", type=int, default=2)
+    orun.add_argument(
+        "--repeats", type=int, default=1, help="runs per case per evaluation, pooled by the gates"
+    )
     orun.add_argument("--max-requests", type=int)
     orun.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
     orun.add_argument("--cases-root")

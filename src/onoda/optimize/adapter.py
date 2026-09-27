@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
@@ -177,6 +177,19 @@ class Rollout:
     verdicts: dict[str, str] = field(default_factory=dict)
     steps: tuple[TraceStep, ...] = ()  # sources in AGENT_VISIBLE_SOURCES only
     failed: str | None = None
+    repeats: tuple[Rollout, ...] = ()  # further trials of the same case and candidate
+
+    @property
+    def runs(self) -> tuple[Rollout, ...]:
+        return (self, *self.repeats)
+
+    @property
+    def outcomes(self) -> tuple[OutcomeVector | None, ...]:
+        return tuple(r.outcome for r in self.runs)
+
+    @property
+    def mean_score(self) -> Decimal:
+        return sum((r.score for r in self.runs), Decimal(0)) / len(self.runs)
 
 
 # ------------------------------------------------------------------- ledger
@@ -381,8 +394,12 @@ class OnodaAdapter:
         *,
         cases: Sequence[str],
         efficiency_gate: Sequence[str],
+        repeats: int = 1,
     ):
+        if repeats < 1:
+            raise OnodaError("repeats must be positive")
         self.runner = runner
+        self.repeats = repeats
         self.ledger = ledger
         self.cases = frozenset(cases)
         self.efficiency_gate = tuple(efficiency_gate)
@@ -442,21 +459,29 @@ class OnodaAdapter:
             raise OnodaError(f"cases outside the acceptance slice: {', '.join(outside)}")
         harness = HarnessCandidate(components=candidate)  # proposer already validated
         digest = harness.digest()
-        rollouts = [self._trial(harness, digest, case_id) for case_id in batch]
+        rollouts = [self._repeated(harness, digest, case_id) for case_id in batch]
         if batch and digest in self.awaiting_valset:
             self.awaiting_valset.discard(digest)
             self.ledger.record_valset(digest, rollouts)
         return EvaluationBatch(
             outputs=list(rollouts),
-            scores=[float(r.score) for r in rollouts],
+            scores=[float(r.mean_score) for r in rollouts],
             trajectories=list(rollouts) if capture_traces else None,
-            objective_scores=[
-                objective_scores(r.outcome, self.efficiency_gate)
-                if r.outcome is not None
-                else _failed_objectives(self.efficiency_gate)
-                for r in rollouts
-            ],
+            objective_scores=[self._objectives(r) for r in rollouts],
         )
+
+    def _repeated(self, candidate: HarnessCandidate, digest: str, case_id: str) -> Rollout:
+        """`repeats` trials of one case, as one GEPA output (the gates pool every run)."""
+        first = self._trial(candidate, digest, case_id)
+        rest = tuple(self._trial(candidate, digest, case_id) for _ in range(self.repeats - 1))
+        return replace(first, repeats=rest) if rest else first
+
+    def _objectives(self, r: Rollout) -> dict[str, float]:
+        """Per-objective mean over the repeats; any failed run fails the example."""
+        if any(v is None for v in r.outcomes):
+            return _failed_objectives(self.efficiency_gate)
+        per_run = [objective_scores(v, self.efficiency_gate) for v in r.outcomes if v is not None]
+        return {k: sum(d[k] for d in per_run) / len(per_run) for k in per_run[0]}
 
     def make_reflective_dataset(
         self,
@@ -464,7 +489,7 @@ class OnodaAdapter:
         eval_batch: EvaluationBatch[Rollout, Rollout],
         components_to_update: list[str],
     ) -> dict[str, list[dict[str, Any]]]:
-        records = [reflective_record(r) for r in eval_batch.trajectories or []]
+        records = [reflective_record(x) for r in eval_batch.trajectories or [] for x in r.runs]
         return {name: [dict(rec) for rec in records] for name in components_to_update}
 
 

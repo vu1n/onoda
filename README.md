@@ -130,6 +130,10 @@ onoda optimize run --live --split split.json --gates gates/gate-spec.yaml --vari
   --reflection-max-cost-usd 0.05 --search-max-cost-usd 5.00
 ```
 
+`--repeats N` runs every case N times per evaluation and the gates compare
+the pooled totals, which damps run-to-run variance in live runs. The chosen
+gate spec also accepts a pure capability gain (A52).
+
 The model names are an example, not a tuned choice. The search stops before
 an iteration the remaining `--search-max-cost-usd` cannot cover at the
 per-trial and per-call caps; `onoda optimize status` and the output's

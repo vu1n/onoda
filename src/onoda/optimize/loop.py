@@ -80,9 +80,20 @@ GEPA_STATE_FILE = "gepa_state.bin"
 
 REFLECTION_TEMPLATE = (
     "You are revising the `{name}` component of a scientific-agent harness. "
-    "Keep it valid for its role; only its text changes.\n\n"
+    "Keep it valid for its role; only its text changes. {format}\n\n"
     + InstructionProposalSignature.default_prompt_template
 )
+# What each component's validator requires, stated to the reflection model: a
+# live search lost half its proposals to malformed text without these.
+COMPONENT_FORMATS = {
+    "rlm.child_prompt": "It must keep the literal placeholder {prompt}.",
+    "rlm.helpers": (
+        "It is Python source code only (no JSON, no prose, no markdown); "
+        "it must parse, and should add no imports."
+    ),
+    "rlm.limits": "It is a JSON object with exactly the current keys; change only the numbers.",
+    "sol_pi.config": "It is a JSON object of the current keys mapped to true or false.",
+}
 
 
 class OptimizationResult(BaseModel):
@@ -174,7 +185,9 @@ class _Proposer:
                 {
                     "current_instruction_doc": candidate[name],
                     "dataset_with_feedback": dataset[name],
-                    "prompt_template": REFLECTION_TEMPLATE.replace("{name}", name),
+                    "prompt_template": REFLECTION_TEMPLATE.replace("{name}", name).replace(
+                        "{format}", COMPONENT_FORMATS.get(name, "It is plain text.")
+                    ),
                 }
             )
             assert isinstance(prompt, str)  # no images in an onoda dataset
@@ -239,7 +252,9 @@ def _decision_observer(
             digest,
             "accepted" if accepted else "rejected",
             reasons,
-            outcomes=tuple(r.outcome_ref for r in after if r.outcome_ref is not None),
+            outcomes=tuple(
+                x.outcome_ref for r in after for x in r.runs if x.outcome_ref is not None
+            ),
         )
         _record_candidate(ledger, rec, decision=decision_ref)
         if accepted:
@@ -248,13 +263,22 @@ def _decision_observer(
     return observe
 
 
-def _bind_search(ledger: SearchLedger, split: SplitAssignment, spec: GateSpec) -> None:
+def _bind_search(
+    ledger: SearchLedger, split: SplitAssignment, spec: GateSpec, repeats: int
+) -> None:
     split_ref = ledger.put(split.model_dump(mode="json", by_alias=True), "optimizer-split")
     spec_ref = ledger.put(spec.model_dump(mode="json", by_alias=True), "optimizer-gates")
     for e in ledger.events("optimizer.search"):
         if e.payload_refs != {"split": split_ref, "gates": spec_ref}:
             raise OnodaError(f"search {ledger.search_id} is bound to another split or gate spec")
-    ledger.event("optimizer.search", refs={"split": split_ref, "gates": spec_ref}, once=True)
+        if e.payload.get("repeats", 1) != repeats:
+            raise OnodaError(f"search {ledger.search_id} is bound to another repeat count")
+    ledger.event(
+        "optimizer.search",
+        refs={"split": split_ref, "gates": spec_ref},
+        payload={"repeats": repeats},
+        once=True,
+    )
 
 
 def _final_set(ledger: SearchLedger, spec: GateSpec) -> tuple[dict[str, PooledArm], str | None]:
@@ -293,6 +317,7 @@ def run_optimization(
     max_trials: int,
     max_reflections: int,
     minibatch_size: int = 2,
+    repeats: int = 1,
     spend: SpendCap | None = None,
 ) -> OptimizationResult:
     """Search from `seed` over `split.acceptance`; see the module docstring.
@@ -301,16 +326,17 @@ def run_optimization(
     the search; the budgets are totals for the search, not per call.
     `spend` caps a live search's money (A51): the loop stops before an
     iteration whose trials and reflection calls, at their reserves, could
-    exceed it.
+    exceed it. `repeats` runs every case that many times per evaluation; the
+    gates compare the pooled totals of all runs.
     """
-    if min(max_trials, max_reflections, minibatch_size) < 1:
-        raise OnodaError("budgets and minibatch size must be positive")
+    if min(max_trials, max_reflections, minibatch_size, repeats) < 1:
+        raise OnodaError("budgets, minibatch size and repeats must be positive")
     run_path = Path(run_dir)
     run_path.mkdir(parents=True, exist_ok=True)
     ledger = SearchLedger(
         store, search_id, max_trials=max_trials, max_reflections=max_reflections, spend=spend
     )
-    _bind_search(ledger, split, gates)
+    _bind_search(ledger, split, gates, repeats)
     seed_digest = seed.digest()
     _record_candidate(
         ledger,
@@ -325,14 +351,16 @@ def run_optimization(
     )
 
     cases = list(split.acceptance)
-    adapter = OnodaAdapter(runner, ledger, cases=cases, efficiency_gate=gates.efficiency_gate)
+    adapter = OnodaAdapter(
+        runner, ledger, cases=cases, efficiency_gate=gates.efficiency_gate, repeats=repeats
+    )
     resuming = (run_path / GEPA_STATE_FILE).exists()
     if not any(
         e.payload.get("candidate") == seed_digest for e in ledger.events("optimizer.valset")
     ):
         adapter.awaiting_valset.add(seed_digest)
 
-    iteration_cost = 2 * minibatch_size + len(cases)
+    iteration_cost = (2 * minibatch_size + len(cases)) * repeats
     n_components = len(seed.components)  # worst case: every component reflected on
     stop_reason = "stopped"
 
