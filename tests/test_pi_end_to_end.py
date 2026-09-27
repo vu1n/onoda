@@ -183,7 +183,7 @@ def test_replay_fails_closed_when_the_ladder_drifts(tmp_path, monkeypatch):
     ("variant", "kwargs"),
     [
         ("S1", {}),  # ladder variant without a ladder (A33)
-        ("S1r", {"ladder": LADDER}),  # RLM not built in M3
+        ("S1r", {}),  # the RLM arm is a ladder variant too
     ],
 )
 def test_refused_variants_commit_nothing(tmp_path, variant, kwargs):
