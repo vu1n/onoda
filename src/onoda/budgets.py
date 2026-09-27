@@ -77,16 +77,45 @@ def inherited_invocation_ids(store: Store, run_id: str) -> list[str]:
 
 
 def cost_views(store: Store, run_id: str) -> dict[str, Any]:
+    """Cost views of one run; a Pi RLM run's marginal cost includes its child runs.
+
+    An `rlm()` child is ingested as its own run and linked by the parent's
+    `rlm.child` event (A40: the parent pays). Every descendant's own
+    receipts are charged to the ancestor's marginal and full-path views,
+    each counted once, and listed under `child_runs`/`children`; a run
+    without children gets exactly the pre-M4 views.
+    """
     own = _receipts(store, own_invocation_ids(store, run_id))
     marginal = [r for r in own if r.invocation_kind != "reuse"]
     inherited = _receipts(store, inherited_invocation_ids(store, run_id))
-    return {
+    child_runs: list[str] = []
+    seen_runs = {run_id}
+    pending = [run_id]
+    while pending:
+        for e in store.events(pending.pop(0)):
+            child = e.payload.get("child_run") if e.type == "rlm.child" else None
+            if child is not None and child not in seen_runs:
+                seen_runs.add(child)
+                child_runs.append(child)
+                pending.append(child)
+    seen_ids = {r.invocation_id for r in marginal}
+    children = []
+    for child in child_runs:
+        for rec in _receipts(store, own_invocation_ids(store, child)):
+            if rec.invocation_kind != "reuse" and rec.invocation_id not in seen_ids:
+                seen_ids.add(rec.invocation_id)
+                children.append(rec)
+    views: dict[str, Any] = {
         "run_id": run_id,
-        "marginal": summarize(marginal),
+        "marginal": summarize([*marginal, *children]),
         "inherited_prefix": summarize(inherited),
-        "full_path": summarize([*inherited, *marginal]),
+        "full_path": summarize([*inherited, *marginal, *children]),
         "reused_receipts": [r.invocation_id for r in own if r.invocation_kind == "reuse"],
     }
+    if child_runs:
+        views["child_runs"] = child_runs
+        views["children"] = summarize(children)
+    return views
 
 
 def physical_cost(store: Store, run_ids: Iterable[str]) -> dict[str, Any]:

@@ -25,6 +25,19 @@ journal event that cites them:
 - a raw tool result that differs from the visible one is `context.reduced`.
 - `compaction` lines with phase `done` go through `context.record_compaction`.
 - the agent's claim is a `pi-claim` artifact cited by a `pi.claim` event.
+- RLM (M4): an `rlm.cell` joins its `ipython` call's tool receipt (the cell's
+  `code` as an input, the kernel's reply as the `cell` output, both committed
+  first). Each `rlm.state` value is an `rlm-state` artifact cited by an
+  `rlm.state` event, and every later checkpoint carries `CTX_RLM_STATE`
+  (name -> digest, latest value per name), so a checkpoint relies on committed
+  state, never on kernel memory (A39). Each child spool under
+  `children/<nnnn>/` is ingested first as its own run `<run_id>.rlm-<nnnn>`
+  (keyed with `derive_child_key`, same task, config plus `parent_run`,
+  `child_index`, `depth`), then the parent's `rlm.child` event cites it and,
+  when the child completed, its finalized checkpoint. A child whose parent
+  wrote no `rlm.child.end`, or whose spool has no `spool.end`, is recorded as
+  incomplete and cites no checkpoint. Refused calls are `rlm.child-refused`
+  events. Grandchildren nest the same way.
 
 Everything in the spool is untrusted input: every line and object is
 validated; given the launch's HMAC key, every line's chained `mac` must
@@ -44,6 +57,7 @@ import hmac
 import json
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -56,6 +70,7 @@ from onoda.adapters.pi.contract import (
     CTX_MECHANISMS,
     CTX_OBSERVATION_PACK,
     CTX_REQUESTS,
+    CTX_RLM_STATE,
     CTX_RUNTIME,
     CTX_VARIANT,
     DECIMAL_RE,
@@ -69,6 +84,7 @@ from onoda.adapters.pi.contract import (
     SPOOL_EVENTS,
     SPOOL_OBJECTS,
     TOOL_CASE_INPUT,
+    TOOL_IPYTHON,
     TOOL_ORCA_RUN,
     TOOL_REPORT,
     UNFUSABLE_COMMAND_TOKENS,
@@ -78,6 +94,11 @@ from onoda.adapters.pi.contract import (
     ProviderRequest,
     ProviderResponse,
     ReplayMismatchLine,
+    RlmCell,
+    RlmChildEnd,
+    RlmChildRefused,
+    RlmChildStart,
+    RlmState,
     Script,
     ScriptTurn,
     SpoolEnd,
@@ -86,6 +107,8 @@ from onoda.adapters.pi.contract import (
     TaskClaim,
     ToolCall,
     ToolResult,
+    canonical_state_json,
+    derive_child_key,
     parse_spool_line,
 )
 from onoda.canonical import canonical_bytes, sha256_digest
@@ -101,6 +124,9 @@ FUSED_TOOLS = frozenset({"edit", "write"})
 OBS_RECALL = "obs_recall"
 _OBS_ID = re.compile(r"^obs_[0-9a-f]{24}$")
 _SESSION_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$", re.IGNORECASE)
+CHILDREN_DIR = "children"  # RlmChildStart.spool_subdir is `children/<nnnn>`
+# Config keys ingest sets on a child run; a top-level config may not carry them.
+CHILD_CONFIG_KEYS = ("parent_run", "child_index", "depth")
 
 
 @dataclass(frozen=True)
@@ -116,6 +142,8 @@ class IngestResult:
     checkpoints: tuple[str, ...]
     claim: str | None  # digest of the last claim
     observation_pack: dict[str, str]  # obs id -> store digest
+    children: tuple[str, ...] = ()  # child run ids, in child-index order (RLM)
+    rlm_state: dict[str, str] = field(default_factory=dict)  # name -> digest, latest
 
 
 # ------------------------------------------------------------------ reading
@@ -177,6 +205,14 @@ def _cited(line: Any) -> list[str]:
             return [line.claim]
         case Compaction():
             return [line.details] if line.details else []
+        case RlmCell():
+            return [line.code, line.output]
+        case RlmChildStart():
+            return [line.prompt]
+        case RlmChildEnd():
+            return [line.answer] if line.answer else []
+        case RlmState():
+            return [line.value]
     return []
 
 
@@ -341,6 +377,8 @@ class _Analysis:
     unanswered: list[ProviderRequest]
     observation_of: dict[int, str]  # visible result seq -> archived obs id
     reducer_models: frozenset[str]
+    child_starts: dict[int, RlmChildStart] = field(default_factory=dict)
+    child_ends: dict[int, RlmChildEnd] = field(default_factory=dict)
 
 
 def _fused_steps(line: ToolCall, args: dict[str, Any], tokens: tuple[str, ...], fusion: bool):
@@ -393,6 +431,10 @@ def _analyze(
         raise OnodaError(f"agent model {start.model!r} is also the reducer model")
     tokens = tuple(t.lower() for t in (*UNFUSABLE_COMMAND_TOKENS, *config.get("unfusable", ())))
     fusion = "actionFusion" in variant.mechanisms
+    depth = config.get("depth", 0)
+    cells: set[str] = set()
+    child_starts: dict[int, RlmChildStart] = {}
+    child_ends: dict[int, RlmChildEnd] = {}
 
     calls: dict[str, _Call] = {}
     pending: dict[int, list[ProviderRequest]] = defaultdict(list)
@@ -454,8 +496,61 @@ def _analyze(
                     Claim.model_validate_json(spool.objects[line.claim])
                 except ValidationError as exc:
                     raise IntegrityError(f"claim at seq {line.seq} is not a valid Claim") from exc
+            case RlmCell() | RlmChildStart() | RlmChildEnd() | RlmChildRefused() | RlmState():
+                if not variant.rlm:
+                    raise IntegrityError(f"{line.type} at seq {line.seq} in non-RLM {variant.id}")
+                _check_rlm_line(line, spool, call_for, cells, child_starts, child_ends, depth)
     unanswered = sorted((r for rs in pending.values() for r in rs), key=lambda r: r.seq)
-    return _Analysis(calls, request_of, unanswered, observation_of, reducer_models)
+    return _Analysis(
+        calls, request_of, unanswered, observation_of, reducer_models, child_starts, child_ends
+    )
+
+
+def _check_rlm_line(
+    line: Any,
+    spool: _Spool,
+    call_for: Callable[..., _Call],
+    cells: set[str],
+    child_starts: dict[int, RlmChildStart],
+    child_ends: dict[int, RlmChildEnd],
+    depth: int,
+) -> None:
+    """One RLM line against its `ipython` call and the child sequence (M4 contract)."""
+    if not isinstance(line, RlmChildEnd):
+        call_for(line, TOOL_IPYTHON)
+    match line:
+        case RlmCell():
+            if line.tool_call_id in cells:
+                raise IntegrityError(f"second rlm.cell for {line.tool_call_id} at seq {line.seq}")
+            cells.add(line.tool_call_id)
+            try:
+                spool.objects[line.code].decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise IntegrityError(f"cell code at seq {line.seq} is not UTF-8") from exc
+            _load_json(spool.objects[line.output], f"cell output at seq {line.seq}")
+        case RlmChildStart():
+            if line.child_index != len(child_starts):
+                raise IntegrityError(f"child {line.child_index} at seq {line.seq} is out of order")
+            if line.spool_subdir != f"{CHILDREN_DIR}/{line.child_index:04d}":
+                raise IntegrityError(f"child at seq {line.seq} names {line.spool_subdir!r}")
+            if line.depth != depth + 1:
+                raise IntegrityError(f"child at seq {line.seq} has depth {line.depth}")
+            child_starts[line.child_index] = line
+        case RlmChildEnd():
+            if line.child_index not in child_starts or line.child_index in child_ends:
+                raise IntegrityError(f"rlm.child.end at seq {line.seq} ends no running child")
+            if line.cost_usd is not None and not DECIMAL_RE.match(line.cost_usd):
+                raise IntegrityError(f"child cost at seq {line.seq} is not decimal text")
+            child_ends[line.child_index] = line
+        case RlmState():
+            data = spool.objects[line.value]
+            value = _load_json(data, f"state {line.name!r} at seq {line.seq}")
+            try:
+                canonical = canonical_state_json(value).encode()
+            except ValueError as exc:  # e.g. 1e999 parses to inf
+                raise IntegrityError(f"state {line.name!r} at seq {line.seq}: {exc}") from exc
+            if canonical != data:
+                raise IntegrityError(f"state {line.name!r} at seq {line.seq} is not canonical")
 
 
 # ------------------------------------------------------------------ writing
@@ -481,10 +576,14 @@ class _Writer:
         archive: _Archive,
         analysis: _Analysis,
         sol_pi_config: dict[str, Any] | None,
+        children: dict[int, _Child] | None = None,
+        ingest_child: Callable[[_Plan], None] | None = None,
     ):
         self.store, self.run, self.task = store, run, task
         self.spool, self.archive, self.a = spool, archive, analysis
         self.sol_pi_config = sol_pi_config
+        self.children = children or {}
+        self.ingest_child = ingest_child
         self.scripted = spool.start.scripted
         self.synthetic = ["synthetic"] if self.scripted else []
         self.runtime = {"pi": spool.start.pi_version, "sol_pi": spool.start.sol_pi_commit}
@@ -502,6 +601,8 @@ class _Writer:
         self.decision_by_index: dict[int, str] = {}
         self.raw_content: dict[str, str] = {}
         self.raw_details: dict[str, str] = {}
+        self.rlm_state: dict[str, str] = {}  # name -> digest of its latest committed value
+        self.cells: dict[str, tuple[RlmCell, str, str]] = {}  # tool_call_id -> (line, code, out)
 
     # ---- primitives
 
@@ -579,6 +680,16 @@ class _Writer:
         if key in self.done:
             return
         events = self.store.events(self.run.run_id)
+        context: dict[str, Any] = {
+            CTX_VARIANT: self.spool.start.variant,
+            CTX_MECHANISMS: self.sol_pi_config,
+            CTX_RUNTIME: self.runtime,
+            CTX_OBSERVATION_PACK: dict(self.obs),
+            CTX_COMPACTIONS: list(self.compactions),
+            CTX_REQUESTS: self.requests,
+        }
+        if self.rlm_state:  # absent before any commit_state, so M3 checkpoints are unchanged
+            context[CTX_RLM_STATE] = dict(self.rlm_state)
         cp = Checkpoint.new(
             run_id=self.run.run_id,
             boundary=boundary,
@@ -587,14 +698,7 @@ class _Writer:
             visible=dict(self.visible),
             phase=phase,
             policy={"mode": self.run.config["mode"], "variant": self.run.config["variant"]},
-            context={
-                CTX_VARIANT: self.spool.start.variant,
-                CTX_MECHANISMS: self.sol_pi_config,
-                CTX_RUNTIME: self.runtime,
-                CTX_OBSERVATION_PACK: dict(self.obs),
-                CTX_COMPACTIONS: list(self.compactions),
-                CTX_REQUESTS: self.requests,
-            },
+            context=context,
             jobs=list(self.jobs),
             quiescent=True,
             capabilities=dict(PI_CAPABILITIES),
@@ -641,6 +745,10 @@ class _Writer:
             TaskClaim: self.on_claim,
             Compaction: self.on_compaction,
             ReplayMismatchLine: self.on_mismatch,
+            RlmCell: self.on_cell,
+            RlmChildEnd: self.on_child_end,
+            RlmChildRefused: self.on_child_refused,
+            RlmState: self.on_state,
         }
         for line in self.spool.lines[1:]:
             if handler := handlers.get(type(line)):
@@ -823,7 +931,16 @@ class _Writer:
     ) -> str:
         line = call.line
         inp = self.obj(line.input, "application/json", ["pi-tool-input", *self.synthetic])
-        outputs = {}
+        inputs, outputs = {"input": inp}, {}
+        metadata: dict[str, Any] = {}
+        if cell := self.cells.get(line.tool_call_id):
+            inputs["code"], outputs["cell"] = cell[1], cell[2]
+            metadata["cell"] = {
+                "cell_index": cell[0].cell_index,
+                "is_error": cell[0].is_error,
+                "truncated": cell[0].truncated,
+                "spool_seq": cell[0].seq,
+            }
         if content:
             outputs["result"] = content
         if raw:
@@ -835,9 +952,9 @@ class _Writer:
         parent = self.decision_by_index.get(line.request_index)
         return self.invocation(
             f"tool:{line.seq}",
-            self.tool_spec(line.tool_name, {"input": inp}),
+            self.tool_spec(line.tool_name, inputs),
             "read" if line.tool_name in READ_TOOLS else "execution",
-            {"input": inp},
+            inputs,
             outputs,
             status=status,
             parents=[parent] if parent else [],
@@ -847,6 +964,7 @@ class _Writer:
                 "request_index": line.request_index,
                 "fused": call.fused is not None,
                 "result": "recorded" if content else "missing",
+                **metadata,
             },
             labels=list(self.synthetic),
             usage=Usage(units={}, measured=False, simulated=self.scripted, cost_usd=None),
@@ -980,8 +1098,105 @@ class _Writer:
             },
         )
 
+    # ---- RLM (M4)
+
+    def on_cell(self, line: RlmCell) -> None:
+        code = self.store.put_bytes(
+            self.spool.objects[line.code],
+            media_type="text/x-python",
+            encoding="utf-8",
+            labels=["rlm-cell-code", *self.synthetic],
+        ).digest
+        output = self.obj(line.output, "application/json", ["rlm-cell-output"])
+        self.cells[line.tool_call_id] = (line, code, output)
+
+    def on_state(self, line: RlmState) -> None:
+        value = self.obj(line.value, "application/json", ["rlm-state", *self.synthetic])
+        self.rlm_state[line.name] = value
+        self.emit(
+            f"rlm-state:{line.seq}",
+            "rlm.state",
+            payload={"name": line.name, "tool_call_id": line.tool_call_id},
+            refs={"value": value},
+        )
+
+    def on_child_refused(self, line: RlmChildRefused) -> None:
+        self.emit(
+            f"rlm-refused:{line.seq}",
+            "rlm.child-refused",
+            payload={
+                "tool_call_id": line.tool_call_id,
+                "reason": line.reason,
+                "detail": line.detail,
+            },
+        )
+
+    def on_child_end(self, line: RlmChildEnd) -> None:
+        self.child(self.children[line.child_index])
+
+    def child(self, child: _Child) -> None:
+        """The child's run first, then the `rlm.child` event citing it (commit before visible)."""
+        key = f"rlm-child:{child.start.child_index}"
+        if key in self.done:
+            return
+        if child.plan is not None:
+            assert self.ingest_child is not None
+            self.ingest_child(child.plan)
+        finalized = _finalized(self.store, child.run_id) if child.plan is not None else None
+        if child.end is None:
+            reason = "the parent recorded no rlm.child.end"
+        elif child.plan is None:
+            reason = "the child wrote no spool"
+        elif child.plan.spool.end is None or finalized is None:
+            reason = "the child's spool has no spool.end"
+        else:
+            reason = None
+        prompt = self.store.put_bytes(
+            self.spool.objects[child.start.prompt],
+            media_type="text/plain",
+            encoding="utf-8",
+            labels=["rlm-child-prompt", *self.synthetic],
+        ).digest
+        refs = {"prompt": prompt}
+        if child.plan is not None:
+            refs["run"] = record_ref("run", child.run_id)
+        if reason is None:
+            assert finalized is not None
+            refs["checkpoint"] = record_ref("checkpoint", finalized)
+        end = child.end
+        if end is not None and end.answer is not None:
+            refs["answer"] = self.store.put_bytes(
+                self.spool.objects[end.answer],
+                media_type="text/plain",
+                encoding="utf-8",
+                labels=["rlm-child-answer", *self.synthetic],
+            ).digest
+        self.emit(
+            key,
+            "rlm.child",
+            payload={
+                "child_index": child.start.child_index,
+                "child_run": child.run_id if child.plan is not None else None,
+                "tool_call_id": child.start.tool_call_id,
+                "depth": child.start.depth,
+                "max_requests": child.start.max_requests,
+                "complete": reason is None,
+                "incomplete_reason": reason,
+                "finalized": finalized if reason is None else None,
+                "exit_code": end.exit_code if end else None,
+                "end_status": end.end_status if end else None,
+                "requests": end.requests if end else None,
+                "cost_usd": end.cost_usd if end else None,
+                "error": end.error if end else None,
+            },
+            refs=refs,
+        )
+
     def flush(self) -> None:
         """Receipts for what the spool left unanswered, then archives no result cited."""
+        for index in sorted(self.children):
+            if self.children[index].end is None:  # the parent stopped while it ran
+                self.child(self.children[index])
         for req in self.a.unanswered:
             self.decision(req, None)
         for call in self.a.calls.values():
@@ -1029,6 +1244,155 @@ def _sol_pi_config(config: dict[str, Any]) -> dict[str, Any] | None:
     return _decimalize(cfg)
 
 
+@dataclass(frozen=True)
+class _Plan:
+    """One spool read and validated, with its children's plans: nothing written yet."""
+
+    run_id: str
+    cfg: dict[str, Any]
+    spool: _Spool
+    run: Run | None  # the run record if an earlier ingest wrote it
+    noop: bool  # the run was already fully ingested
+    archive: _Archive = field(default_factory=_Archive)
+    analysis: _Analysis | None = None
+    sol_pi_config: dict[str, Any] | None = None
+    children: dict[int, _Child] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _Child:
+    start: RlmChildStart
+    end: RlmChildEnd | None
+    run_id: str
+    plan: _Plan | None  # None: the child wrote no spool
+
+
+def _finalized(store: Store, run_id: str) -> str | None:
+    """Digest of a run's finalized checkpoint, if it has one."""
+    found = [d for _, d, cp in store.checkpoints(run_id) if cp.boundary == "finalized"]
+    return found[-1] if found else None
+
+
+def _child_spool(spool_dir: Path, start: RlmChildStart) -> Path | None:
+    """The child's spool dir, or None when the child never wrote a spool line."""
+    path = spool_dir / start.spool_subdir
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_dir():
+        raise IntegrityError(f"child spool {start.spool_subdir} is not a directory")
+    events = path / SPOOL_EVENTS
+    if not events.exists() and not events.is_symlink():
+        return None
+    return None if _read_file(events, "child spool").strip() == b"" else path
+
+
+def _prepare(
+    store: Store,
+    spool_dir: Path,
+    *,
+    run_id: str,
+    task: TaskManifest,
+    cfg: dict[str, Any],
+    key: bytes | None,
+    expected_session_dir: Path | None,
+) -> _Plan:
+    """Read and check one spool and, recursively, its children's; raises before any write."""
+    check_safe_id(run_id, "run id")
+    spool = _read_spool(spool_dir, key)
+    run = None
+    if store.has_record("run", run_id):
+        run = store.run_record(run_id)
+        if (
+            run.config.get("spool") != spool.digest
+            or run.task != task.task_id
+            or {k: v for k, v in run.config.items() if k != "spool"} != cfg
+        ):
+            raise OnodaError(f"run {run_id} was ingested from a different spool or config")
+        if any(e.type == "pi.ingested" for e in store.events(run_id)):
+            return _Plan(run_id, cfg, spool, run, noop=True)
+    archive = _read_archive(spool.start, expected_session_dir)
+    analysis = _analyze(spool, archive, task, cfg)
+    sol_pi_config = _sol_pi_config(cfg)
+    named = {start.spool_subdir for start in analysis.child_starts.values()}
+    children_dir = spool_dir / CHILDREN_DIR
+    if children_dir.is_symlink() or (children_dir.exists() and not children_dir.is_dir()):
+        raise IntegrityError(f"{CHILDREN_DIR} in spool {spool_dir.name} is not a directory")
+    if children_dir.is_dir():
+        for path in sorted(children_dir.iterdir()):
+            if f"{CHILDREN_DIR}/{path.name}" not in named:
+                raise IntegrityError(f"{CHILDREN_DIR}/{path.name} is named by no rlm.child.start")
+    children: dict[int, _Child] = {}
+    for index, start in sorted(analysis.child_starts.items()):
+        end = analysis.child_ends.get(index)
+        child_run = f"{run_id}.rlm-{index:04d}"
+        child_dir = _child_spool(spool_dir, start)
+        plan = None
+        if child_dir is None:
+            if end is not None and (end.end_status is not None or end.requests):
+                raise IntegrityError(
+                    f"child {index} ended {end.end_status} after {end.requests} requests "
+                    "but its spool is missing"
+                )
+        else:
+            child_cfg = {**cfg, "parent_run": run_id, "child_index": index, "depth": start.depth}
+            plan = _prepare(
+                store,
+                child_dir,
+                run_id=child_run,
+                task=task,
+                cfg=child_cfg,
+                key=derive_child_key(key, index) if key is not None else None,
+                expected_session_dir=expected_session_dir,
+            )
+            child_end = plan.spool.end
+            if end is not None and end.end_status != (child_end.status if child_end else None):
+                raise IntegrityError(
+                    f"child {index}: the parent recorded end status {end.end_status!r}, "
+                    f"its spool says {child_end.status if child_end else None!r}"
+                )
+        children[index] = _Child(start, end, child_run, plan)
+    return _Plan(run_id, cfg, spool, run, False, archive, analysis, sol_pi_config, children)
+
+
+def _write(store: Store, plan: _Plan, task: TaskManifest, labels: tuple[str, ...]) -> None:
+    """Ingest a prepared spool; children are written when the parent reaches them."""
+    if plan.noop:
+        return
+    run = plan.run
+    if run is None:
+        cfg = plan.cfg
+        scripted = cfg["mode"] == "pi-scripted"
+        run_labels = [
+            cfg["mode"],
+            cfg["variant"],
+            *(["synthetic"] if scripted else []),
+            *(["rlm-child"] if "parent_run" in cfg else []),
+            *labels,
+        ]
+        run = Run.new(
+            run_id=plan.run_id,
+            experiment_id=PI_EXPERIMENT,
+            task=task.task_id,
+            config={**cfg, "spool": plan.spool.digest},
+            quota_id=f"{PI_EXPERIMENT}-unbudgeted",
+            created_at=store.clock.now(),
+            labels=list(dict.fromkeys(run_labels)),
+        )
+        store.put_record(run)
+    assert plan.analysis is not None
+    _Writer(
+        store,
+        run,
+        task,
+        plan.spool,
+        plan.archive,
+        plan.analysis,
+        plan.sol_pi_config,
+        plan.children,
+        lambda child: _write(store, child, task, labels),
+    ).ingest()
+
+
 def ingest_spool(
     store: Store,
     spool_dir: str | Path,
@@ -1049,46 +1413,32 @@ def ingest_spool(
     named `output` pins the acquisition: any other acquired bytes are refused.
     `key` (the launch's spool HMAC key; never stored) makes every line's mac
     mandatory; `expected_session_dir` (the launch's sessions dir) bounds where
-    ObservationPack archives are read from.
+    ObservationPack archives are read from. RLM child spools under
+    `children/` are read, checked and ingested as runs of their own; every
+    spool in the tree is validated before anything is written.
     """
     check_safe_id(run_id, "run id")
     cfg = _run_config(config)
-    spool = _read_spool(Path(spool_dir), key)
-    if store.has_record("run", run_id):
-        run = store.run_record(run_id)
-        if (
-            run.config.get("spool") != spool.digest
-            or run.task != task.task_id
-            or {k: v for k, v in run.config.items() if k != "spool"} != cfg
-        ):
-            raise OnodaError(f"run {run_id} was ingested from a different spool or config")
-        if any(e.type == "pi.ingested" for e in store.events(run_id)):
-            return _result(store, run_id, noop=True)
-    else:
-        run = None
-    archive = _read_archive(
-        spool.start, Path(expected_session_dir) if expected_session_dir is not None else None
+    if reserved := sorted(k for k in CHILD_CONFIG_KEYS if k in cfg):
+        raise OnodaError(f"config keys {reserved} are set by ingest for RLM child runs")
+    plan = _prepare(
+        store,
+        Path(spool_dir),
+        run_id=run_id,
+        task=task,
+        cfg=cfg,
+        key=key,
+        expected_session_dir=(
+            Path(expected_session_dir) if expected_session_dir is not None else None
+        ),
     )
-    analysis = _analyze(spool, archive, task, cfg)
-    sol_pi_config = _sol_pi_config(cfg)
+    if plan.noop:
+        return _result(store, run_id, noop=True)
     for name, digest in task.inputs.items():
         if not store.has_object(digest):
             raise MissingObjectError(digest, f"task input {name!r} -> {digest} is not committed")
     store.put_record(task)
-    if run is None:
-        scripted = cfg["mode"] == "pi-scripted"
-        run_labels = [cfg["mode"], cfg["variant"], *(["synthetic"] if scripted else []), *labels]
-        run = Run.new(
-            run_id=run_id,
-            experiment_id=PI_EXPERIMENT,
-            task=task.task_id,
-            config={**cfg, "spool": spool.digest},
-            quota_id=f"{PI_EXPERIMENT}-unbudgeted",
-            created_at=store.clock.now(),
-            labels=list(dict.fromkeys(run_labels)),
-        )
-        store.put_record(run)
-    _Writer(store, run, task, spool, archive, analysis, sol_pi_config).ingest()
+    _write(store, plan, task, tuple(labels))
     return _result(store, run_id, noop=False)
 
 
@@ -1112,6 +1462,17 @@ def _result(store: Store, run_id: str, *, noop: bool) -> IngestResult:
             e.payload["obs_id"]: e.payload_refs["observation"]
             for e in events
             if e.type == "context.observation-archived"
+        },
+        children=tuple(
+            e.payload["child_run"]
+            for e in sorted(
+                (e for e in events if e.type == "rlm.child"),
+                key=lambda e: e.payload["child_index"],
+            )
+            if e.payload["child_run"] is not None
+        ),
+        rlm_state={
+            e.payload["name"]: e.payload_refs["value"] for e in events if e.type == "rlm.state"
         },
     )
 
@@ -1158,6 +1519,12 @@ def recorded_script(store: Store, run_id: str) -> Script:
     which reproduces the recorded ending (the provider failing at that
     request). Replaying it re-runs Pi under the recorded responses and fails
     closed on any context drift (A34).
+
+    RLM: `children` holds each child run's recorded script, rebuilt the same
+    way (recursively), in child-index order, so a child's scripted provider
+    also fails closed on drift. A refused call spawned nothing and has no
+    entry; a child that wrote no spool gets an empty script so later indices
+    still line up. Children of an incomplete child are included if recorded.
     """
     store.run_record(run_id)
     by_role: dict[str, list[ScriptTurn]] = {"agent": [], "reducer": [], "compaction-summary": []}
@@ -1181,5 +1548,23 @@ def recorded_script(store: Store, run_id: str) -> Script:
             "turns": by_role["agent"],
             "reducer_turns": by_role["reducer"],
             "summary_turns": by_role["compaction-summary"],
+            "children": [
+                recorded_script(store, child)
+                if child is not None
+                else Script(source=f"replay:{run_id}:child-{index:04d}:no-spool", turns=())
+                for index, child in _child_runs(store, run_id)
+            ],
         }
     )
+
+
+def _child_runs(store: Store, run_id: str) -> list[tuple[int, str | None]]:
+    """(child index, child run id or None) from the run's `rlm.child` events."""
+    found = sorted(
+        (e.payload["child_index"], e.payload["child_run"])
+        for e in store.events(run_id)
+        if e.type == "rlm.child"
+    )
+    if [index for index, _ in found] != list(range(len(found))):
+        raise IntegrityError(f"run {run_id} records child indices {[i for i, _ in found]}")
+    return found
