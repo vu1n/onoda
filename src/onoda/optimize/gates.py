@@ -26,7 +26,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 from onoda.ablation.contract import CAPABILITY_METRICS, FALSE_SUCCESS, MetricCheck, OutcomeVector
-from onoda.ablation.gates import PooledArm, compare_arm, gain, pool
+from onoda.ablation.gates import PooledArm, compare_arm, dominates, gain, pool
 from onoda.optimize.contract import GateSpec
 
 
@@ -83,9 +83,7 @@ def _dominates(a: PooledArm, b: PooledArm, spec: GateSpec) -> bool:
     """`a` is no worse than `b` on every axis and better on one. Unknown never dominates."""
     gains = [gain(m, b.capability.get(m), a.capability.get(m)) for m in CAPABILITY_METRICS]
     gains += [gain(m, b.efficiency.get(m), a.efficiency.get(m)) for m in spec.efficiency_gate]
-    if any(g is None for g in gains):
-        return False
-    return all(g >= 0 for g in gains) and any(g > 0 for g in gains)
+    return dominates(gains)
 
 
 def non_dominated(pooled: Mapping[str, PooledArm], spec: GateSpec) -> list[str]:

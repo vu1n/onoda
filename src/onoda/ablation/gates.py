@@ -213,12 +213,19 @@ def compare_arm(
 # ------------------------------------------------------------- non_dominated
 
 
-def _dominates(other: PooledArm, arm: PooledArm, efficiency_gate: Sequence[str]) -> bool:
-    """`other` is no worse than `arm` on every metric and better on one; unknown never dominates."""
-    gains = [gain(n, arm.efficiency.get(n), other.efficiency.get(n)) for n in efficiency_gate]
-    if any(g is None for g in gains):
+def dominates(gains: Sequence[Decimal | None]) -> bool:
+    """Per-metric `gain`s say no worse everywhere and better somewhere; unknown never dominates."""
+    known = [g for g in gains if g is not None]
+    if len(known) != len(gains):
         return False
-    return all(g >= 0 for g in gains) and any(g > 0 for g in gains)
+    return all(g >= 0 for g in known) and any(g > 0 for g in known)
+
+
+def _dominates(other: PooledArm, arm: PooledArm, efficiency_gate: Sequence[str]) -> bool:
+    """`other` beats `arm` on the efficiency gate's metrics (ablation dominance, A41)."""
+    return dominates(
+        [gain(n, arm.efficiency.get(n), other.efficiency.get(n)) for n in efficiency_gate]
+    )
 
 
 def non_dominated(

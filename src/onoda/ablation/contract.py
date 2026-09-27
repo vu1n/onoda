@@ -26,9 +26,10 @@ import re
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, ConfigDict, Field, field_validator, model_validator
 
 from onoda.adapters.pi.contract import VARIANTS
+from onoda.records import Frozen as _Frozen
 
 SPEC_SCHEMA = "onoda.ablation-spec/1"
 REPORT_SCHEMA = "onoda.ablation-report/1"
@@ -108,10 +109,6 @@ def _decimal_text(v: str) -> str:
 
 
 DecimalText = Annotated[str, AfterValidator(_decimal_text)]  # A21: never a float
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class OutcomeVector(_Frozen):

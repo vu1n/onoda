@@ -27,7 +27,7 @@ from __future__ import annotations
 import random
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from onoda.ablation.contract import (
     CAPABILITY_METRICS,
@@ -35,12 +35,13 @@ from onoda.ablation.contract import (
     FALSE_SUCCESS,
     Tolerances,
 )
+from onoda.records import Frozen
 
 GATE_SPEC_SCHEMA = "onoda.gate-spec/2"
 
 
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+class _Frozen(Frozen):
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class GateSpec(_Frozen):

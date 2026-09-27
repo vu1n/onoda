@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from onoda.canonical import sha256_digest
 from onoda.errors import IntegrityError, OnodaError
+from onoda.records import Frozen as _Frozen
 
 Digest = str
 
@@ -40,10 +41,6 @@ ProblemState = Literal["missing", "error", "ambiguous", "unresolved"]
 Termination = Literal["normal", "error", "absent"]
 ScfStatus = Literal["converged", "not_converged", "absent"]
 StatesStatus = Literal["present", "absent", "ambiguous", "error"]
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class Evidence(_Frozen):

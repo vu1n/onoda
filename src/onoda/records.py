@@ -38,6 +38,12 @@ BOUNDARIES: tuple[Boundary, ...] = (
 )
 
 
+class Frozen(BaseModel):
+    """Base of onoda's immutable schemas: frozen, and unknown fields are refused."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 class Record(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

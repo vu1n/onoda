@@ -38,6 +38,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from onoda.canonical import digest_of
+from onoda.records import Frozen as _Frozen
 
 # ------------------------------------------------------------------ runtime pins
 
@@ -113,10 +114,6 @@ MECHANISMS: tuple[Mechanism, ...] = (
     "onlineContextCompact",
     "actionFusion",
 )
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class Variant(_Frozen):

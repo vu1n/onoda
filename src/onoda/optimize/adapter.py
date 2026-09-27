@@ -47,7 +47,7 @@ from decimal import Decimal
 from typing import Any, Literal, Protocol
 
 from gepa.core.adapter import EvaluationBatch
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
 from onoda.ablation.contract import CAPABILITY_METRICS, EFFICIENCY_METRICS, OutcomeVector
 from onoda.adapters.pi.contract import HarnessCandidate
@@ -55,15 +55,12 @@ from onoda.adapters.pi.task import VERDICTS
 from onoda.errors import OnodaError
 from onoda.optimize.contract import CandidateRecord, Decision
 from onoda.optimize.gates import pool_outputs
+from onoda.records import Frozen as _Frozen
 from onoda.store import Store, check_safe_id
 
 AGENT_VISIBLE_SOURCES = ("agent", "raw_tool")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._?-]{0,63}$")
 _GRADED = ("count.supported", "count.missing", "count.contradicted", "count.unsupported")
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class TraceStep(_Frozen):
