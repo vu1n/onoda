@@ -53,6 +53,7 @@ from onoda.ablation.contract import CAPABILITY_METRICS, EFFICIENCY_METRICS, Outc
 from onoda.adapters.pi.contract import HarnessCandidate
 from onoda.adapters.pi.task import VERDICTS
 from onoda.errors import OnodaError
+from onoda.optimize.contract import CandidateRecord, Decision
 from onoda.optimize.gates import pool_outputs
 from onoda.store import Store, check_safe_id
 
@@ -261,6 +262,28 @@ class Pending:
     feedback: str
     iteration: int
     components: dict[str, str]
+
+    def record(
+        self,
+        search_id: str,
+        candidate: str | None,
+        decision: Decision,
+        reasons: tuple[str, ...],
+        outcomes: tuple[str, ...] = (),
+    ) -> CandidateRecord:
+        """This proposal's `CandidateRecord` (`candidate` is None when it is invalid)."""
+        return CandidateRecord(
+            search_id=search_id,
+            iteration=self.iteration,
+            candidate=candidate,
+            components=self.components,
+            parents=(self.parent,),
+            origin="reflection",
+            decision=decision,
+            reasons=reasons,
+            outcomes=outcomes,
+            feedback=self.feedback,
+        )
 
 
 class OnodaAdapter:

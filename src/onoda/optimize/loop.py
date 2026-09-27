@@ -178,22 +178,12 @@ class _Proposer:
             new_texts[name] = InstructionProposalSignature.output_extractor(out)["new_instruction"]
 
         child = {**candidate, **new_texts}
+        pend = Pending(parent, feedback, iteration, child)
 
         def refuse(
             decision: Decision, reasons: tuple[str, ...], digest: str | None
         ) -> dict[str, str]:
-            rec = CandidateRecord(
-                search_id=self.search_id,
-                iteration=iteration,
-                candidate=digest,
-                components=child,
-                parents=(parent,),
-                origin="reflection",
-                decision=decision,
-                reasons=reasons,
-                feedback=feedback,
-            )
-            _record_candidate(ledger, rec)
+            _record_candidate(ledger, pend.record(self.search_id, digest, decision, reasons))
             return {}  # no texts: GEPA runs nothing for this proposal
 
         try:
@@ -202,7 +192,7 @@ class _Proposer:
             return refuse("invalid", tuple(str(e["msg"]) for e in exc.errors()), None)
         if child == candidate:
             return refuse("rejected", ("proposal is identical to its parent",), parent)
-        self.adapter.pending[harness.digest()] = Pending(parent, feedback, iteration, child)
+        self.adapter.pending[harness.digest()] = pend
         return new_texts
 
 
@@ -234,17 +224,12 @@ def _decision_observer(
         }
         decision_ref = ledger.put(decision, "optimizer-decision")
         ledger.event("optimizer.decision", refs={"decision": decision_ref})
-        rec = CandidateRecord(
-            search_id=search_id,
-            iteration=pend.iteration,
-            candidate=digest,
-            components=pend.components,
-            parents=(pend.parent,),
-            origin="reflection",
-            decision="accepted" if accepted else "rejected",
-            reasons=reasons,
+        rec = pend.record(
+            search_id,
+            digest,
+            "accepted" if accepted else "rejected",
+            reasons,
             outcomes=tuple(r.outcome_ref for r in after if r.outcome_ref is not None),
-            feedback=pend.feedback,
         )
         _record_candidate(ledger, rec, decision=decision_ref)
         if accepted:
@@ -376,20 +361,8 @@ def run_optimization(
         except BudgetExhausted as exc:  # backstop; the stopper normally ends first
             stop_reason = str(exc)
             for digest, pend in adapter.pending.items():
-                _record_candidate(
-                    ledger,
-                    CandidateRecord(
-                        search_id=search_id,
-                        iteration=pend.iteration,
-                        candidate=digest,
-                        components=pend.components,
-                        parents=(pend.parent,),
-                        origin="reflection",
-                        decision="rejected",
-                        reasons=("budget spent before the gates could judge it",),
-                        feedback=pend.feedback,
-                    ),
-                )
+                reasons = ("budget spent before the gates could judge it",)
+                _record_candidate(ledger, pend.record(search_id, digest, "rejected", reasons))
             adapter.pending.clear()
 
     front, final_ref = _final_set(ledger, gates)
