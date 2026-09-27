@@ -9,8 +9,8 @@ information, and evaluator. This module fixes:
 - the declared ablation (`AblationSpec`), read from YAML by the runner;
 - the outcome vector of one run (`OutcomeVector`) and the metric names in it,
   each with the direction that counts as better;
-- the predeclared tolerances (`Tolerances`) and the per-arm gate result
-  (`ArmComparison`) of SoL-Pi's two-gate rule.
+- the predeclared tolerances (`Tolerances`, read through `tolerance_for`) and
+  the per-arm gate result (`ArmComparison`) of SoL-Pi's two-gate rule.
 
 Every number is a decimal string (A21). A metric with no declared tolerance
 makes its capability check `unresolved`, never `pass` (A18, A39). Scripted
@@ -23,9 +23,9 @@ Nothing here launches Pi, reads a store, or writes anything.
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from onoda.adapters.pi.contract import VARIANTS
 
@@ -79,14 +79,15 @@ EFFICIENCY_METRICS: dict[str, Direction] = {
     "acquisitions": "lower",  # orca_run acquisitions: the solver-submission stand-in
 }
 
-# Activation counts per mechanism (SOL_PI_DELTA §3: log activation per run),
-# each read from the ingested run's own events:
+# Activation counts per mechanism (SOL_PI_DELTA §3: log activation per run):
+# the number of the run's own events of this type. `actionFusion` counts
+# distinct `fusion_id`s instead, since one fused call is several steps.
 ACTIVATION_METRICS: dict[str, str] = {
-    "observationPack": "context.observation-archived events",
-    "observationPack.recall": "context.page events (obs_recall calls)",
-    "evidencePreservingReducer": "context.reduced events",
-    "onlineContextCompact": "context.compaction events",
-    "actionFusion": "distinct fusion_id values over context.fused-step events",
+    "observationPack": "context.observation-archived",
+    "observationPack.recall": "context.page",  # obs_recall calls
+    "evidencePreservingReducer": "context.reduced",
+    "onlineContextCompact": "context.compaction",
+    "actionFusion": "context.fused-step",
 }
 
 # A15 probe: over each `context.reduced` result, the deterministic parser's
@@ -105,6 +106,9 @@ def _decimal_text(v: str) -> str:
     return v
 
 
+DecimalText = Annotated[str, AfterValidator(_decimal_text)]  # A21: never a float
+
+
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -118,27 +122,12 @@ class OutcomeVector(_Frozen):
     model: str  # the agent model id the spool recorded (A16: activation per model)
     synthetic: bool  # scripted provider (A32)
     status: str | None  # `spool.end` status; None if the spool never ended
-    capability: dict[str, str]  # CAPABILITY_METRICS keys -> decimal text
-    efficiency: dict[str, str | None]  # EFFICIENCY_METRICS keys; None = not reported
-    activation: dict[str, str]  # ACTIVATION_METRICS keys -> integer text
-    reducer_probe: dict[str, str]  # REDUCER_PROBE_METRICS keys -> integer text
+    capability: dict[str, DecimalText]  # CAPABILITY_METRICS keys
+    efficiency: dict[str, DecimalText | None]  # EFFICIENCY_METRICS keys; None = not reported
+    activation: dict[str, DecimalText]  # ACTIVATION_METRICS keys, integer text
+    reducer_probe: dict[str, DecimalText]  # REDUCER_PROBE_METRICS keys, integer text
     mechanism_config: str | None  # digest of the sol-pi.json in force, or None (S0/S1)
     evaluation_id: str
-
-    @field_validator("capability", "activation", "reducer_probe")
-    @classmethod
-    def _decimals(cls, v: dict[str, str]) -> dict[str, str]:
-        for x in v.values():
-            _decimal_text(x)
-        return v
-
-    @field_validator("efficiency")
-    @classmethod
-    def _optional_decimals(cls, v: dict[str, str | None]) -> dict[str, str | None]:
-        for x in v.values():
-            if x is not None:
-                _decimal_text(x)
-        return v
 
 
 class Tolerances(_Frozen):
@@ -154,7 +143,7 @@ class Tolerances(_Frozen):
 
     schema_: Literal["onoda.ablation-tolerances/1"] = Field(TOLERANCES_SCHEMA, alias="schema")
     justification: str = Field(min_length=1)
-    capability: dict[str, str] = Field(default_factory=dict)
+    capability: dict[str, DecimalText] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -164,18 +153,22 @@ class Tolerances(_Frozen):
         for name, tol in v.items():
             if name not in CAPABILITY_METRICS:
                 raise ValueError(f"unknown capability metric {name!r}")
-            if Decimal(_decimal_text(tol)) < 0:
+            if Decimal(tol) < 0:
                 raise ValueError(f"tolerance for {name} is negative: {tol}")
         if FALSE_SUCCESS in v and Decimal(v[FALSE_SUCCESS]) != 0:
             raise ValueError("false_success_claims tolerance is fixed at 0 (SOL_PI_DELTA §5)")
         return v
 
-    def allowed(self, metric: str) -> Decimal | None:
-        """The declared tolerance for `metric`, or None if undeclared."""
-        if metric == FALSE_SUCCESS:
-            return Decimal(0)
-        tol = self.capability.get(metric)
-        return None if tol is None else Decimal(tol)
+
+def tolerance_for(metric: str, tolerances: Tolerances | None) -> Decimal | None:
+    """The declared tolerance for `metric`, or None if undeclared (or no file was given).
+
+    `false_success_claims` is always zero, with or without a file (SOL_PI_DELTA §5).
+    """
+    if metric == FALSE_SUCCESS:
+        return Decimal(0)
+    tol = tolerances.capability.get(metric) if tolerances is not None else None
+    return None if tol is None else Decimal(tol)
 
 
 class AblationCase(_Frozen):
@@ -231,10 +224,10 @@ Verdict = Literal["eligible", "rejected", "unresolved"]
 
 class MetricCheck(_Frozen):
     metric: str
-    baseline: str | None
-    candidate: str | None
-    delta: str | None  # candidate - baseline; None when either side is unreported
-    tolerance: str | None  # capability only
+    baseline: DecimalText | None
+    candidate: DecimalText | None
+    delta: DecimalText | None  # candidate - baseline; None when either side is unreported
+    tolerance: DecimalText | None  # capability only
     result: CheckResult  # efficiency: pass = strictly better, fail = not better
 
 

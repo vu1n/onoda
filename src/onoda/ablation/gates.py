@@ -7,65 +7,78 @@ capability and efficiency gates from `ArmComparison`'s own docstring;
 efficiency metric; `interaction` puts S3's delta beside the sum of the S2a-d
 deltas, never as that sum (A41).
 
-All arithmetic is `Decimal`; outputs are decimal text (A21).
+Every "which way is better" judgement goes through `_gain`, so the gates and
+domination cannot disagree about a metric's direction. All arithmetic is
+`Decimal`; outputs are decimal text (A21).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from decimal import Decimal
 
 from onoda.ablation.contract import (
     ACTIVATION_METRICS,
     CAPABILITY_METRICS,
     EFFICIENCY_METRICS,
-    FALSE_SUCCESS,
     REDUCER_PROBE_METRICS,
     SINGLE_ARMS,
     ArmComparison,
     CheckResult,
+    DecimalText,
     MetricCheck,
     OutcomeVector,
     Tolerances,
     Verdict,
+    _Frozen,
+    tolerance_for,
 )
+
+DIRECTIONS = {**CAPABILITY_METRICS, **EFFICIENCY_METRICS}
 
 # --------------------------------------------------------------------- pool
 
 
-@dataclass(frozen=True)
-class PooledArm:
-    """One arm's runs, summed metric-by-metric.
+class PooledArm(_Frozen):
+    """One arm's runs, summed metric-by-metric, plus the per-arm facts the report shows.
 
     A metric is `None` when any run left it unreported (a missing key for
     `capability`/`activation`/`reducer_probe`, or a `None` value for
-    `efficiency`).
+    `efficiency`). `activation_by_model[model][mechanism]` is "k/n": of the n
+    runs with that model, k activated the mechanism (A16).
     """
 
     arm: str
     case_ids: tuple[str, ...]
     runs: int
-    capability: dict[str, str | None]
-    efficiency: dict[str, str | None]
-    activation: dict[str, str | None]
-    reducer_probe: dict[str, str | None]
+    capability: dict[str, DecimalText | None]
+    efficiency: dict[str, DecimalText | None]
+    activation: dict[str, DecimalText | None]
+    reducer_probe: dict[str, DecimalText | None]
+    mechanism_config: tuple[str, ...]  # distinct sol-pi.json digests; "none" = SoL-Pi off
+    activation_by_model: dict[str, dict[str, str]]
 
 
 def _sum(names: Sequence[str], dicts: Sequence[Mapping[str, str | None]]) -> dict[str, str | None]:
     """Sum `names` across `dicts`; `None` if any dict lacks the name or reports `None`."""
     out: dict[str, str | None] = {}
     for name in names:
-        total = Decimal(0)
-        reported = True
-        for d in dicts:
-            v = d.get(name)
-            if v is None:
-                reported = False
-                break
-            total += Decimal(v)
-        out[name] = str(total) if reported else None
+        values = [d.get(name) for d in dicts]
+        out[name] = None if None in values else str(sum(map(Decimal, values), Decimal(0)))
     return out
+
+
+def _activation_by_model(vectors: Sequence[OutcomeVector]) -> dict[str, dict[str, str]]:
+    by_model: dict[str, list[OutcomeVector]] = {}
+    for v in vectors:
+        by_model.setdefault(v.model, []).append(v)
+    return {
+        model: {
+            m: f"{sum(1 for v in runs if int(v.activation.get(m, '0')) > 0)}/{len(runs)}"
+            for m in ACTIVATION_METRICS
+        }
+        for model, runs in sorted(by_model.items())
+    }
 
 
 def pool(vectors: Sequence[OutcomeVector]) -> PooledArm:
@@ -84,99 +97,48 @@ def pool(vectors: Sequence[OutcomeVector]) -> PooledArm:
         efficiency=_sum(list(EFFICIENCY_METRICS), [v.efficiency for v in vectors]),
         activation=_sum(list(ACTIVATION_METRICS), [v.activation for v in vectors]),
         reducer_probe=_sum(list(REDUCER_PROBE_METRICS), [v.reducer_probe for v in vectors]),
+        mechanism_config=tuple(sorted({v.mechanism_config or "none" for v in vectors})),
+        activation_by_model=_activation_by_model(vectors),
     )
 
 
 # --------------------------------------------------------------- compare_arm
 
 
-def _capability_tolerance(name: str, tolerances: Tolerances | None) -> Decimal | None:
-    if tolerances is not None:
-        return tolerances.allowed(name)
-    return Decimal(0) if name == FALSE_SUCCESS else None
+def _gain(name: str, baseline: str | None, candidate: str | None) -> Decimal | None:
+    """How much better `candidate` is than `baseline` on `name` (negative = worse)."""
+    if baseline is None or candidate is None:
+        return None
+    delta = Decimal(candidate) - Decimal(baseline)
+    return -delta if DIRECTIONS[name] == "lower" else delta
 
 
-def _capability_check(
+def _check(
     name: str,
-    baseline: PooledArm,
-    candidate: PooledArm,
-    tolerances: Tolerances | None,
+    b: str | None,
+    c: str | None,
+    tolerance: Decimal | None,
+    *,
+    efficiency: bool,
     case_mismatch: bool,
 ) -> MetricCheck:
-    b = baseline.capability.get(name)
-    c = candidate.capability.get(name)
-    tol = _capability_tolerance(name, tolerances)
+    """Capability passes if it worsens by at most `tolerance`; efficiency if strictly better."""
+    gain = None if case_mismatch else _gain(name, b, c)
     result: CheckResult
-    delta: Decimal | None
-    if case_mismatch or b is None or c is None:
+    if gain is None or (not efficiency and tolerance is None):
         result = "unresolved"
-        delta = None
+    elif efficiency:
+        result = "pass" if gain > 0 else "fail"  # a tie is not an improvement (A41)
     else:
-        bd, cd = Decimal(b), Decimal(c)
-        delta = cd - bd
-        direction = CAPABILITY_METRICS[name]
-        worsening = delta if direction == "lower" else -delta
-        if tol is None:
-            result = "unresolved"
-        elif worsening <= tol:
-            result = "pass"
-        else:
-            result = "fail"
+        result = "pass" if -gain <= tolerance else "fail"
     return MetricCheck(
         metric=name,
         baseline=b,
         candidate=c,
-        delta=str(delta) if delta is not None else None,
-        tolerance=str(tol) if tol is not None else None,
+        delta=None if gain is None else str(Decimal(c) - Decimal(b)),
+        tolerance=None if efficiency or tolerance is None else str(tolerance),
         result=result,
     )
-
-
-def _efficiency_check(
-    name: str,
-    baseline: PooledArm,
-    candidate: PooledArm,
-    case_mismatch: bool,
-) -> MetricCheck:
-    b = baseline.efficiency.get(name)
-    c = candidate.efficiency.get(name)
-    result: CheckResult
-    delta: Decimal | None
-    if case_mismatch or b is None or c is None:
-        result = "unresolved"
-        delta = None
-    else:
-        bd, cd = Decimal(b), Decimal(c)
-        delta = cd - bd
-        direction = EFFICIENCY_METRICS[name]
-        better = cd < bd if direction == "lower" else cd > bd
-        result = "pass" if better else "fail"
-    return MetricCheck(
-        metric=name,
-        baseline=b,
-        candidate=c,
-        delta=str(delta) if delta is not None else None,
-        tolerance=None,
-        result=result,
-    )
-
-
-def _capability_gate(checks: Sequence[MetricCheck]) -> CheckResult:
-    results = {c.result for c in checks}
-    if "fail" in results:
-        return "fail"
-    if "unresolved" in results:
-        return "unresolved"
-    return "pass"
-
-
-def _efficiency_gate(checks: Sequence[MetricCheck]) -> CheckResult:
-    results = {c.result for c in checks}
-    if "pass" in results:
-        return "pass"
-    if "unresolved" in results:
-        return "unresolved"
-    return "fail"
 
 
 def compare_arm(
@@ -191,20 +153,41 @@ def compare_arm(
     for at least one case, so every check is `unresolved` and the verdict is
     `unresolved` regardless of what the pooled sums happen to show.
     """
-    case_mismatch = set(baseline.case_ids) != set(candidate.case_ids)
+    mismatch = set(baseline.case_ids) != set(candidate.case_ids)
     capability = tuple(
-        _capability_check(name, baseline, candidate, tolerances, case_mismatch)
+        _check(
+            name,
+            baseline.capability.get(name),
+            candidate.capability.get(name),
+            tolerance_for(name, tolerances),
+            efficiency=False,
+            case_mismatch=mismatch,
+        )
         for name in CAPABILITY_METRICS
     )
     efficiency = tuple(
-        _efficiency_check(name, baseline, candidate, case_mismatch) for name in efficiency_gate
+        _check(
+            name,
+            baseline.efficiency.get(name),
+            candidate.efficiency.get(name),
+            None,
+            efficiency=True,
+            case_mismatch=mismatch,
+        )
+        for name in efficiency_gate
     )
-    capability_gate = _capability_gate(capability)
-    efficiency_gate_result = _efficiency_gate(efficiency)
+    cap = {c.result for c in capability}
+    capability_gate: CheckResult = (
+        "fail" if "fail" in cap else "unresolved" if "unresolved" in cap else "pass"
+    )
+    eff = {c.result for c in efficiency}
+    efficiency_gate_result: CheckResult = (
+        "pass" if "pass" in eff else "unresolved" if "unresolved" in eff else "fail"
+    )
     verdict: Verdict
-    if capability_gate == "fail" or efficiency_gate_result == "fail":
+    if "fail" in (capability_gate, efficiency_gate_result):
         verdict = "rejected"
-    elif capability_gate == "pass" and efficiency_gate_result == "pass":
+    elif capability_gate == efficiency_gate_result == "pass":
         verdict = "eligible"
     else:
         verdict = "unresolved"
@@ -222,29 +205,12 @@ def compare_arm(
 # ------------------------------------------------------------- non_dominated
 
 
-def _dominates(
-    candidate_vals: Mapping[str, str | None],
-    other_vals: Mapping[str, str | None],
-    efficiency_gate: Sequence[str],
-) -> bool:
-    """True if `other` dominates `candidate`: <= on every metric, < on at least one."""
-    at_least_as_good_on_all = True
-    strictly_better_on_one = False
-    for name in efficiency_gate:
-        cv = candidate_vals.get(name)
-        ov = other_vals.get(name)
-        if cv is None or ov is None:
-            return False  # can't establish domination without both values
-        cd, od = Decimal(cv), Decimal(ov)
-        direction = EFFICIENCY_METRICS[name]
-        not_worse = od <= cd if direction == "lower" else od >= cd
-        better = od < cd if direction == "lower" else od > cd
-        if not not_worse:
-            at_least_as_good_on_all = False
-            break
-        if better:
-            strictly_better_on_one = True
-    return at_least_as_good_on_all and strictly_better_on_one
+def _dominates(other: PooledArm, arm: PooledArm, efficiency_gate: Sequence[str]) -> bool:
+    """`other` is no worse than `arm` on every metric and better on one; unknown never dominates."""
+    gains = [_gain(n, arm.efficiency.get(n), other.efficiency.get(n)) for n in efficiency_gate]
+    if any(g is None for g in gains):
+        return False
+    return all(g >= 0 for g in gains) and any(g > 0 for g in gains)
 
 
 def non_dominated(
@@ -258,36 +224,31 @@ def non_dominated(
     (candidates named in `comparisons` at least).
     """
     eligible = [c.arm for c in comparisons if c.verdict == "eligible"]
-    kept = []
-    for arm in eligible:
-        beaten = any(
-            other != arm
-            and _dominates(pooled[arm].efficiency, pooled[other].efficiency, efficiency_gate)
+    return tuple(
+        arm
+        for arm in eligible
+        if not any(
+            other != arm and _dominates(pooled[other], pooled[arm], efficiency_gate)
             for other in eligible
         )
-        if not beaten:
-            kept.append(arm)
-    return tuple(kept)
+    )
 
 
 # ----------------------------------------------------------------- interaction
 
 
-@dataclass(frozen=True)
-class InteractionTerm:
+class InteractionTerm(_Frozen):
     """S3's delta from baseline beside the sum of the S2a-d deltas, and their difference."""
 
-    full_delta: str | None
-    sum_single_deltas: str | None
-    interaction: str | None
+    full_delta: DecimalText | None
+    sum_single_deltas: DecimalText | None
+    interaction: DecimalText | None
 
 
 def _delta(field_name: str, base: PooledArm, other: PooledArm, name: str) -> Decimal | None:
     b = getattr(base, field_name).get(name)
     o = getattr(other, field_name).get(name)
-    if b is None or o is None:
-        return None
-    return Decimal(o) - Decimal(b)
+    return None if b is None or o is None else Decimal(o) - Decimal(b)
 
 
 def interaction(
@@ -304,27 +265,19 @@ def interaction(
     delta as though it were the S2a-d sum).
     """
     result: dict[str, InteractionTerm] = {}
-    fields = [("capability", CAPABILITY_METRICS), ("efficiency", EFFICIENCY_METRICS)]
+    fields = (("capability", CAPABILITY_METRICS), ("efficiency", EFFICIENCY_METRICS))
     for field_name, metrics in fields:
         for name in metrics:
             full_delta = _delta(field_name, baseline, full, name)
-            sum_single: Decimal | None = Decimal(0)
-            for arm in SINGLE_ARMS:
-                single = singles.get(arm)
-                if single is None:
-                    sum_single = None
-                    break
-                d = _delta(field_name, baseline, single, name)
-                if d is None:
-                    sum_single = None
-                    break
-                sum_single += d
-            interaction_val = (
-                None if full_delta is None or sum_single is None else full_delta - sum_single
-            )
+            singles_d = [
+                _delta(field_name, baseline, singles[a], name) if a in singles else None
+                for a in SINGLE_ARMS
+            ]
+            sum_single = None if None in singles_d else sum(singles_d, Decimal(0))
+            both = full_delta is not None and sum_single is not None
             result[name] = InteractionTerm(
-                full_delta=str(full_delta) if full_delta is not None else None,
-                sum_single_deltas=str(sum_single) if sum_single is not None else None,
-                interaction=str(interaction_val) if interaction_val is not None else None,
+                full_delta=None if full_delta is None else str(full_delta),
+                sum_single_deltas=None if sum_single is None else str(sum_single),
+                interaction=str(full_delta - sum_single) if both else None,
             )
     return result

@@ -424,7 +424,7 @@ def cmd_ablation_run(a) -> Any:
     from onoda.ablation.run import run_ablation
     from onoda.science.contract import CASES_ROOT
 
-    report = run_ablation(
+    digest, report = run_ablation(
         a.spec,
         store=_store(a.store),
         evaluator_store=_store(a.evaluator_store, evaluator=True),
@@ -433,9 +433,9 @@ def cmd_ablation_run(a) -> Any:
         timeout_s=a.timeout,
     )
     if a.full:
-        return report
+        return {"report": digest, **report}
     return {
-        "report": report["report"],
+        "report": digest,
         "ablation_id": report["ablation_id"],
         "evidence": report["evidence"],
         "caveat": report["caveat"],

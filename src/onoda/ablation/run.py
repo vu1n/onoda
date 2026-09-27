@@ -16,15 +16,12 @@ it exercises the harness and is not a verdict about any mechanism.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from onoda.ablation.contract import (
-    ACTIVATION_METRICS,
     ALLOWED_SPLITS,
     FULL_ARM,
     REPORT_SCHEMA,
@@ -33,7 +30,7 @@ from onoda.ablation.contract import (
     OutcomeVector,
     Tolerances,
 )
-from onoda.ablation.gates import PooledArm, compare_arm, interaction, non_dominated, pool
+from onoda.ablation.gates import compare_arm, interaction, non_dominated, pool
 from onoda.ablation.metrics import outcome_vector
 from onoda.adapters.pi.contract import VARIANTS, Script
 from onoda.adapters.pi.ingest import run_claim
@@ -70,31 +67,10 @@ def run_id_for(ablation_id: str, arm: str, case_id: str) -> str:
     return f"{ablation_id}-{arm}-{case_id}"
 
 
-def _activation_by_model(vectors: Sequence[OutcomeVector]) -> dict[str, dict[str, str]]:
-    """model -> mechanism -> "k/n": of n runs with that model, k activated the mechanism (A16)."""
-    by_model: dict[str, list[OutcomeVector]] = {}
-    for v in vectors:
-        by_model.setdefault(v.model, []).append(v)
-    return {
-        model: {
-            m: f"{sum(1 for v in runs if int(v.activation[m]) > 0)}/{len(runs)}"
-            for m in ACTIVATION_METRICS
-        }
-        for model, runs in sorted(by_model.items())
-    }
-
-
-def run_ablation(
-    spec_path: str | Path,
-    *,
-    store: Store,
-    evaluator_store: Store,
-    work_dir: str | Path,
-    cases_root: Path = CASES_ROOT,
-    timeout_s: float = 300,
-) -> dict[str, Any]:
-    """Run every arm on every case, then write and return the report (with its digest)."""
-    spec_path = Path(spec_path)
+def _prepare(
+    spec_path: Path, cases_root: Path
+) -> tuple[AblationSpec, Tolerances | None, bytes | None, dict[str, tuple[LoadedCase, Script]]]:
+    """Everything an ablation reads, validated before the first Pi launch."""
     base = spec_path.parent
     spec: AblationSpec = _validated(AblationSpec, _load_yaml(spec_path, "spec"), "ablation spec")
     tolerances: Tolerances | None = None
@@ -120,7 +96,58 @@ def run_ablation(
         except (OSError, ValueError) as exc:
             raise OnodaError(f"invalid script for case {c.case_id}: {exc}") from exc
         cases[c.case_id] = (case, script)
+    return spec, tolerances, ladder, cases
 
+
+def build_report(
+    spec: AblationSpec,
+    tolerances: Tolerances | None,
+    vectors: dict[str, list[OutcomeVector]],
+) -> dict[str, Any]:
+    """The report body for `vectors` (arm -> its runs), without store references. Pure."""
+    pooled = {arm: pool(vs) for arm, vs in vectors.items()}
+    baseline = pooled[spec.baseline]
+    comparisons = [
+        compare_arm(baseline, pooled[arm], tolerances, spec.efficiency_gate)
+        for arm in spec.arms
+        if arm != spec.baseline
+    ]
+    # S3 against the sum of S2a-d only makes sense from a baseline below both.
+    interaction_terms = None
+    if FULL_ARM in pooled and spec.baseline not in (FULL_ARM, *SINGLE_ARMS):
+        singles = {a: pooled[a] for a in SINGLE_ARMS if a in pooled}
+        interaction_terms = {
+            m: t.model_dump(mode="json")
+            for m, t in interaction(baseline, singles, pooled[FULL_ARM]).items()
+        }
+    all_vectors = [v for vs in vectors.values() for v in vs]
+    synthetic = any(v.synthetic for v in all_vectors)
+    return {
+        "schema": REPORT_SCHEMA,
+        "ablation_id": spec.ablation_id,
+        "evidence": "synthetic" if synthetic else "measured",
+        "caveat": SYNTHETIC_CAVEAT if synthetic else None,
+        "baseline": spec.baseline,
+        "efficiency_gate": list(spec.efficiency_gate),
+        "runs": [v.model_dump(mode="json") for v in all_vectors],
+        "arms": {arm: p.model_dump(mode="json") for arm, p in pooled.items()},
+        "comparisons": [c.model_dump(mode="json") for c in comparisons],
+        "non_dominated": list(non_dominated(comparisons, pooled, spec.efficiency_gate)),
+        "interaction": interaction_terms,
+    }
+
+
+def run_ablation(
+    spec_path: str | Path,
+    *,
+    store: Store,
+    evaluator_store: Store,
+    work_dir: str | Path,
+    cases_root: Path = CASES_ROOT,
+    timeout_s: float = 300,
+) -> tuple[str, dict[str, Any]]:
+    """Run every arm on every case, then write the report; returns (report digest, report)."""
+    spec, tolerances, ladder, cases = _prepare(Path(spec_path), cases_root)
     run_ids = [run_id_for(spec.ablation_id, a, c) for a in spec.arms for c in cases]
     if taken := [r for r in run_ids if store.has_record("run", r)]:
         raise OnodaError(f"ablation {spec.ablation_id} already has runs: {', '.join(taken)}")
@@ -153,28 +180,13 @@ def run_ablation(
             )
             vectors[arm].append(outcome_vector(store, evaluation, arm=arm))
 
-    pooled: dict[str, PooledArm] = {arm: pool(vs) for arm, vs in vectors.items()}
-    baseline = pooled[spec.baseline]
-    comparisons = [
-        compare_arm(baseline, pooled[arm], tolerances, spec.efficiency_gate)
-        for arm in spec.arms
-        if arm != spec.baseline
-    ]
-    interaction_terms = None
-    if FULL_ARM in pooled and spec.baseline not in (FULL_ARM, *SINGLE_ARMS):
-        singles = {a: pooled[a] for a in SINGLE_ARMS if a in pooled}
-        interaction_terms = {
-            m: asdict(t) for m, t in interaction(baseline, singles, pooled[FULL_ARM]).items()
-        }
-
-    all_vectors = [v for vs in vectors.values() for v in vs]
-    synthetic = any(v.synthetic for v in all_vectors)
-    spec_ref = evaluator_store.put_json(
+    report = build_report(spec, tolerances, vectors)
+    report["spec"] = evaluator_store.put_json(
         spec.model_dump(mode="json", by_alias=True),
         visibility="evaluator",
         labels=["ablation-spec"],
     ).digest
-    tolerances_ref = (
+    report["tolerances"] = (
         evaluator_store.put_json(
             tolerances.model_dump(mode="json", by_alias=True),
             visibility="evaluator",
@@ -183,28 +195,9 @@ def run_ablation(
         if tolerances is not None
         else None
     )
-    report = {
-        "schema": REPORT_SCHEMA,
-        "ablation_id": spec.ablation_id,
-        "spec": spec_ref,
-        "tolerances": tolerances_ref,
-        "evidence": "synthetic" if synthetic else "measured",
-        "caveat": SYNTHETIC_CAVEAT if synthetic else None,
-        "baseline": spec.baseline,
-        "efficiency_gate": list(spec.efficiency_gate),
-        "runs": [v.model_dump(mode="json") for v in all_vectors],
-        "arms": {arm: asdict(p) for arm, p in pooled.items()},
-        "mechanism_config": {
-            arm: sorted({v.mechanism_config or "none" for v in vs}) for arm, vs in vectors.items()
-        },
-        "activation_by_model": {arm: _activation_by_model(vs) for arm, vs in vectors.items()},
-        "comparisons": [c.model_dump(mode="json") for c in comparisons],
-        "non_dominated": list(non_dominated(comparisons, pooled, spec.efficiency_gate)),
-        "interaction": interaction_terms,
-    }
     digest = evaluator_store.put_json(
         report,
         visibility="evaluator",
-        labels=["ablation-report", *(["synthetic"] if synthetic else [])],
+        labels=["ablation-report", *(["synthetic"] if report["evidence"] == "synthetic" else [])],
     ).digest
-    return {"report": digest, **report}
+    return digest, report

@@ -46,7 +46,7 @@ def spec_copy(tmp_path: Path, **changes) -> Path:
 @requires_pi
 def test_default_arms_run_compare_and_report(tmp_path):
     store, evaluator = stores(tmp_path)
-    report = run_ablation(
+    digest, report = run_ablation(
         FIXTURES / "spec.yaml", store=store, evaluator_store=evaluator, work_dir=tmp_path / "w"
     )
     assert report["schema"] == REPORT_SCHEMA
@@ -56,15 +56,15 @@ def test_default_arms_run_compare_and_report(tmp_path):
 
     # Each single-mechanism arm activates its own mechanism and only that one
     # (S2c's compaction does not trigger on a run this short); S3 activates all three.
-    act = {a: m["scripted"] for a, m in report["activation_by_model"].items()}
+    act = {a: p["activation_by_model"]["scripted"] for a, p in report["arms"].items()}
     assert act["S1"] == dict.fromkeys(act["S1"], "0/1")
     assert act["S2a"]["observationPack"] == "1/1"
     assert act["S2b"]["evidencePreservingReducer"] == "1/1"
     assert act["S2d"]["actionFusion"] == "1/1"
     assert all(act["S3"][m] == "1/1" for m in ("observationPack", "evidencePreservingReducer"))
     assert act["S3"]["actionFusion"] == "1/1"
-    assert report["mechanism_config"]["S1"] == ["none"]
-    assert len(set(report["mechanism_config"]["S3"]) - {"none"}) == 1
+    assert report["arms"]["S1"]["mechanism_config"] == ["none"]
+    assert len(set(report["arms"]["S3"]["mechanism_config"]) - {"none"}) == 1
 
     # The same claim in every arm: capability is identical, and the one metric the
     # fixture tolerances leave undeclared keeps every capability gate unresolved (A39).
@@ -89,10 +89,10 @@ def test_default_arms_run_compare_and_report(tmp_path):
     assert int(term["interaction"]) == int(term["full_delta"]) - int(term["sum_single_deltas"])
 
     # The report and every evaluation live in the evaluator store only.
-    desc = evaluator.descriptor(report["report"])
+    desc = evaluator.descriptor(digest)
     assert desc.visibility == "evaluator" and {"ablation-report", "synthetic"} <= set(desc.labels)
-    assert not store.has_object(report["report"])
-    assert evaluator.get_json(report["report"])["runs"] == report["runs"]
+    assert not store.has_object(digest)
+    assert evaluator.get_json(digest)["runs"] == report["runs"]
     for arm in DEFAULT_ARMS:
         assert store.has_record("run", run_id_for("fixture", arm, CASE_ID))
 
@@ -166,3 +166,27 @@ def test_cli_run_and_show(tmp_path, capsys):
     assert out["evidence"] == "synthetic" and set(out["verdicts"]) == {"S2d"}
     assert main(["ablation", "show", out["report"], base[1]]) == 0
     assert json.loads(capsys.readouterr().out)["ablation_id"] == "fixture"
+
+
+def test_report_is_built_offline_from_outcome_vectors():
+    from test_ablation_gates import make_vector
+
+    from onoda.ablation.contract import AblationSpec
+    from onoda.ablation.run import build_report
+
+    spec = AblationSpec.model_validate(
+        yaml.safe_load((FIXTURES / "spec.yaml").read_text()) | {"arms": ["S1", "S2a", "S3"]}
+    )
+    lean = {"context_bytes.total": "60", "acquisitions": "1"}
+    vectors = {
+        "S1": [make_vector(arm="S1", case_id=CASE_ID)],
+        "S2a": [make_vector(arm="S2a", case_id=CASE_ID, efficiency=lean)],
+        "S3": [make_vector(arm="S3", case_id=CASE_ID, efficiency=lean)],
+    }
+    report = build_report(spec, None, vectors)
+    assert report["evidence"] == "synthetic" and report["baseline"] == "S1"
+    assert [c["verdict"] for c in report["comparisons"]] == ["unresolved", "unresolved"]
+    # Only S2a is present of the singles, so the S2 sum (and the interaction) is unknown.
+    term = report["interaction"]["context_bytes.total"]
+    assert term == {"full_delta": "-40", "sum_single_deltas": None, "interaction": None}
+    assert report["arms"]["S2a"]["efficiency"]["cost_usd"] is None  # unreported by `lean`

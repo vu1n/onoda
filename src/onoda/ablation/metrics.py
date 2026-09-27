@@ -21,7 +21,7 @@ import json
 from collections import Counter, defaultdict
 from decimal import Decimal
 
-from onoda.ablation.contract import CAPABILITY_METRICS, OutcomeVector
+from onoda.ablation.contract import ACTIVATION_METRICS, CAPABILITY_METRICS, OutcomeVector
 from onoda.adapters.pi.contract import CTX_MECHANISMS
 from onoda.adapters.pi.task import CLAIM_EVALUATOR
 from onoda.canonical import digest_of
@@ -121,14 +121,10 @@ def _efficiency(
 def _activation(events: list[Event]) -> dict[str, str]:
     """ACTIVATION_METRICS: each mechanism's own event type, counted from the run's journal."""
     counts = Counter(e.type for e in events)
-    fusion_ids = {e.payload["fusion_id"] for e in events if e.type == "context.fused-step"}
-    return {
-        "observationPack": str(counts["context.observation-archived"]),
-        "observationPack.recall": str(counts["context.page"]),
-        "evidencePreservingReducer": str(counts["context.reduced"]),
-        "onlineContextCompact": str(counts["context.compaction"]),
-        "actionFusion": str(len(fusion_ids)),
-    }
+    out = {m: str(counts[event_type]) for m, event_type in ACTIVATION_METRICS.items()}
+    fused = ACTIVATION_METRICS["actionFusion"]
+    out["actionFusion"] = str(len({e.payload["fusion_id"] for e in events if e.type == fused}))
+    return out
 
 
 def _reducer_probe_totals(store: Store, events: list[Event]) -> dict[str, str]:
