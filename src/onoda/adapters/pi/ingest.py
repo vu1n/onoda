@@ -427,6 +427,8 @@ def _analyze(
         raise IntegrityError(f"spool mechanisms {start.mechanisms} do not match {variant.id}")
     if start.scripted != (config["mode"] == "pi-scripted"):
         raise OnodaError(f"spool scripted={start.scripted} contradicts mode {config['mode']!r}")
+    if start.sandbox != config.get("sandbox"):
+        raise OnodaError(f"spool sandbox={start.sandbox!r} contradicts the run's")
     reducer_models = frozenset(
         m for m in (SCRIPTED_REDUCER_MODEL, config.get("reducer_model")) if m is not None
     )

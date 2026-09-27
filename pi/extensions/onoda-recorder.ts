@@ -24,6 +24,8 @@
  * other onoda setting.
  */
 
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext, MessageEndEvent } from "@earendil-works/pi-coding-agent";
 import {
 	addCost,
@@ -87,6 +89,45 @@ function writeEnd(w: SpoolWriter, fallback: EndStatus, reason: string | null): v
 
 const REJECTED_BEFORE_TOOL_CALL = "rejected by Pi before tool_call";
 
+/** Pi's own file tools and the root set their `path` must stay under (sandboxed runs, A50). */
+const FILE_TOOL_ROOTS: Record<string, "read_roots" | "write_roots"> = { read: "read_roots", edit: "write_roots", write: "write_roots" };
+
+/** `p` with symlinks resolved as far as it exists; the missing tail is appended unresolved. */
+function realpathLoose(p: string): string {
+	const rest: string[] = [];
+	let cur = p;
+	for (;;) {
+		try {
+			return join(realpathSync(cur), ...rest.reverse());
+		} catch {
+			const parent = dirname(cur);
+			if (parent === cur) return p;
+			rest.push(basename(cur));
+			cur = parent;
+		}
+	}
+}
+
+/** Blocking reason when a file tool's path leaves its roots; undefined when it stays inside. */
+function pathDecision(policy: GatewayPolicy, toolName: string, input: Record<string, unknown>): string | undefined {
+	const key = FILE_TOOL_ROOTS[toolName];
+	const roots = key ? policy[key] : undefined;
+	if (!key || !roots) return undefined;
+	const raw = input.path;
+	if (typeof raw !== "string" || raw.length === 0) return `${toolName} has no string path`;
+	// Pi strips one leading "@" and expands "~" and file:// URLs; refuse the forms it would reinterpret.
+	const stripped = raw.startsWith("@") ? raw.slice(1) : raw;
+	if (stripped.startsWith("~") || stripped.startsWith("file:") || /[^\x20-\x7e]/.test(stripped)) {
+		return `${toolName} path ${JSON.stringify(raw)} is not a plain path`;
+	}
+	const target = realpathLoose(isAbsolute(stripped) ? resolve(stripped) : resolve(process.cwd(), stripped));
+	const inside = [...roots, ...(key === "read_roots" ? (policy.write_roots ?? []) : [])].some((r) => {
+		const root = realpathLoose(r);
+		return target === root || target.startsWith(root.endsWith(sep) ? root : root + sep);
+	});
+	return inside ? undefined : `${toolName} path ${JSON.stringify(raw)} is outside the sandbox roots`;
+}
+
 /** Blocking reason for a call under `policy`, or undefined when it may run. */
 function gatewayDecision(policy: GatewayPolicy, toolName: string, input: Record<string, unknown>): string | undefined {
 	const c = counters();
@@ -96,6 +137,8 @@ function gatewayDecision(policy: GatewayPolicy, toolName: string, input: Record<
 	const cost = costExhausted(policy);
 	if (cost) return cost;
 	if (!policy.allowed_tools.includes(toolName)) return `tool ${toolName} is not allowed by the gateway policy`;
+	const outside = pathDecision(policy, toolName, input);
+	if (outside) return outside;
 	const thenRun = input.then_run;
 	if (thenRun !== undefined && thenRun !== null) {
 		// Anything but {command: string} cannot be checked, so it never runs.

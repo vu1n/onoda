@@ -36,6 +36,7 @@ from onoda.adapters.pi.contract import (
 )
 from onoda.adapters.pi.ingest import IngestResult, _read_spool, ingest_spool, recorded_script
 from onoda.adapters.pi.runtime import LiveSettings, build_launch, launch
+from onoda.adapters.pi.sandbox import SANDBOX_KIND, Sandbox
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
 from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
@@ -133,8 +134,11 @@ def run_case(
     reducer: tuple[str, str] | None = None,
     timeout_s: float = 300,
     candidate: HarnessCandidate | None = None,
+    sandbox: Sandbox | None = None,
 ) -> PiRun:
     """Run one variant on one case and ingest it as `run_id`.
+
+    `sandbox` runs Pi inside the bwrap sandbox (A50); a live run needs one.
 
     A scripted run's `max_requests` defaults to 16. A live run's request cap
     is its own `live.max_requests` (A35); a different `max_requests` here is
@@ -187,6 +191,7 @@ def run_case(
         max_acquisitions=max_acquisitions,
         reducer=reducer,
         candidate=candidate,
+        sandbox=sandbox,
     )
     # Refusals happen above; only a launchable run commits anything.
     task = _commit_task(
@@ -205,6 +210,8 @@ def run_case(
         "max_requests": max_requests,
         "max_acquisitions": max_acquisitions,
     }
+    if sandbox is not None:
+        config["sandbox"] = SANDBOX_KIND
     if reducer is not None:
         config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
     if candidate is not None:

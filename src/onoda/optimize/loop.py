@@ -19,6 +19,8 @@ search id:
   run), and each gated proposal (`accepted` / `rejected` with the reasons);
 - every feedback packet, i.e. the reflective dataset a proposal came from
   (`optimizer.feedback`);
+- every reflection call's prompt, reply and, for a live model, its receipt
+  (`optimizer.reflection-call`, A51);
 - every gate decision with the parent and child minibatch totals
   (`optimizer.decision`);
 - every trial's ablation `OutcomeVector` (see `adapter.py`) and each pool
@@ -61,6 +63,7 @@ from onoda.optimize.adapter import (
     Pending,
     Runner,
     SearchLedger,
+    SpendCap,
 )
 from onoda.optimize.contract import (
     CandidateRecord,
@@ -93,6 +96,7 @@ class OptimizationResult(BaseModel):
     stop_reason: str
     trials: int
     reflections: int
+    spent_usd: str  # settled costs plus unsettled reserves (A51); "0" without a spend cap
 
 
 class _QuietLogger:
@@ -174,7 +178,13 @@ class _Proposer:
                 }
             )
             assert isinstance(prompt, str)  # no images in an onoda dataset
-            out = self.reflect(prompt).strip()
+            reply: str | None = None
+            try:
+                reply = self.reflect(prompt)
+            finally:  # a live call is billed even when its reply is refused (A51)
+                receipt = getattr(self.reflect, "last_receipt", None)
+                ledger.record_reflection_call(name, prompt, reply, receipt)
+            out = reply.strip()
             new_texts[name] = InstructionProposalSignature.output_extractor(out)["new_instruction"]
 
         child = {**candidate, **new_texts}
@@ -283,17 +293,23 @@ def run_optimization(
     max_trials: int,
     max_reflections: int,
     minibatch_size: int = 2,
+    spend: SpendCap | None = None,
 ) -> OptimizationResult:
     """Search from `seed` over `split.acceptance`; see the module docstring.
 
     Calling it again with the same `run_dir`, `search_id` and store resumes
     the search; the budgets are totals for the search, not per call.
+    `spend` caps a live search's money (A51): the loop stops before an
+    iteration whose trials and reflection calls, at their reserves, could
+    exceed it.
     """
     if min(max_trials, max_reflections, minibatch_size) < 1:
         raise OnodaError("budgets and minibatch size must be positive")
     run_path = Path(run_dir)
     run_path.mkdir(parents=True, exist_ok=True)
-    ledger = SearchLedger(store, search_id, max_trials=max_trials, max_reflections=max_reflections)
+    ledger = SearchLedger(
+        store, search_id, max_trials=max_trials, max_reflections=max_reflections, spend=spend
+    )
     _bind_search(ledger, split, gates)
     seed_digest = seed.digest()
     _record_candidate(
@@ -317,6 +333,7 @@ def run_optimization(
         adapter.awaiting_valset.add(seed_digest)
 
     iteration_cost = 2 * minibatch_size + len(cases)
+    n_components = len(seed.components)  # worst case: every component reflected on
     stop_reason = "stopped"
 
     def stopper(state: Any) -> bool:
@@ -330,10 +347,18 @@ def run_optimization(
                 f"used, up to {iteration_cost} needed)"
             )
             return True
+        if not ledger.can_afford(iteration_cost, n_components):
+            stop_reason = (
+                f"spend cap cannot cover another iteration ({ledger.spent_usd} USD spent, "
+                f"up to {iteration_cost} trials and {n_components} reflection calls needed)"
+            )
+            return True
         return False
 
     if not resuming and ledger.trials + len(cases) > max_trials:
         stop_reason = "trial budget cannot cover the seed evaluation"
+    elif not resuming and not ledger.can_afford(len(cases), 0):
+        stop_reason = "spend cap cannot cover the seed evaluation"
     else:
         try:
             gepa.optimize(
@@ -380,4 +405,5 @@ def run_optimization(
         stop_reason=stop_reason,
         trials=ledger.trials,
         reflections=ledger.reflections,
+        spent_usd=format(ledger.spent_usd, "f"),
     )

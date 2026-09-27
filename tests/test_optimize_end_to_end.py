@@ -11,6 +11,7 @@ payload bytes (A40: context bytes are measured, a proxy for tokens).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from conftest import requires_pi
@@ -135,6 +136,9 @@ def test_two_proposals_one_rejected_one_accepted_on_real_pi(tmp_path):
     assert reflect.prompts and "report_states" in reflect.prompts[0]
 
 
+REPO_GATES = Path(__file__).resolve().parents[1] / "gates" / "gate-spec.yaml"
+
+
 def test_cli_refuses_unset_tolerances_and_live_search(tmp_path, capsys):
     gates = tmp_path / "gates.yaml"
     gates.write_text(
@@ -152,8 +156,13 @@ def test_cli_refuses_unset_tolerances_and_live_search(tmp_path, capsys):
     assert main([*common, "--scripts", str(tmp_path), "--reflection-script", str(split)]) != 0
     err = capsys.readouterr().err
     assert "unresolved" in err or "tolerance" in err
-    assert main([*common, "--live"]) != 0
-    assert "authorized" in capsys.readouterr().err
+    # A live search refuses to start until every live setting is given (A35, A51).
+    real_gates = ["--gates", str(REPO_GATES)]
+    assert main([*common, *real_gates, "--live"]) != 0
+    err = capsys.readouterr().err
+    assert "provider" in err and "credential_env" in err
+    assert main([*common, *real_gates, "--live", "--scripts", str(tmp_path)]) != 0
+    assert "no --scripts" in capsys.readouterr().err
     assert not (tmp_path / "a").exists()
 
 

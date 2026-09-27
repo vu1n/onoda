@@ -61,6 +61,7 @@ from onoda.adapters.pi.contract import (
     PI_VERSION,
     RECORDER_EXTENSION,
     RLM_EXTENSION,
+    RLM_KERNEL,
     RUNTIME_DIR,
     SCRIPTED_EXTENSION,
     SCRIPTED_MODEL,
@@ -79,6 +80,7 @@ from onoda.adapters.pi.contract import (
     candidate_for,
     with_mechanisms,
 )
+from onoda.adapters.pi.sandbox import SANDBOX_KIND, Sandbox, write_settings
 from onoda.errors import CapabilityError, OnodaError
 
 _MIN_NODE = (22, 19, 0)
@@ -98,6 +100,18 @@ _ENV_ALLOWLIST = (
     "TERM",
     "TMPDIR",
     "TZ",
+)
+
+# What a live run's Pi process additionally inherits so it can reach its
+# provider through an HTTPS proxy (as in a cloud session). None of them is a
+# credential; the inner sandbox layer clears them for every tool command.
+_LIVE_NETWORK_ENV = (
+    "HTTPS_PROXY",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
 )
 
 
@@ -241,6 +255,7 @@ class Launch:
     # The spool HMAC key: in memory only (the Pi process unlinks its copy).
     spool_key: bytes = field(default=b"", repr=False)
     rlm: RlmStage | None = None  # set for rlm variants only
+    sandboxed: bool = False  # argv runs Pi inside the bwrap sandbox (A50)
 
 
 @dataclass(frozen=True)
@@ -267,6 +282,20 @@ class RlmStage:
         }
 
 
+def detect_sandbox() -> Sandbox:
+    """This host's Pi sandbox (A50), or `CapabilityError` saying why there is none.
+
+    A CA bundle named by the live network variables is mounted read-only, so
+    Pi's TLS through a proxy still verifies inside the sandbox.
+    """
+    ca = tuple(
+        Path(os.environ[k])
+        for k in ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE")
+        if k in os.environ and Path(os.environ[k]).is_file()
+    )
+    return Sandbox.detect(runtime_dir=RUNTIME_DIR, kernel_dir=RLM_KERNEL.parent, extra_ro=ca)
+
+
 def _write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, sort_keys=True))
 
@@ -282,6 +311,7 @@ def build_launch(
     max_acquisitions: int,
     reducer: tuple[str, str] | None = None,
     candidate: HarnessCandidate | None = None,
+    sandbox: Sandbox | None = None,
 ) -> Launch:
     """Stage one run of `variant_id` against the bundle at `bundle_dir` under
     `work_dir`. Exactly one of `script` (offline, deterministic) or `live` (a
@@ -293,6 +323,9 @@ def build_launch(
     `sol_pi.config` component, when set, overrides the variant's mechanisms
     (the effective mechanisms then drive `--tools`, the SoL-Pi config and
     `run_info["mechanisms"]`).
+
+    `sandbox` runs Pi inside `sandbox.Sandbox` (A50). A live run refuses to
+    stage without one: A38 requires a sandbox before any live run.
     """
     if (script is None) == (live is None):
         raise OnodaError("build_launch requires exactly one of script or live")
@@ -317,6 +350,8 @@ def build_launch(
 
     if live is not None:
         live.validate()
+        if sandbox is None:
+            raise CapabilityError("a live Pi run needs the sandbox (A38, A50)")
         provider, model = live.provider, live.model
     else:
         provider, model = SCRIPTED_PROVIDER, SCRIPTED_MODEL
@@ -342,6 +377,12 @@ def build_launch(
     for d in (workspace_dir, spool_dir, sessions_dir, agent_dir):
         d.mkdir(parents=True, exist_ok=True)
     rlm = RlmStage.write(work_dir, candidate) if variant.rlm and candidate is not None else None
+    sandbox_python: Path | None = None
+    if sandbox is not None:
+        shell_path, sandbox_python = sandbox.stage(
+            pi_work_dir=work_dir, workspace=workspace_dir, bundle_dir=bundle_dir
+        )
+        write_settings(agent_dir, Sandbox.pi_settings(shell_path))
 
     if sol_pi_cfg is not None:
         _write_json(agent_dir / "sol-pi.json", sol_pi_cfg)
@@ -366,6 +407,8 @@ def build_launch(
         max_acquisitions=max_acquisitions,
         max_cost_usd=live.max_cost_usd if live is not None else None,
         path_aliases=path_aliases,
+        read_roots=(str(workspace_dir), str(bundle_dir)) if sandbox is not None else None,
+        write_roots=(str(workspace_dir),) if sandbox is not None else None,
     )
     policy_path.write_text(policy.model_dump_json(by_alias=True))
 
@@ -380,6 +423,8 @@ def build_launch(
         "model": model,
         "scripted": script is not None,
     }
+    if sandbox is not None:  # absent for an unsandboxed run, so its record is unchanged
+        run_info["sandbox"] = SANDBOX_KIND
     if live is not None:
         run_info["max_cost_usd"] = live.max_cost_usd
     # Recorded for any variant: a candidate can also change `sol_pi.config` and
@@ -411,6 +456,7 @@ def build_launch(
     if live is not None:
         assert live.credential_env is not None  # validate() checked it
         env[live.credential_env] = os.environ[live.credential_env]
+        env.update({k: os.environ[k] for k in _LIVE_NETWORK_ENV if k in os.environ})
     if script is not None:
         script_path = work_dir / "script.json"
         script_path.write_text(script.model_dump_json(by_alias=True))
@@ -429,13 +475,21 @@ def build_launch(
     )
     if rlm is not None:
         env.update(rlm.env())
+        if sandbox_python is not None:
+            env[ENV_RLM_PYTHON] = str(sandbox_python)
     if live is None:
         # Scripted runs never reach a real provider; PI_OFFLINE keeps Pi from
         # making any of its own background network calls too. A live run
         # needs the network to reach its provider, so it is left unset.
         env["PI_OFFLINE"] = "1"
 
+    prefix = (
+        sandbox.outer_argv(pi_work_dir=work_dir, bundle_dir=bundle_dir)
+        if sandbox is not None
+        else []
+    )
     argv = [
+        *prefix,
         str(RUNTIME_DIR / "node_modules/.bin/pi"),
         "--no-extensions",
     ]
@@ -470,6 +524,7 @@ def build_launch(
         run_info_path=run_info_path,
         spool_key=spool_key,
         rlm=rlm,
+        sandboxed=sandbox is not None,
     )
 
 

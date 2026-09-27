@@ -28,6 +28,7 @@ from onoda.adapters.pi.contract import HarnessCandidate, Script
 from onoda.adapters.pi.ingest import run_claim
 from onoda.adapters.pi.run import run_case
 from onoda.adapters.pi.runtime import LiveSettings
+from onoda.adapters.pi.sandbox import Sandbox
 from onoda.adapters.pi.task import evaluate_claims
 from onoda.errors import OnodaError
 from onoda.optimize.adapter import TraceStep, Trial
@@ -91,6 +92,7 @@ class PiRunner:
     variant_id: str
     scripts: Mapping[str, Script] | None = None  # case id -> script (offline; synthetic)
     live: LiveSettings | None = None
+    sandbox: Sandbox | None = None  # required when live (A38, A50)
     ladder: bytes | None = None
     synthetic_ladder: bool = False
     docs: Mapping[str, bytes] = field(default_factory=dict)
@@ -129,6 +131,7 @@ class PiRunner:
             max_requests=self.max_requests,
             timeout_s=self.timeout_s,
             candidate=candidate,
+            sandbox=self.sandbox,
         )
         claims = [e for e in self.store.events(trial_id) if e.type == "pi.claim"]
         evaluation = evaluate_claims(

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import requires_pi
+from conftest import requires_pi, stub_sandbox
 
 from onoda.adapters.pi.contract import (
     ENV_POLICY,
@@ -229,6 +229,7 @@ def test_s0_omits_sol_pi_and_scripted_extension_in_live_mode(tmp_path, monkeypat
         ),
         max_requests=5,
         max_acquisitions=0,
+        sandbox=stub_sandbox(tmp_path),
     )
     dash_e = [launch_obj.argv[i + 1] for i, a in enumerate(launch_obj.argv) if a == "-e"]
     assert dash_e == [
@@ -698,7 +699,7 @@ def live_launch(tmp_path: Path, monkeypatch, **kw):
         work_dir=tmp_path / "work",
         live=live,
         max_acquisitions=0,
-        **{"max_requests": 5, **kw},
+        **{"max_requests": 5, "sandbox": stub_sandbox(tmp_path), **kw},
     )
 
 

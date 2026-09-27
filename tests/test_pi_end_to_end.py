@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import requires_pi
+from conftest import requires_pi, stub_sandbox
 
 from onoda.adapters.pi import run as pi_run
 from onoda.adapters.pi.contract import Script, ScriptTurn
@@ -319,8 +319,9 @@ def test_live_run_uses_its_own_request_cap(tmp_path, monkeypatch):
     seen = capture_launch(monkeypatch)
     with pytest.raises(RuntimeError, match="captured"):
         pi_run.run_case(
-            store, case(), run_id="l1", variant_id="S0", work_dir=tmp_path / "w1", live=live
-        )
+            store, case(), run_id="l1", variant_id="S0", work_dir=tmp_path / "w1", live=live,
+            sandbox=stub_sandbox(tmp_path),
+        )  # fmt: skip
     assert seen["policy"]["max_requests"] == 3
     assert seen["policy"]["max_cost_usd"] == "0.50"
     # Only the named credential variable is passed through, nothing else.

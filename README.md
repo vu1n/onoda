@@ -112,8 +112,29 @@ onoda optimize status --search-id s1 --optimizer-store ./optimizer
 
 `--scripts` holds one scripted-provider script per acceptance case
 (`<case_id>.json`) and `--reflection-script` a JSON list of the reflection
-model's replies; both are synthetic. A live search (`--live`) refuses: no
-agent or reflection model is authorized (A11, A35).
+model's replies; both are synthetic.
+
+A live search (`--live`, A51) calls real models through OpenRouter and runs
+every trial in the bubblewrap sandbox (A50; Linux with `bwrap` on PATH). Every
+setting is explicit, and the host needs egress to `openrouter.ai`:
+
+```bash
+export OPENROUTER_API_KEY=...
+onoda optimize run --live --split split.json --gates gates/gate-spec.yaml --variant S1r \
+  --ladder ladder.md --search-id live1 --store ./store-a --evaluator-store ./evaluator \
+  --optimizer-store ./optimizer --work-dir ./opt --max-trials 24 --max-reflections 4 \
+  --provider openrouter --model deepseek/deepseek-v4-flash \
+  --credential-env OPENROUTER_API_KEY --max-requests 30 --max-cost-usd 0.20 \
+  --reflection-provider openrouter --reflection-model deepseek/deepseek-v4-flash \
+  --reflection-credential-env OPENROUTER_API_KEY --reflection-max-tokens 4000 \
+  --reflection-max-cost-usd 0.05 --search-max-cost-usd 5.00
+```
+
+The model names are an example, not a tuned choice. The search stops before
+an iteration the remaining `--search-max-cost-usd` cannot cover at the
+per-trial and per-call caps; `onoda optimize status` and the output's
+`spent_usd` show what was spent. `onoda pi run --live` needs the sandbox too,
+and `onoda pi run --sandbox` runs a scripted run inside it.
 
 ## Layout
 
@@ -169,6 +190,8 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because the fixture tolerances leave `count.unresolved` undeclared (the chosen ones, A49, are in `gates/`). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
 | RLM extension (S1r) | Real Pi with `ipython` cells, committed JSON state, a child Pi run recorded as its own run and charged to the parent, replay of the whole tree; scripted provider only | `tests/test_pi_rlm_extension.py`, `tests/test_rlm_end_to_end.py` |
 | Harness optimization (M4) | GEPA proposes candidate components from agent traces; SoL-Pi's gates accept or reject each on acceptance cases only. A scripted two-proposal search on real Pi rejects one (a false success) and accepts one (fewer context bytes). Synthetic, not an improvement (A32) | `tests/test_optimize*.py`, `scripts/demo.sh` |
+| Live search (A51) | Built and tested offline only: OpenRouter reflection with recorded receipts against a fake transport, and the search-wide spend cap. No live search has run yet | `tests/test_live_optimizer.py` |
+| Sandbox (A50) | Scripted Pi runs inside bubblewrap: `bash` and the RLM kernel have no network, no credential and no host files; file tools stay in the workspace and bundle | `tests/test_pi_sandbox.py` |
 | Repeat experiment | Not implemented | — |
 
 ## Acceptance tests
@@ -214,11 +237,10 @@ belong to later milestones.
 - The advisory ladder and allowed documentation are unresolved (A33): S1
   onward, the RLM arm S1r included, refuse to run without an operator-supplied
   ladder.
-- Pi's `bash` tool and Action Fusion's `then_run` are unsandboxed (A38): the
-  gateway limits which tools run and the request/cost budgets, not what a
-  shell command can reach, and its `then_run` token filter is not a boundary.
-  A sandbox (no solver on PATH, no scheduler, no network) is required before
-  any live run.
+- Pi runs are sandboxed only when asked (`--sandbox`) or live (A50), and only
+  on Linux with bubblewrap. Scripted runs and replay are unsandboxed by
+  default. Inside the sandbox the Pi process itself keeps network access to
+  reach its provider, and the file-tool path check has a time-of-check gap.
 - The spool's HMAC chain is tamper evidence against the agent's own tools
   rewriting the spool casually, not a sandbox: a process that can read the Pi
   process's memory can forge it, and dropping trailing lines only makes the
@@ -261,10 +283,11 @@ belong to later milestones.
 - RLM kernel state is recorded only as JSON committed with `commit_state`
   (A43); anything left only in kernel memory is lost with the process, and
   restarting from committed state is not implemented (A36). The kernel runs
-  with the same lack of sandbox as Pi's `bash` (A38).
-- The optimizer only runs scripted trials with a scripted reflection, so an
-  accepted candidate says the loop works, not that the harness improved
-  (A32). Its gates are `gates/gate-spec.yaml` (zero capability tolerances,
+  in the same inner sandbox layer as Pi's `bash` when the run is sandboxed
+  (A50).
+- The optimizer has only run scripted trials with a scripted reflection, so
+  an accepted candidate says the loop works, not that the harness improved
+  (A32). A live search (A51) exists but has not run. Its gates are `gates/gate-spec.yaml` (zero capability tolerances,
   A47/A49); the only cases are unreviewed, so every split is exploratory
   (A48). GEPA's own state file is scratch, not the record (A46).
 
@@ -272,6 +295,5 @@ belong to later milestones.
 
 Run the M3b ablation and an M4 search on a real model once a model and
 budget are authorized, with the predeclared zero capability tolerances in `gates/` (A49) and long-horizon cases (SOL_PI_DELTA §5); RLM arms in ablations;
-semantic restart of Pi runs from committed state (A36); a sandbox for `bash`
-and the kernel (A38). Before comparisons: a human review of the M2 cases, an
+semantic restart of Pi runs from committed state (A36). Before comparisons: a human review of the M2 cases, an
 ORCA run on licensed hardware, and justified tolerances (A6, A18).

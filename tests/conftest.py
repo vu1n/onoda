@@ -58,3 +58,16 @@ def pi_runtime_installed() -> bool:
 requires_pi = pytest.mark.skipif(
     not pi_runtime_installed(), reason="pinned Pi runtime not installed (scripts/pi-setup.sh)"
 )
+
+
+def stub_sandbox(tmp_path: Path):
+    """A `Sandbox` for tests that build a live launch but never start it."""
+    from onoda.adapters.pi.sandbox import Sandbox
+
+    return Sandbox(
+        bwrap="/usr/bin/bwrap",
+        runtime_dirs=(tmp_path / "runtime",),
+        node_prefix=tmp_path / "node",
+        python_dirs=(tmp_path / "python",),
+        kernel_dir=tmp_path / "kernel",
+    )

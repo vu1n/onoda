@@ -334,7 +334,7 @@ def cmd_pi_variants(a) -> Any:
 def cmd_pi_run(a) -> Any:
     from onoda.adapters.pi.contract import HarnessCandidate, Script
     from onoda.adapters.pi.run import DEFAULT_INSTRUCTION, run_case
-    from onoda.adapters.pi.runtime import LiveSettings
+    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
 
     if bool(a.script) == bool(a.live):
         raise OnodaError("give exactly one of --script (offline) or --live")
@@ -376,6 +376,7 @@ def cmd_pi_run(a) -> Any:
             if a.candidate
             else None
         ),
+        sandbox=detect_sandbox() if (a.live or a.sandbox) else None,
     )
     r = pi.ingest
     return {
@@ -465,19 +466,16 @@ def cmd_optimize_split(a) -> Any:
 
 
 def cmd_optimize_run(a) -> Any:
-    from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate, Script
+    from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate
     from onoda.optimize.contract import GateSpec, SplitAssignment
     from onoda.optimize.loop import run_optimization
     from onoda.optimize.pi_runner import PiRunner
     from onoda.science.contract import CASES_ROOT, case_manifests, load_case
 
-    if a.live:
-        raise OnodaError(
-            "a live optimization needs live agent and reflection settings; none are "
-            "authorized (A11, A35), so only --scripts runs"
-        )
-    if not (a.scripts and a.reflection_script):
-        raise OnodaError("give --scripts and --reflection-script (the offline, synthetic mode)")
+    if a.live and (a.scripts or a.reflection_script):
+        raise OnodaError("--live takes no --scripts or --reflection-script")
+    if not a.live and not (a.scripts and a.reflection_script):
+        raise OnodaError("give --scripts and --reflection-script (offline, synthetic) or --live")
     gates = _read_model(GateSpec, a.gates)  # refuses unset tolerances (A47)
     split = _read_model(SplitAssignment, a.split)
     cases_root = Path(a.cases_root) if a.cases_root else CASES_ROOT
@@ -492,22 +490,12 @@ def cmd_optimize_run(a) -> Any:
         raise OnodaError(
             f"cases {', '.join(pending)} are not reviewed; the split must be exploratory (A48)"
         )
-    scripts = {}
-    for cid in split.acceptance:
-        path = Path(a.scripts) / f"{cid}.json"
-        if not path.is_file():
-            raise OnodaError(f"no script for acceptance case {cid!r} at {path}")
-        scripts[cid] = Script.model_validate_json(path.read_text())
-    replies = json.loads(Path(a.reflection_script).read_text())
-    if not (isinstance(replies, list) and all(isinstance(r, str) for r in replies)):
-        raise OnodaError("--reflection-script must be a JSON list of strings (synthetic)")
-    served = iter(replies)
-
-    def reflect(prompt: str) -> str:
-        try:
-            return next(served)
-        except StopIteration:
-            raise OnodaError("the reflection script is exhausted") from None
+    if a.live:
+        live, reflect, spend, sandbox = _live_search(a)
+        scripts = None
+    else:
+        live = spend = sandbox = None
+        scripts, reflect = _scripted_search(a, split.acceptance)
 
     seed = _read_model(HarnessCandidate, a.seed) if a.seed else SEED_CANDIDATE
     runner = PiRunner(
@@ -516,6 +504,8 @@ def cmd_optimize_run(a) -> Any:
         work_dir=Path(a.work_dir) / "trials",
         variant_id=a.variant,
         scripts=scripts,
+        live=live,
+        sandbox=sandbox,
         ladder=Path(a.ladder).read_bytes() if a.ladder else None,
         synthetic_ladder=a.synthetic_ladder,
         max_requests=a.max_requests,
@@ -534,10 +524,12 @@ def cmd_optimize_run(a) -> Any:
         max_trials=a.max_trials,
         max_reflections=a.max_reflections,
         minibatch_size=a.minibatch_size,
+        spend=spend,
     )
     return {
         "search_id": result.search_id,
-        "evidence": "synthetic",  # scripted trials and a scripted reflection (A32)
+        # scripted trials and a scripted reflection are synthetic (A32)
+        "evidence": "live" if a.live else "synthetic",
         "exploratory_split": split.exploratory,
         "seed": result.seed,
         "accepted": [r.candidate for r in result.accepted],
@@ -545,7 +537,68 @@ def cmd_optimize_run(a) -> Any:
         "stop_reason": result.stop_reason,
         "trials": result.trials,
         "reflections": result.reflections,
+        **({"spent_usd": result.spent_usd} if a.live else {}),
     }
+
+
+def _scripted_search(a, acceptance) -> tuple[dict[str, Any], Any]:
+    from onoda.adapters.pi.contract import Script
+
+    scripts = {}
+    for cid in acceptance:
+        path = Path(a.scripts) / f"{cid}.json"
+        if not path.is_file():
+            raise OnodaError(f"no script for acceptance case {cid!r} at {path}")
+        scripts[cid] = Script.model_validate_json(path.read_text())
+    replies = json.loads(Path(a.reflection_script).read_text())
+    if not (isinstance(replies, list) and all(isinstance(r, str) for r in replies)):
+        raise OnodaError("--reflection-script must be a JSON list of strings (synthetic)")
+    served = iter(replies)
+
+    def reflect(prompt: str) -> str:
+        try:
+            return next(served)
+        except StopIteration:
+            raise OnodaError("the reflection script is exhausted") from None
+
+    return scripts, reflect
+
+
+def _live_search(a) -> tuple[Any, Any, Any, Any]:
+    """Live agent settings, reflection, spend cap and sandbox; every flag explicit (A35, A51)."""
+    from decimal import Decimal
+
+    from onoda.adapters.pi.contract import DECIMAL_RE
+    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
+    from onoda.optimize.adapter import SpendCap
+    from onoda.optimize.reflection import LiveReflection, ReflectionSettings
+
+    live = LiveSettings(
+        provider=a.provider,
+        model=a.model,
+        credential_env=a.credential_env,
+        max_requests=a.max_requests,
+        max_cost_usd=a.max_cost_usd,
+    )
+    live.validate()
+    reflect = LiveReflection(
+        ReflectionSettings(
+            provider=a.reflection_provider,
+            model=a.reflection_model,
+            credential_env=a.reflection_credential_env,
+            max_tokens=a.reflection_max_tokens,
+            max_cost_usd=a.reflection_max_cost_usd,
+        )
+    )
+    if not a.search_max_cost_usd or not DECIMAL_RE.match(a.search_max_cost_usd):
+        raise OnodaError("--live needs --search-max-cost-usd (decimal USD)")
+    assert live.max_cost_usd is not None and a.reflection_max_cost_usd is not None
+    spend = SpendCap(
+        max_cost_usd=Decimal(a.search_max_cost_usd),
+        trial_reserve=Decimal(live.max_cost_usd),
+        reflection_reserve=Decimal(a.reflection_max_cost_usd),
+    )
+    return live, reflect, spend, detect_sandbox()
 
 
 def cmd_optimize_status(a) -> Any:
@@ -736,6 +789,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--max-cost-usd")
     pr.add_argument("--max-requests", type=int)
     pr.add_argument("--max-acquisitions", type=int, default=1)
+    pr.add_argument(
+        "--sandbox", action="store_true", help="run Pi in the bwrap sandbox (always on for --live)"
+    )
     pr.add_argument("--reducer-provider", help="reducer provider for S2b/S3 (live runs)")
     pr.add_argument("--reducer-model", help="reducer model for S2b/S3 (live runs)")
     pr.add_argument("--doc", action="append", default=[], help="allowed documentation (.md)")
@@ -802,7 +858,19 @@ def build_parser() -> argparse.ArgumentParser:
     orun.add_argument("--work-dir", required=True)
     orun.add_argument("--scripts", help="dir of <case_id>.json scripts (offline; synthetic)")
     orun.add_argument("--reflection-script", help="JSON list of reflection replies (synthetic)")
-    orun.add_argument("--live", action="store_true", help="refused: no live search is authorized")
+    orun.add_argument(
+        "--live", action="store_true", help="real agent and reflection models (A51); flags below"
+    )
+    orun.add_argument("--provider", help="live: Pi provider for the agent")
+    orun.add_argument("--model", help="live: agent model")
+    orun.add_argument("--credential-env", help="live: env var holding the agent's API key")
+    orun.add_argument("--max-cost-usd", help="live: cost cap per trial (one Pi run)")
+    orun.add_argument("--reflection-provider", help="live: reflection provider (openrouter)")
+    orun.add_argument("--reflection-model", help="live: reflection model")
+    orun.add_argument("--reflection-credential-env", help="live: env var for reflection")
+    orun.add_argument("--reflection-max-tokens", type=int, help="live: reply cap per call")
+    orun.add_argument("--reflection-max-cost-usd", help="live: cost cap per reflection call")
+    orun.add_argument("--search-max-cost-usd", help="live: cost cap for the whole search")
     orun.add_argument("--seed", help="HarnessCandidate JSON (default: the seed candidate)")
     orun.add_argument("--variant", default="S1r")
     orun.add_argument("--ladder")

@@ -98,7 +98,27 @@ class Runner(Protocol):
 
 
 class BudgetExhausted(OnodaError):
-    """The search's trial or reflection budget is spent."""
+    """The search's trial, reflection or spend budget is spent."""
+
+
+@dataclass(frozen=True)
+class SpendCap:
+    """A live search's money budget (A51), all decimal USD.
+
+    `max_cost_usd` bounds the whole search. A trial is reserved at its own
+    per-run cap (`trial_reserve`) before it runs and settles at the cost its
+    outcome reports; a trial that fails or reports no cost stays charged at
+    the reserve. A reflection call is reserved at its per-call cap and
+    settles at the cost its receipt reports.
+    """
+
+    max_cost_usd: Decimal
+    trial_reserve: Decimal
+    reflection_reserve: Decimal
+
+    def __post_init__(self) -> None:
+        if min(self.max_cost_usd, self.trial_reserve, self.reflection_reserve) <= 0:
+            raise OnodaError("spend cap and reserves must be positive")
 
 
 def claim_score(outcome: OutcomeVector) -> Decimal:
@@ -167,7 +187,8 @@ class SearchLedger:
 
     Journal event types (run id = search id): `optimizer.search`,
     `optimizer.candidate`, `optimizer.trial`, `optimizer.outcome`,
-    `optimizer.trial-failed`, `optimizer.reflection`, `optimizer.feedback`,
+    `optimizer.trial-failed`, `optimizer.reflection`, `optimizer.reflection-call`,
+    `optimizer.feedback`,
     `optimizer.decision`, `optimizer.valset`, `optimizer.final`. Records are
     content-addressed JSON, so rewriting one on resume is a no-op; events
     marked `once` are skipped when an identical ref is already journalled.
@@ -176,24 +197,62 @@ class SearchLedger:
     ACTOR = "optimizer"
 
     def __init__(
-        self, store: Store, search_id: str, *, max_trials: int, max_reflections: int
+        self,
+        store: Store,
+        search_id: str,
+        *,
+        max_trials: int,
+        max_reflections: int,
+        spend: SpendCap | None = None,
     ) -> None:
         self.store = store
         self.search_id = check_safe_id(search_id, "search id")
         self.max_trials = max_trials
         self.max_reflections = max_reflections
+        self.spend = spend
         self.trials = 0
         self.reflections = 0
         self.proposals = 0
+        # Spend (A51): trial id -> settled cost (None: still at its reserve), and
+        # settled reflection-call costs. Counted from the journal, so it survives resume.
+        self._trial_cost: dict[str, Decimal | None] = {}
+        self._reflection_cost = Decimal(0)
         self._seen: set[tuple[str, str]] = set()
         for e in store.events(self.search_id):
-            self._count(e.type, e.payload_refs)
+            self._count(e.type, e.payload_refs, e.payload)
 
-    def _count(self, type_: str, refs: Mapping[str, str]) -> None:
+    def _count(
+        self, type_: str, refs: Mapping[str, str], payload: Mapping[str, Any] | None = None
+    ) -> None:
+        payload = payload or {}
         self.trials += type_ == "optimizer.trial"
         self.reflections += type_ == "optimizer.reflection"
         self.proposals += type_ == "optimizer.feedback"
+        if type_ == "optimizer.trial":
+            self._trial_cost[payload["trial_id"]] = None
+        elif type_ == "optimizer.outcome" and payload.get("cost_usd") is not None:
+            self._trial_cost[payload["trial_id"]] = Decimal(payload["cost_usd"])
+        elif type_ == "optimizer.reflection-call":
+            # A call without a cost figure is charged at its reserve (fail closed).
+            cost = payload.get("cost_usd")
+            reserve = self.spend.reflection_reserve if self.spend else Decimal(0)
+            self._reflection_cost += Decimal(cost) if cost is not None else reserve
         self._seen.update((type_, r) for r in refs.values())
+
+    @property
+    def spent_usd(self) -> Decimal:
+        """Settled costs plus the reserve of every trial that has not settled."""
+        reserve = self.spend.trial_reserve if self.spend else Decimal(0)
+        costs = (c if c is not None else reserve for c in self._trial_cost.values())
+        trials = sum(costs, Decimal(0))
+        return trials + self._reflection_cost
+
+    def can_afford(self, trials: int, reflections: int) -> bool:
+        """Whether `trials` more trials and `reflections` more calls fit, at their reserves."""
+        if self.spend is None:
+            return True
+        need = trials * self.spend.trial_reserve + reflections * self.spend.reflection_reserve
+        return self.spent_usd + need <= self.spend.max_cost_usd
 
     def events(self, type_: str) -> list[Any]:
         return [e for e in self.store.events(self.search_id) if e.type == type_]
@@ -219,11 +278,14 @@ class SearchLedger:
             payload=dict(payload or {}),
             payload_refs=refs,
         )
-        self._count(type_, refs)
+        self._count(type_, refs, payload)
 
     def charge_trial(self, candidate: str, case_id: str) -> str:
         if self.trials >= self.max_trials:
             raise BudgetExhausted(f"trial budget {self.max_trials} spent")
+        if not self.can_afford(1, 0):
+            assert self.spend is not None
+            raise BudgetExhausted(f"spend cap {self.spend.max_cost_usd} USD cannot cover a trial")
         trial_id = f"{self.search_id}.t{self.trials + 1:06d}"
         self.event(
             "optimizer.trial",
@@ -234,7 +296,31 @@ class SearchLedger:
     def charge_reflection(self, component: str) -> None:
         if self.reflections >= self.max_reflections:
             raise BudgetExhausted(f"reflection budget {self.max_reflections} spent")
+        if not self.can_afford(0, 1):
+            assert self.spend is not None
+            raise BudgetExhausted(
+                f"spend cap {self.spend.max_cost_usd} USD cannot cover a reflection call"
+            )
         self.event("optimizer.reflection", payload={"component": component})
+
+    def record_reflection_call(
+        self, component: str, prompt: str, reply: str | None, receipt: Mapping[str, Any] | None
+    ) -> None:
+        """One call to the reflection model: its prompt, reply and (live) receipt."""
+        refs = {"prompt": self.put({"text": prompt}, "optimizer-reflection-prompt")}
+        if reply is not None:
+            refs["reply"] = self.put({"text": reply}, "optimizer-reflection-reply")
+        if receipt is not None:
+            refs["receipt"] = self.put(dict(receipt), "optimizer-reflection-receipt")
+        self.event(
+            "optimizer.reflection-call",
+            refs=refs,
+            payload={
+                "component": component,
+                "cost_usd": receipt.get("cost_usd") if receipt is not None else None,
+                "live": receipt is not None,
+            },
+        )
 
     def record_valset(self, candidate: str, rollouts: Sequence[Rollout]) -> None:
         """A pool member's full acceptance-slice evaluation (for the final frontier)."""
@@ -329,7 +415,12 @@ class OnodaAdapter:
         self.ledger.event(
             "optimizer.outcome",
             refs={"outcome": ref},
-            payload={"trial_id": trial_id, "case": case_id, "run": trial.run_id},
+            payload={
+                "trial_id": trial_id,
+                "case": case_id,
+                "run": trial.run_id,
+                "cost_usd": trial.outcome.efficiency.get("cost_usd"),
+            },
         )
         steps = tuple(s for s in trial.steps if s.source in AGENT_VISIBLE_SOURCES)
         return Rollout(

@@ -202,7 +202,8 @@ class GatewayPolicy(_Frozen):
     """What the recorder enforces at Pi's `tool_call` hook, before any tool runs.
 
     A call outside `allowed_tools`, a `then_run` without a string `command`
-    or containing an unfusable token, an `orca_run` past `max_acquisitions`,
+    or containing an unfusable token, a file tool whose path leaves the
+    sandbox roots, an `orca_run` past `max_acquisitions`,
     any call after `max_requests` provider requests, or any call once the
     summed cost reached `max_cost_usd` is blocked and spooled as `tool.call`
     with `decision: "blocked"`. Both budgets also abort the agent at
@@ -219,6 +220,12 @@ class GatewayPolicy(_Frozen):
     # Absolute path -> placeholder, applied to every string before computing a
     # replay key, so a moved workspace or runtime does not change the key.
     path_aliases: dict[str, str] = Field(default_factory=dict)
+    # Sandboxed runs (A50): Pi's own file tools (`read`, `edit`, `write`) run in
+    # the Pi process, outside the inner layer, so their `path` must resolve
+    # (symlinks followed) under one of these roots. `read_roots` also covers
+    # the edit/write roots. None: no path rule (unsandboxed runs).
+    read_roots: tuple[str, ...] | None = None
+    write_roots: tuple[str, ...] | None = None
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -399,6 +406,7 @@ class SpoolStart(_Line):
     max_cost_usd: str | None = None  # a live run's cost cap, as given (decimal text)
     candidate_digest: str | None = None  # M4: the HarnessCandidate the run was launched with
     rlm_limits: dict[str, int] | None = None  # M4: its RlmLimits (RLM variants)
+    sandbox: str | None = None  # "bwrap" when Pi ran inside the sandbox (A50)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 

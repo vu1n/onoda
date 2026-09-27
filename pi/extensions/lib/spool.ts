@@ -54,6 +54,8 @@ export interface GatewayPolicy {
 	max_cost_usd?: string | null;
 	unfusable_command_tokens: string[];
 	path_aliases: Record<string, string>;
+	read_roots?: string[] | null;
+	write_roots?: string[] | null;
 }
 
 export function sha256Hex(data: string | Uint8Array): string {
