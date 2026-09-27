@@ -647,7 +647,10 @@ class KernelExecReply(_Frozen):
 class KernelCall(_Frozen):
     """A call from inside a running cell.
 
-    Args: rlm {prompt, context}; commit_state {name, value}.
+    rlm args: {"prompt": str, "context": str | None}. commit_state args:
+    {"name": str, "json": str}, where `json` is `canonical_state_json(value)`
+    computed in the kernel; the host spools those exact bytes (UTF-8) as the
+    `rlm.state` object and acknowledges with `value` = "sha256:<hex>" of them.
     """
 
     op: Literal["call"]

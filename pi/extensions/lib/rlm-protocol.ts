@@ -89,7 +89,11 @@ export interface KernelCall {
 	op: "call";
 	id: number;
 	fn: "rlm" | "commit_state";
-	/** rlm: {prompt, context}; commit_state: {name, value}. */
+	/**
+	 * rlm: {prompt: string, context: string | null}. commit_state: {name, json}:
+	 * `json` is the kernel's canonical text; spool exactly those UTF-8 bytes as
+	 * the rlm.state object and reply `value: "sha256:<hex>"`.
+	 */
 	args: Record<string, unknown>;
 }
 
