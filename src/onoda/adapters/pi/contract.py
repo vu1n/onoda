@@ -762,12 +762,15 @@ def _check_child_prompt(value: str) -> None:
     _check_text("rlm.child_prompt", value)
     if "{prompt}" not in value:
         raise ValueError("rlm.child_prompt must contain {prompt}")
-    try:
-        rendered = value.format(prompt="p", context="c")
-    except (KeyError, IndexError, ValueError) as exc:
-        raise ValueError(f"rlm.child_prompt is not a template: {exc}") from exc
-    if rendered.startswith(("@", "-")):
-        raise ValueError("rlm.child_prompt must not start with '@' or '-'")
+    # The extension substitutes the two placeholders literally, so the template
+    # may hold no other braces (no `{{`, fields, or format specs), and it must not
+    # start with a placeholder: the rendered text is Pi's `-p` argument, where a
+    # leading `@` or `-` from the model's prompt would be a file or a flag.
+    rest = value.replace("{prompt}", "").replace("{context}", "")
+    if "{" in rest or "}" in rest:
+        raise ValueError("rlm.child_prompt may use only {prompt} and {context} as braces")
+    if value.startswith(("@", "-", "{")):
+        raise ValueError("rlm.child_prompt must not start with '@', '-' or a placeholder")
 
 
 def _check_limits(value: str) -> None:

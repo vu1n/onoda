@@ -75,6 +75,7 @@ from onoda.adapters.pi.contract import (
     CTX_VARIANT,
     DECIMAL_RE,
     MAC_RE,
+    MECHANISMS,
     PI_CAPABILITIES,
     PI_EXPERIMENT,
     PI_PACKAGE,
@@ -107,6 +108,7 @@ from onoda.adapters.pi.contract import (
     TaskClaim,
     ToolCall,
     ToolResult,
+    Variant,
     canonical_state_json,
     derive_child_key,
     parse_spool_line,
@@ -417,9 +419,9 @@ def _analyze(
 ) -> _Analysis:
     """Check the whole spool against the contract and the run; raises before any write."""
     start = spool.start
-    variant = VARIANTS.get(start.variant)
-    if start.variant != config["variant"] or variant is None:
+    if start.variant != config["variant"] or start.variant not in VARIANTS:
         raise OnodaError(f"spool variant {start.variant!r} is not the run's {config['variant']!r}")
+    variant = _effective_variant(config)
     if set(start.mechanisms) != set(variant.mechanisms):
         raise IntegrityError(f"spool mechanisms {start.mechanisms} do not match {variant.id}")
     if start.scripted != (config["mode"] == "pi-scripted"):
@@ -1227,8 +1229,19 @@ def _run_config(config: dict[str, Any]) -> dict[str, Any]:
     return json.loads(canonical_bytes(config))  # rejects floats; normalizes tuples
 
 
-def _sol_pi_config(config: dict[str, Any]) -> dict[str, Any] | None:
+def _effective_variant(config: dict[str, Any]) -> Variant:
+    """The run's variant, with a candidate's `sol_pi.config` mechanisms if it set one
+    (as `runtime.build_launch` launched it)."""
     variant = VARIANTS[config["variant"]]
+    override = config.get("sol_pi_config_override")
+    if override is None:
+        return variant
+    mechanisms = tuple(m for m in MECHANISMS if override.get(m, False))
+    return variant.model_copy(update={"mechanisms": mechanisms})
+
+
+def _sol_pi_config(config: dict[str, Any]) -> dict[str, Any] | None:
+    variant = _effective_variant(config)
     scripted = config["mode"] == "pi-scripted"
     try:
         cfg = variant.sol_pi_config(

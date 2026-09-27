@@ -56,7 +56,7 @@ def rlm_script() -> Script:
     )
 
 
-def run_s1r(tmp_path, store):
+def run_s1r(tmp_path, store, candidate=None):
     return pi_run.run_case(
         store,
         case(),
@@ -66,6 +66,7 @@ def run_s1r(tmp_path, store):
         script=rlm_script(),
         ladder=LADDER,
         synthetic_ladder=True,
+        candidate=candidate,
     )
 
 
@@ -123,3 +124,18 @@ def test_a_changed_child_prompt_fails_the_parents_replay_closed(tmp_path, monkey
     monkeypatch.setattr(pi_run, "build_launch", drifted)
     with pytest.raises(ReplayMismatch):
         pi_run.replay_run_pi(store, "r1", case(), work_dir=tmp_path / "replay")
+
+
+def test_a_candidates_sol_pi_config_is_what_ingest_checks(tmp_path):
+    store, _ = stores(tmp_path)
+    candidate = HarnessCandidate(
+        components={**SEED_CANDIDATE.components, "sol_pi.config": '{"actionFusion": true}'}
+    )
+    pi = run_s1r(tmp_path, store, candidate)
+    assert (pi.ingest.status, pi.ingest.complete) == ("settled", True), pi.stderr_tail
+    assert store.run_record("r1").config["sol_pi_config_override"] == {"actionFusion": True}
+    assert store.run_record("r1.rlm-0000").config["sol_pi_config_override"] == {
+        "actionFusion": True
+    }
+    report = pi_run.replay_run_pi(store, "r1", case(), work_dir=tmp_path / "replay")
+    assert report["status"] == "match"

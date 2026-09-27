@@ -48,6 +48,7 @@ import {
 	TOOL_IPYTHON,
 } from "./lib/rlm-protocol.ts";
 import {
+	costExhausted,
 	counters,
 	ENV_POLICY,
 	ENV_PREFIX,
@@ -155,6 +156,8 @@ interface ChildOutcome {
 	endStatus: string | null;
 	requests: number;
 	costUsd: string | null;
+	/** `orca_run` acquisitions by the child and its own children (read from their spools). */
+	acquisitions: number;
 	answer: string | null;
 	error: string | null;
 }
@@ -170,10 +173,11 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 		raw = readFileSync(join(dir, "events.jsonl"), "utf8");
 	} catch {
 		// No events file: the child never wrote a spool (ingest records it as such).
-		return { endStatus: null, requests: 0, costUsd: null, answer: null };
+		return { endStatus: null, requests: 0, costUsd: null, acquisitions: 0, answer: null };
 	}
 	const agentRequests = new Set<number>();
 	let requests = 0;
+	let acquisitions = 0;
 	const costs: string[] = [];
 	let costKnown = true;
 	let endStatus: string | null = null;
@@ -190,6 +194,12 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 				if (line.cost_usd == null) costKnown = false;
 				else costs.push(line.cost_usd as string);
 				if (agentRequests.has(line.request_index as number)) lastAgentMessage = line.message as string;
+				break;
+			case "task.acquire":
+				acquisitions++;
+				break;
+			case "rlm.child.start":
+				acquisitions += readChildSpool(join(dir, line.spool_subdir as string)).acquisitions;
 				break;
 			case "rlm.child.end":
 				requests += line.requests as number;
@@ -211,7 +221,7 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 			.map((b) => b.text ?? "")
 			.join("\n");
 	}
-	return { endStatus, requests, costUsd: costKnown ? sumDecimals(costs) : null, answer };
+	return { endStatus, requests, costUsd: costKnown ? sumDecimals(costs) : null, acquisitions, answer };
 }
 
 class Kernel {
@@ -223,6 +233,9 @@ class Kernel {
 	private nextId = 0;
 	private readonly pending = new Map<number, (reply: KernelExecReply, raw: string) => void>();
 	private ready: Promise<void> | undefined;
+	// Host calls run one at a time, in arrival order: a cell that calls rlm() from
+	// several threads must not let two children read the same remaining budget.
+	private calls: Promise<void> = Promise.resolve();
 	private rejectReady: ((err: Error) => void) | undefined;
 	private dead: string | undefined; // set once the kernel is gone; every later cell fails with it
 
@@ -295,10 +308,12 @@ class Kernel {
 				this.pending.delete(msg.id);
 				done?.(msg, raw);
 			} else if (msg.op === "call") {
-				void this.onCall(msg).then(
-					(r) => this.send({ op: "call.reply", id: msg.id, ok: r.ok, value: r.value ?? null, error: r.error ?? null }),
-					(err: unknown) =>
-						this.send({ op: "call.reply", id: msg.id, ok: false, error: err instanceof Error ? err.message : String(err) }),
+				this.calls = this.calls.then(() =>
+					this.onCall(msg).then(
+						(r) => this.send({ op: "call.reply", id: msg.id, ok: r.ok, value: r.value ?? null, error: r.error ?? null }),
+						(err: unknown) =>
+							this.send({ op: "call.reply", id: msg.id, ok: false, error: err instanceof Error ? err.message : String(err) }),
+					),
 				);
 			}
 		}
@@ -334,6 +349,9 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 	let cellIndex = 0;
 	let childCount = 0;
 	let currentCall = ""; // the ipython tool call whose cell is running (cells are sequential)
+	// Host calls are honoured only while a cell runs: not while helpers load, and not
+	// from a thread a finished cell left behind (it would cite the wrong tool call).
+	let cellRunning = false;
 
 	const refuse = (reason: "max-depth" | "max-children" | "budget", detail: string) => {
 		w.rlmLine({ type: "rlm.child.refused", tool_call_id: currentCall, reason, detail });
@@ -348,6 +366,9 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 		}
 		const remaining = s.policy.max_requests - requestsUsed();
 		if (remaining < 1) return refuse("budget", `no requests left (${requestsUsed()} of ${s.policy.max_requests} used)`);
+		const cost = costExhausted(s.policy);
+		if (cost) return refuse("budget", cost);
+		const acquisitionsLeft = s.policy.max_acquisitions - counters().acquisitions;
 
 		const index = childCount++;
 		const nnnn = childTag(index);
@@ -358,9 +379,12 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 		const sessions = join(parentSessionDir(), "children", nnnn);
 		mkdirSync(sessions, { recursive: true });
 		mkdirSync(join(stage, "rlm"), { recursive: true });
-		const text = s.components.child_prompt.replaceAll("{context}", context ?? "").replaceAll("{prompt}", prompt);
+		// One pass, so a `{prompt}` inside the context is not substituted again.
+		const text = s.components.child_prompt.replace(/\{(prompt|context)\}/g, (_, k: string) =>
+			k === "prompt" ? prompt : (context ?? ""),
+		);
 
-		const childPolicy = { ...s.policy, max_requests: remaining };
+		const childPolicy = { ...s.policy, max_requests: remaining, max_acquisitions: Math.max(0, acquisitionsLeft) };
 		if (s.policy.max_cost_usd != null) {
 			childPolicy.max_cost_usd = String(Math.max(0, Number(s.policy.max_cost_usd) - counters().costUsd));
 		}
@@ -421,6 +445,7 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 		const out = readChildSpool(childSpool);
 		const c = counters();
 		c.childRequests += out.requests;
+		c.acquisitions += out.acquisitions;
 		if (out.costUsd == null) {
 			if (out.requests > 0) c.costUnknown = true;
 		} else c.costUsd += Number(out.costUsd);
@@ -446,6 +471,7 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 	};
 
 	const kernel = new Kernel(s.python, async (call) => {
+		if (!cellRunning) return { ok: false, error: `${call.fn}() runs only inside an ipython cell` };
 		const args = call.args;
 		if (call.fn === "rlm") {
 			if (typeof args.prompt !== "string" || (args.context != null && typeof args.context !== "string")) {
@@ -470,7 +496,14 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 			await kernel.start(s.components.helpers, limits.max_output_chars);
 			currentCall = toolCallId;
 			const index = cellIndex++;
-			const { reply, raw } = await kernel.exec(params.code);
+			cellRunning = true;
+			let result: Awaited<ReturnType<Kernel["exec"]>>;
+			try {
+				result = await kernel.exec(params.code);
+			} finally {
+				cellRunning = false;
+			}
+			const { reply, raw } = result;
 			w.rlmLine({
 				type: "rlm.cell",
 				tool_call_id: toolCallId,

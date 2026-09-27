@@ -197,6 +197,10 @@ def test_sol_pi_config_toggles_are_read_back():
         ("rlm.child_prompt", "no placeholder"),
         ("rlm.child_prompt", "-{prompt}"),
         ("rlm.child_prompt", "{prompt} {unknown}"),
+        ("rlm.child_prompt", "{prompt}"),  # the model's text would lead `-p` (@file, -flag)
+        ("rlm.child_prompt", "Task: {prompt} {prompt.text}"),
+        ("rlm.child_prompt", "Task: {prompt} {prompt[a]}"),
+        ("rlm.child_prompt", "Task: {{prompt}} {prompt}"),
         ("rlm.limits", '{"max_depth": 9, "max_children": 1, "max_output_chars": 1}'),
         ("rlm.system_prompt", "   "),
     ],

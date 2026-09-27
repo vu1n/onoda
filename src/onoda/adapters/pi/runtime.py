@@ -37,6 +37,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -488,37 +489,43 @@ class LaunchResult:
 def launch(launch: Launch, *, timeout_s: float) -> LaunchResult:
     """Run a prepared `Launch` synchronously with stdin closed (Pi hangs on an
     open stdin). A timeout or non-zero exit is returned as data, never raised.
+
+    Pi runs in its own process group, and the whole group is killed when it
+    exits or times out: an RLM kernel or child Pi process must not outlive the
+    run and keep spending or writing into a spool that ingest is reading.
     """
+    proc = subprocess.Popen(
+        launch.argv,
+        cwd=launch.cwd,
+        env=launch.env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+    )
+    timed_out = False
     try:
-        proc = subprocess.run(
-            launch.argv,
-            cwd=launch.cwd,
-            env=launch.env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout = (
-            exc.stdout
-            if isinstance(exc.stdout, str)
-            else (exc.stdout or b"").decode(errors="replace")
-        )
-        stderr = (
-            exc.stderr
-            if isinstance(exc.stderr, str)
-            else (exc.stderr or b"").decode(errors="replace")
-        )
-        return LaunchResult(
-            -1, stdout, stderr, launch.spool_dir, launch.session_dir, True, launch.spool_key
-        )
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_group(proc.pid)
+        stdout, stderr = proc.communicate()
+    _kill_group(proc.pid)
     return LaunchResult(
-        proc.returncode,
-        proc.stdout,
-        proc.stderr,
+        -1 if timed_out else proc.returncode,
+        stdout,
+        stderr,
         launch.spool_dir,
         launch.session_dir,
-        False,
+        timed_out,
         launch.spool_key,
     )
+
+
+def _kill_group(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:  # the group is already empty
+        pass

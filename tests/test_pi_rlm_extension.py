@@ -81,6 +81,7 @@ def run_rlm(
     children: tuple[C.Script, ...] = (),
     limits: C.RlmLimits | None = None,
     max_requests: int = 20,
+    components: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess, Spool]:
     v = C.VARIANTS["S1r"]
     for d in ("ws", "agent", "sessions", "spool", "home", "bundle", "rlm"):
@@ -91,6 +92,8 @@ def run_rlm(
         candidate = C.HarnessCandidate(
             components={**candidate.components, "rlm.limits": limits.model_dump_json()}
         )
+    if components:
+        candidate = C.HarnessCandidate(components={**candidate.components, **components})
     policy = C.GatewayPolicy(
         allowed_tools=v.tools(),
         max_requests=max_requests,
@@ -296,3 +299,37 @@ def test_a_dead_kernel_fails_this_and_every_later_cell(tmp_path):
     assert first.is_error and second.is_error
     for cell in (first, second):
         assert json.loads(parent.obj(cell.output))["error"] == "kernel exited (3)"
+
+
+def test_child_acquisitions_are_charged_to_the_parent(tmp_path):
+    proc, parent = run_rlm(  # max_acquisitions is 2 for the whole tree
+        tmp_path,
+        [
+            turn(call("p1", "orca_run")),
+            turn(ipython("c1", "print(rlm('fetch'))")),
+            turn(call("p2", "orca_run")),
+            turn(text("done")),
+        ],
+        children=(
+            child_script(
+                turn(call("k1", "orca_run")), turn(call("k2", "orca_run")), turn(text("ok"))
+            ),
+        ),
+    )
+    assert parent.lines[-1].status == "settled", proc.stderr.decode()
+    child = read_spool(tmp_path / "spool" / "children" / "0000", C.derive_child_key(KEY, 0))
+    decisions = {ln.tool_call_id: ln.decision for ln in child.of("tool.call")}
+    assert decisions == {"k1": "allowed", "k2": "blocked"}  # 1 left after the parent's
+    assert parent.first("tool.call", tool_call_id="p2").decision == "blocked"
+
+
+def test_helpers_cannot_call_the_host_while_loading(tmp_path):
+    proc, parent = run_rlm(
+        tmp_path,
+        [turn(ipython("c1", "print(1)")), turn(text("done"))],
+        components={"rlm.helpers": "commit_state('early', 1)\n"},
+    )
+    assert parent.lines[-1].status == "settled", proc.stderr.decode()
+    assert not parent.of("rlm.state")
+    result = parent.first("tool.result", tool_call_id="c1", stage="raw")
+    assert "only inside an ipython cell" in parent.obj(result.content).decode()
