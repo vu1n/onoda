@@ -12,8 +12,14 @@ wall-clock timeout, and never raises for a non-zero exit or a timeout --
 both come back as data on `LaunchResult`.
 
 Extension load order is part of the contract (`contract.py`): the task
-extension first, SoL-Pi next when the variant has mechanisms, the scripted
-provider next when running scripted, the recorder last.
+extension first, SoL-Pi next when the effective mechanisms are non-empty,
+the RLM extension next for an `rlm` variant, the scripted provider next when
+running scripted, the recorder last. An `rlm` variant's candidate (M4;
+`SEED_CANDIDATE` when none is given) is written to `work_dir/rlm-components.json`
+and its scratch dir (`work_dir/rlm`, never the spool) is handed to the
+extension through `ENV_RLM_WORK`/`ENV_RLM_COMPONENTS`/`ENV_RLM_DEPTH`/
+`ENV_RLM_PYTHON`. A candidate's `sol_pi.config` component, when set,
+overrides the variant's mechanisms.
 
 The child environment is built from an allowlist (`_ENV_ALLOWLIST`), never
 copied from `os.environ`: only the Pi/onoda settings the runtime sets, and in
@@ -32,6 +38,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,6 +46,10 @@ from typing import Any
 from onoda.adapters.pi.contract import (
     DECIMAL_RE,
     ENV_POLICY,
+    ENV_RLM_COMPONENTS,
+    ENV_RLM_DEPTH,
+    ENV_RLM_PYTHON,
+    ENV_RLM_WORK,
     ENV_RUN_INFO,
     ENV_SCRIPT,
     ENV_SPOOL,
@@ -48,11 +59,13 @@ from onoda.adapters.pi.contract import (
     PI_PACKAGE,
     PI_VERSION,
     RECORDER_EXTENSION,
+    RLM_EXTENSION,
     RUNTIME_DIR,
     SCRIPTED_EXTENSION,
     SCRIPTED_MODEL,
     SCRIPTED_PROVIDER,
     SCRIPTED_REDUCER_MODEL,
+    SEED_CANDIDATE,
     SOL_PI_COMMIT,
     SOL_PI_ENTRY,
     SOL_PI_PACKAGE,
@@ -60,6 +73,7 @@ from onoda.adapters.pi.contract import (
     TASK_EXTENSION,
     VARIANTS,
     GatewayPolicy,
+    HarnessCandidate,
     Script,
     TaskBundle,
 )
@@ -224,6 +238,10 @@ class Launch:
     run_info_path: Path
     # The spool HMAC key: in memory only (the Pi process unlinks its copy).
     spool_key: bytes = field(default=b"", repr=False)
+    # Set for rlm variants only: the RLM scratch dir and the components file
+    # the extension reads at load (ENV_RLM_WORK / ENV_RLM_COMPONENTS).
+    rlm_work_dir: Path | None = None
+    rlm_components_path: Path | None = None
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -240,11 +258,17 @@ def build_launch(
     max_requests: int,
     max_acquisitions: int,
     reducer: tuple[str, str] | None = None,
+    candidate: HarnessCandidate | None = None,
 ) -> Launch:
     """Stage one run of `variant_id` against the bundle at `bundle_dir` under
     `work_dir`. Exactly one of `script` (offline, deterministic) or `live` (a
     real provider) must be given; a live run's `max_requests` must equal its
     own `live.max_requests`.
+
+    `candidate` is the harness candidate under test (M4): for an `rlm`
+    variant it defaults to `SEED_CANDIDATE`. Its `sol_pi.config` component,
+    when set, overrides the variant's mechanisms (the effective mechanisms
+    then drive `--tools`, the SoL-Pi config and `run_info["mechanisms"]`).
     """
     if (script is None) == (live is None):
         raise OnodaError("build_launch requires exactly one of script or live")
@@ -254,8 +278,15 @@ def build_launch(
         )
 
     variant = VARIANTS[variant_id]
-    if variant.rlm:
-        raise CapabilityError(f"variant {variant_id} needs the RLM extension, not built in M3")
+    override_mechanisms = candidate.sol_pi_mechanisms() if candidate is not None else None
+    effective_variant = (
+        variant
+        if override_mechanisms is None
+        else variant.model_copy(update={"mechanisms": override_mechanisms})
+    )
+    rlm_candidate = (
+        candidate if candidate is not None else (SEED_CANDIDATE if variant.rlm else None)
+    )
 
     # Pi runs with the workspace as cwd, so every path handed to it must be absolute.
     bundle_dir = Path(bundle_dir).resolve()
@@ -278,7 +309,7 @@ def build_launch(
     else:
         reducer_provider = reducer_model = None
     try:
-        sol_pi_cfg = variant.sol_pi_config(
+        sol_pi_cfg = effective_variant.sol_pi_config(
             reducer_provider=reducer_provider, reducer_model=reducer_model
         )
     except ValueError as exc:
@@ -289,28 +320,44 @@ def build_launch(
     spool_dir = work_dir / "spool"
     sessions_dir = work_dir / "sessions"
     agent_dir = work_dir / "agent"
-    for d in (workspace_dir, spool_dir, sessions_dir, agent_dir):
+    rlm_work_dir = work_dir / "rlm" if variant.rlm else None
+    dirs = (workspace_dir, spool_dir, sessions_dir, agent_dir)
+    if rlm_work_dir is not None:
+        dirs = (*dirs, rlm_work_dir)
+    for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
 
     if sol_pi_cfg is not None:
         _write_json(agent_dir / "sol-pi.json", sol_pi_cfg)
 
+    rlm_components_path: Path | None = None
+    if variant.rlm:
+        assert rlm_candidate is not None
+        rlm_components_path = work_dir / "rlm-components.json"
+        rlm_components_path.write_text(
+            rlm_candidate.rlm_components().model_dump_json(by_alias=True)
+        )
+
+    path_aliases = {
+        str(workspace_dir): "$WORKSPACE",
+        str(RUNTIME_DIR): "$PI_RUNTIME",
+        str(RUNTIME_DIR.resolve()): "$PI_RUNTIME",
+        # pi/node_modules may be a symlink into another checkout.
+        str((RUNTIME_DIR / "node_modules").resolve()): "$PI_RUNTIME/node_modules",
+        str(bundle_dir): "$BUNDLE",
+        str(spool_dir): "$SPOOL",
+        str(sessions_dir): "$SESSIONS",
+    }
+    if rlm_work_dir is not None:
+        path_aliases[str(rlm_work_dir)] = "$RLM_WORK"
+
     policy_path = work_dir / "policy.json"
     policy = GatewayPolicy(
-        allowed_tools=variant.tools(),
+        allowed_tools=effective_variant.tools(),
         max_requests=max_requests,
         max_acquisitions=max_acquisitions,
         max_cost_usd=live.max_cost_usd if live is not None else None,
-        path_aliases={
-            str(workspace_dir): "$WORKSPACE",
-            str(RUNTIME_DIR): "$PI_RUNTIME",
-            str(RUNTIME_DIR.resolve()): "$PI_RUNTIME",
-            # pi/node_modules may be a symlink into another checkout.
-            str((RUNTIME_DIR / "node_modules").resolve()): "$PI_RUNTIME/node_modules",
-            str(bundle_dir): "$BUNDLE",
-            str(spool_dir): "$SPOOL",
-            str(sessions_dir): "$SESSIONS",
-        },
+        path_aliases=path_aliases,
     )
     policy_path.write_text(policy.model_dump_json(by_alias=True))
 
@@ -320,18 +367,23 @@ def build_launch(
         "pi_version": PI_VERSION,
         "sol_pi_commit": SOL_PI_COMMIT if sol_pi_cfg is not None else None,
         "variant": variant_id,
-        "mechanisms": list(variant.mechanisms),
+        "mechanisms": list(effective_variant.mechanisms),
         "provider": provider,
         "model": model,
         "scripted": script is not None,
     }
     if live is not None:
         run_info["max_cost_usd"] = live.max_cost_usd
+    if rlm_candidate is not None:
+        run_info["candidate_digest"] = rlm_candidate.digest()
+        run_info["rlm_limits"] = rlm_candidate.limits.model_dump()
     _write_json(run_info_path, run_info)
 
     extensions = [str(EXTENSIONS_DIR / TASK_EXTENSION)]
     if sol_pi_cfg is not None:
         extensions.append(str(RUNTIME_DIR / SOL_PI_ENTRY))
+    if variant.rlm:
+        extensions.append(str(EXTENSIONS_DIR / RLM_EXTENSION))
     if script is not None:
         extensions.append(str(EXTENSIONS_DIR / SCRIPTED_EXTENSION))
     extensions.append(str(EXTENSIONS_DIR / RECORDER_EXTENSION))
@@ -365,6 +417,16 @@ def build_launch(
             ENV_RUN_INFO: str(run_info_path),
         }
     )
+    if rlm_work_dir is not None:
+        assert rlm_components_path is not None
+        env.update(
+            {
+                ENV_RLM_DEPTH: "0",
+                ENV_RLM_COMPONENTS: str(rlm_components_path),
+                ENV_RLM_WORK: str(rlm_work_dir),
+                ENV_RLM_PYTHON: sys.executable,
+            }
+        )
     if live is None:
         # Scripted runs never reach a real provider; PI_OFFLINE keeps Pi from
         # making any of its own background network calls too. A live run
@@ -388,7 +450,7 @@ def build_launch(
         "--model",
         model,
         "--tools",
-        ",".join(variant.tools()),
+        ",".join(effective_variant.tools()),
         "--mode",
         "json",
         "-p",
@@ -405,6 +467,8 @@ def build_launch(
         policy_path=policy_path,
         run_info_path=run_info_path,
         spool_key=spool_key,
+        rlm_work_dir=rlm_work_dir,
+        rlm_components_path=rlm_components_path,
     )
 
 

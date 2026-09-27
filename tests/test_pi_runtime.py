@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,10 @@ from conftest import requires_pi
 
 from onoda.adapters.pi.contract import (
     ENV_POLICY,
+    ENV_RLM_COMPONENTS,
+    ENV_RLM_DEPTH,
+    ENV_RLM_PYTHON,
+    ENV_RLM_WORK,
     ENV_RUN_INFO,
     ENV_SCRIPT,
     ENV_SPOOL,
@@ -24,15 +29,19 @@ from onoda.adapters.pi.contract import (
     EXTENSIONS_DIR,
     PI_VERSION,
     RECORDER_EXTENSION,
+    RLM_EXTENSION,
     RUNTIME_DIR,
     SCRIPTED_EXTENSION,
     SCRIPTED_MODEL,
     SCRIPTED_PROVIDER,
     SCRIPTED_REDUCER_MODEL,
+    SEED_CANDIDATE,
     SOL_PI_COMMIT,
     SOL_PI_ENTRY,
     TASK_EXTENSION,
     GatewayPolicy,
+    HarnessCandidate,
+    RlmComponents,
     Script,
     ScriptTurn,
     TextBlock,
@@ -266,17 +275,276 @@ def test_ladder_variant_refuses_without_ladder(tmp_path):
         )
 
 
-def test_rlm_variant_always_refuses(tmp_path):
+def test_rlm_variant_no_longer_refused(tmp_path):
     bundle_dir = make_bundle(tmp_path, ladder=True)
-    with pytest.raises(CapabilityError):
-        build_launch(
-            variant_id="S1r",
-            bundle_dir=bundle_dir,
-            work_dir=tmp_path / "work",
-            script=SCRIPT,
-            max_requests=5,
-            max_acquisitions=1,
-        )
+    build_launch(
+        variant_id="S1r",
+        bundle_dir=bundle_dir,
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+
+
+def test_rlm_argv_order_task_sol_pi_rlm_scripted_recorder(tmp_path):
+    # S1r itself has no mechanisms; a candidate's sol_pi.config override turns
+    # one on, so this also exercises "sol-pi loads when the effective
+    # mechanisms are non-empty" together with the rlm extension.
+    candidate = HarnessCandidate(
+        components={
+            **SEED_CANDIDATE.components,
+            "sol_pi.config": '{"observationPack": true}',
+        }
+    )
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    launch_obj = build_launch(
+        variant_id="S1r",
+        bundle_dir=bundle_dir,
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+        candidate=candidate,
+        reducer=(SCRIPTED_PROVIDER, SCRIPTED_REDUCER_MODEL),
+    )
+    dash_e = [launch_obj.argv[i + 1] for i, a in enumerate(launch_obj.argv) if a == "-e"]
+    assert dash_e == [
+        str(EXTENSIONS_DIR / TASK_EXTENSION),
+        str(RUNTIME_DIR / SOL_PI_ENTRY),
+        str(EXTENSIONS_DIR / RLM_EXTENSION),
+        str(EXTENSIONS_DIR / SCRIPTED_EXTENSION),
+        str(EXTENSIONS_DIR / RECORDER_EXTENSION),
+    ]
+
+
+def test_rlm_argv_order_without_mechanisms(tmp_path):
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    launch_obj = build_launch(
+        variant_id="S1r",
+        bundle_dir=bundle_dir,
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    dash_e = [launch_obj.argv[i + 1] for i, a in enumerate(launch_obj.argv) if a == "-e"]
+    assert dash_e == [
+        str(EXTENSIONS_DIR / TASK_EXTENSION),
+        str(EXTENSIONS_DIR / RLM_EXTENSION),
+        str(EXTENSIONS_DIR / SCRIPTED_EXTENSION),
+        str(EXTENSIONS_DIR / RECORDER_EXTENSION),
+    ]
+
+
+def test_rlm_components_file_and_run_info_carry_the_candidate(tmp_path):
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    work_dir = tmp_path / "work"
+    launch_obj = build_launch(
+        variant_id="S1r",
+        bundle_dir=bundle_dir,
+        work_dir=work_dir,
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    assert launch_obj.rlm_work_dir == work_dir / "rlm"
+    assert launch_obj.rlm_work_dir.is_dir()
+    assert launch_obj.rlm_components_path == work_dir / "rlm-components.json"
+    assert (
+        launch_obj.rlm_components_path.read_text()
+        == SEED_CANDIDATE.rlm_components().model_dump_json(by_alias=True)
+    )
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    assert run_info["candidate_digest"] == SEED_CANDIDATE.digest()
+    assert run_info["rlm_limits"] == SEED_CANDIDATE.limits.model_dump()
+
+
+def test_rlm_components_file_reflects_an_explicit_candidate(tmp_path):
+    candidate = HarnessCandidate(
+        components={**SEED_CANDIDATE.components, "rlm.tool_doc": "a different tool doc"}
+    )
+    assert candidate.digest() != SEED_CANDIDATE.digest()
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    work_dir = tmp_path / "work"
+    launch_obj = build_launch(
+        variant_id="S1r",
+        bundle_dir=bundle_dir,
+        work_dir=work_dir,
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+        candidate=candidate,
+    )
+    written = RlmComponents.model_validate_json(launch_obj.rlm_components_path.read_text())
+    assert written == candidate.rlm_components()
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    assert run_info["candidate_digest"] == candidate.digest()
+
+
+def test_rlm_env_vars_and_path_alias(tmp_path):
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    work_dir = tmp_path / "work"
+    launch_obj = build_launch(
+        variant_id="S1r",
+        bundle_dir=bundle_dir,
+        work_dir=work_dir,
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    assert launch_obj.env[ENV_RLM_DEPTH] == "0"
+    assert launch_obj.env[ENV_RLM_COMPONENTS] == str(launch_obj.rlm_components_path)
+    assert launch_obj.env[ENV_RLM_WORK] == str(launch_obj.rlm_work_dir)
+    assert launch_obj.env[ENV_RLM_PYTHON] == sys.executable
+    policy = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text())
+    assert policy.path_aliases[str(launch_obj.rlm_work_dir)] == "$RLM_WORK"
+
+
+def test_non_rlm_variant_has_no_rlm_env_or_alias(tmp_path):
+    bundle_dir = make_bundle(tmp_path, ladder=False)
+    launch_obj = build_launch(
+        variant_id="S0",
+        bundle_dir=bundle_dir,
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    for env_name in (ENV_RLM_DEPTH, ENV_RLM_COMPONENTS, ENV_RLM_WORK, ENV_RLM_PYTHON):
+        assert env_name not in launch_obj.env
+    assert launch_obj.rlm_work_dir is None
+    assert launch_obj.rlm_components_path is None
+    policy = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text())
+    assert not any(v == "$RLM_WORK" for v in policy.path_aliases.values())
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    assert "candidate_digest" not in run_info
+    assert "rlm_limits" not in run_info
+
+
+def test_candidate_sol_pi_config_overrides_a_non_rlm_variant(tmp_path):
+    # S1 has no mechanisms of its own; the candidate turns onlineContextCompact on.
+    candidate = HarnessCandidate(
+        components={
+            **SEED_CANDIDATE.components,
+            "sol_pi.config": '{"onlineContextCompact": true}',
+        }
+    )
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    launch_obj = build_launch(
+        variant_id="S1",
+        bundle_dir=bundle_dir,
+        work_dir=tmp_path / "work",
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+        candidate=candidate,
+    )
+    cfg = json.loads((launch_obj.agent_dir / "sol-pi.json").read_text())
+    assert cfg["onlineContextCompact"] is True
+    assert cfg["observationPack"] is False
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    assert run_info["mechanisms"] == ["onlineContextCompact"]
+    assert run_info["sol_pi_commit"] == SOL_PI_COMMIT
+    assert "--tools" in launch_obj.argv
+    tools = launch_obj.argv[launch_obj.argv.index("--tools") + 1].split(",")
+    assert "update_plan" in tools  # onlineContextCompact's mechanism tool
+    # A non-rlm variant given a candidate still records it, even without RLM.
+    assert run_info["candidate_digest"] == candidate.digest()
+    assert run_info["rlm_limits"] == candidate.limits.model_dump()
+    dash_e = [launch_obj.argv[i + 1] for i, a in enumerate(launch_obj.argv) if a == "-e"]
+    assert RLM_EXTENSION not in "".join(dash_e)  # S1 is not an rlm variant
+
+
+# ------------------------------------------------------- golden values (M3)
+
+
+def test_golden_s0_scripted_argv_env_run_info_unchanged_without_candidate(tmp_path):
+    bundle_dir = make_bundle(tmp_path, ladder=False)
+    work_dir = tmp_path / "work"
+    launch_obj = build_launch(
+        variant_id="S0",
+        bundle_dir=bundle_dir,
+        work_dir=work_dir,
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+    )
+    assert launch_obj.argv == (
+        str(RUNTIME_DIR / "node_modules/.bin/pi"),
+        "--no-extensions",
+        "-e",
+        str(EXTENSIONS_DIR / TASK_EXTENSION),
+        "-e",
+        str(EXTENSIONS_DIR / SCRIPTED_EXTENSION),
+        "-e",
+        str(EXTENSIONS_DIR / RECORDER_EXTENSION),
+        "--session-dir",
+        str(work_dir / "sessions"),
+        "--no-context-files",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--provider",
+        SCRIPTED_PROVIDER,
+        "--model",
+        SCRIPTED_MODEL,
+        "--tools",
+        "case_input,orca_run,report_states,read,bash,edit,write",
+        "--mode",
+        "json",
+        "-p",
+        "do the thing",
+    )
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    assert run_info == {
+        "schema": "onoda.pi-spool/1",
+        "pi_version": PI_VERSION,
+        "sol_pi_commit": None,
+        "variant": "S0",
+        "mechanisms": [],
+        "provider": SCRIPTED_PROVIDER,
+        "model": SCRIPTED_MODEL,
+        "scripted": True,
+    }
+    rlm_env_keys = {ENV_RLM_DEPTH, ENV_RLM_COMPONENTS, ENV_RLM_WORK, ENV_RLM_PYTHON}
+    assert not (rlm_env_keys & launch_obj.env.keys())
+    assert launch_obj.rlm_work_dir is None
+    assert launch_obj.rlm_components_path is None
+
+
+def test_golden_s3_scripted_argv_env_run_info_unchanged_without_candidate(tmp_path):
+    bundle_dir = make_bundle(tmp_path, ladder=True)
+    work_dir = tmp_path / "work"
+    launch_obj = build_launch(
+        variant_id="S3",
+        bundle_dir=bundle_dir,
+        work_dir=work_dir,
+        script=SCRIPT,
+        max_requests=5,
+        max_acquisitions=1,
+        reducer=(SCRIPTED_PROVIDER, SCRIPTED_REDUCER_MODEL),
+    )
+    dash_e = [launch_obj.argv[i + 1] for i, a in enumerate(launch_obj.argv) if a == "-e"]
+    assert dash_e == [
+        str(EXTENSIONS_DIR / TASK_EXTENSION),
+        str(RUNTIME_DIR / SOL_PI_ENTRY),
+        str(EXTENSIONS_DIR / SCRIPTED_EXTENSION),
+        str(EXTENSIONS_DIR / RECORDER_EXTENSION),
+    ]
+    run_info = json.loads(launch_obj.run_info_path.read_text())
+    assert run_info["mechanisms"] == [
+        "observationPack",
+        "evidencePreservingReducer",
+        "onlineContextCompact",
+        "actionFusion",
+    ]
+    assert run_info["sol_pi_commit"] == SOL_PI_COMMIT
+    assert "candidate_digest" not in run_info
+    assert "rlm_limits" not in run_info
+    rlm_env_keys = {ENV_RLM_DEPTH, ENV_RLM_COMPONENTS, ENV_RLM_WORK, ENV_RLM_PYTHON}
+    assert not (rlm_env_keys & launch_obj.env.keys())
+    assert launch_obj.rlm_work_dir is None
+    assert launch_obj.rlm_components_path is None
 
 
 def test_live_refused_for_missing_setting(tmp_path, monkeypatch):
@@ -504,3 +772,127 @@ def test_replay_aliases_cover_sessions_and_the_resolved_runtime(tmp_path):
     assert aliases[str(launch_obj.session_dir)] == "$SESSIONS"
     assert aliases[str(RUNTIME_DIR.resolve())] == "$PI_RUNTIME"
     assert aliases[str((RUNTIME_DIR / "node_modules").resolve())] == "$PI_RUNTIME/node_modules"
+
+
+# ---------------------------------------------------------------- run_case (M4)
+#
+# `launch` and `ingest_spool` are faked here: run_case's own job (staging,
+# committing, and building the run config) is what these tests check, not a
+# real Pi process or spool parsing (covered by test_pi_end_to_end.py and
+# test_pi_ingest.py).
+
+
+def test_run_case_threads_a_candidate_ladder_and_sol_pi_override(tmp_path, monkeypatch):
+    from onoda.adapters.pi import run as pi_run
+    from onoda.adapters.pi.ingest import IngestResult
+    from onoda.clock import LogicalClock
+    from onoda.science.contract import case_manifests, load_case
+    from onoda.store import Store
+
+    case = load_case(case_manifests()["orca6-water-mp2"])
+    store = Store(tmp_path / "store", clock=LogicalClock())
+    candidate = HarnessCandidate(
+        components={
+            **SEED_CANDIDATE.components,
+            "ladder": "# candidate ladder (test fixture)\n",
+            "sol_pi.config": '{"observationPack": true}',
+        }
+    )
+
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        pi_run, "launch", lambda prepared, *, timeout_s: _fake_launch_result(prepared)
+    )
+
+    def fake_ingest_spool(store, spool_dir, *, run_id, task, config, key, expected_session_dir):
+        captured["config"] = config
+        captured["task"] = task
+        return IngestResult(
+            run_id=run_id,
+            spool="sha256:" + "0" * 64,
+            complete=False,
+            status=None,
+            noop=False,
+            invocations=(),
+            checkpoints=(),
+            claim=None,
+            observation_pack={},
+        )
+
+    monkeypatch.setattr(pi_run, "ingest_spool", fake_ingest_spool)
+
+    pi_run.run_case(
+        store,
+        case,
+        run_id="r1",
+        variant_id="S1",
+        work_dir=tmp_path / "w",
+        script=SCRIPT,
+        candidate=candidate,
+    )
+    cfg = captured["config"]
+    assert cfg["ladder_source"] == "candidate"
+    assert cfg["sol_pi_config_override"] == {"observationPack": True}
+    assert (
+        cfg["candidate"]
+        == store.put_json(candidate.components, labels=["harness-candidate"]).digest
+    )
+    # The ladder committed to the task is the candidate's, not None.
+    ladder_bytes = store.get_bytes(captured["task"].inputs["ladder"])
+    assert ladder_bytes == b"# candidate ladder (test fixture)\n"
+
+
+def _fake_launch_result(prepared):
+    from onoda.adapters.pi.runtime import LaunchResult
+
+    (prepared.spool_dir / "events.jsonl").write_text("")
+    return LaunchResult(
+        exit_code=0,
+        stdout="",
+        stderr="",
+        spool_dir=prepared.spool_dir,
+        session_dir=prepared.session_dir,
+        timed_out=False,
+        spool_key=prepared.spool_key,
+    )
+
+
+def test_run_case_with_no_candidate_omits_candidate_config_keys(tmp_path, monkeypatch):
+    from onoda.adapters.pi import run as pi_run
+    from onoda.adapters.pi.ingest import IngestResult
+    from onoda.clock import LogicalClock
+    from onoda.science.contract import case_manifests, load_case
+    from onoda.store import Store
+
+    case = load_case(case_manifests()["orca6-water-mp2"])
+    store = Store(tmp_path / "store", clock=LogicalClock())
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        pi_run, "launch", lambda prepared, *, timeout_s: _fake_launch_result(prepared)
+    )
+
+    def fake_ingest_spool(store, spool_dir, *, run_id, task, config, key, expected_session_dir):
+        captured["config"] = config
+        return IngestResult(
+            run_id=run_id,
+            spool="sha256:" + "0" * 64,
+            complete=False,
+            status=None,
+            noop=False,
+            invocations=(),
+            checkpoints=(),
+            claim=None,
+            observation_pack={},
+        )
+
+    monkeypatch.setattr(pi_run, "ingest_spool", fake_ingest_spool)
+
+    pi_run.run_case(
+        store, case, run_id="r1", variant_id="S0", work_dir=tmp_path / "w", script=SCRIPT
+    )
+    cfg = captured["config"]
+    assert "candidate" not in cfg
+    assert "ladder_source" not in cfg
+    assert "sol_pi_config_override" not in cfg

@@ -21,12 +21,13 @@ The spool HMAC key of each launch stays in memory and is handed to ingest
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from onoda.adapters.pi.contract import SPOOL_EVENTS, VARIANTS, Script
+from onoda.adapters.pi.contract import SPOOL_EVENTS, VARIANTS, HarnessCandidate, Script
 from onoda.adapters.pi.ingest import IngestResult, _read_spool, ingest_spool, recorded_script
 from onoda.adapters.pi.runtime import LiveSettings, build_launch, launch
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
@@ -124,6 +125,7 @@ def run_case(
     max_acquisitions: int = 1,
     reducer: tuple[str, str] | None = None,
     timeout_s: float = 300,
+    candidate: HarnessCandidate | None = None,
 ) -> PiRun:
     """Run one variant on one case and ingest it as `run_id`.
 
@@ -131,6 +133,14 @@ def run_case(
     is its own `live.max_requests` (A35); a different `max_requests` here is
     refused. `reducer` = (provider, model) names the reducer for S2b/S3
     (scripted runs default to the scripted reducer).
+
+    `candidate` (M4) is threaded through to `build_launch`. With none given,
+    every argv/env/run_info/config value stays exactly what M3 produced. When
+    given, its components file is committed to the store (labelled
+    `harness-candidate`); its `ladder` component, when set, replaces the
+    ladder bytes staged into the bundle (recorded as `ladder_source:
+    "candidate"`), and its `sol_pi.config`, when set, is recorded as
+    `sol_pi_config_override`.
     """
     check_safe_id(run_id, "run id")
     if variant_id not in VARIANTS:
@@ -147,12 +157,14 @@ def run_case(
         max_requests = 16
     work_dir = Path(work_dir)
     bundle_dir = work_dir / "bundle"
+    candidate_ladder = candidate.components.get("ladder") if candidate is not None else None
+    effective_ladder = candidate_ladder.encode() if candidate_ladder is not None else ladder
     stage_bundle(
         case,
         bundle_dir,
         instruction=instruction,
         docs=docs,
-        ladder=ladder,
+        ladder=effective_ladder,
         synthetic_ladder=synthetic_ladder,
     )
     prepared = build_launch(
@@ -164,6 +176,7 @@ def run_case(
         max_requests=max_requests,
         max_acquisitions=max_acquisitions,
         reducer=reducer,
+        candidate=candidate,
     )
     # Refusals happen above; only a launchable run commits anything.
     task = _commit_task(
@@ -171,7 +184,7 @@ def run_case(
         case,
         variant_id=variant_id,
         docs=docs,
-        ladder=ladder,
+        ladder=effective_ladder,
         synthetic_ladder=synthetic_ladder,
     )
     config: dict[str, Any] = {
@@ -184,6 +197,15 @@ def run_case(
     }
     if reducer is not None:
         config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
+    if candidate is not None:
+        config["candidate"] = store.put_json(
+            candidate.components, labels=["harness-candidate"]
+        ).digest
+        if candidate_ladder is not None:
+            config["ladder_source"] = "candidate"
+        sol_pi_override = candidate.components.get("sol_pi.config")
+        if sol_pi_override is not None:
+            config["sol_pi_config_override"] = json.loads(sol_pi_override)
     if script is not None:
         config["script"] = store.put_json(
             script.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]
