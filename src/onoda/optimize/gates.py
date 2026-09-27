@@ -3,87 +3,101 @@
 GEPA's default criterion compares summed minibatch scores. SoL-Pi promotes on
 something stricter and multi-dimensional, so `SolPiGates` replaces it: GEPA
 evaluates the parent and the proposal on the same minibatch (`eval_before`,
-`eval_after`), the adapter carries each trial's `OutcomeVector` through the
-outputs, and the gates compare the two slice totals:
+`eval_after`), the adapter carries each trial's ablation `OutcomeVector`
+through the outputs, each side is `pool`ed into a `PooledArm`, and
+`gate_decision` hands the pair to M3b's `compare_arm` with the `GateSpec`'s
+tolerances and efficiency gate. There is one implementation of the two gates
+in onoda, and it lives in `onoda.ablation.gates`.
 
-- every capability metric within the `GateSpec` tolerance of the parent;
-- no increase at all in false-success claims (tolerance fixed at 0);
-- at least one efficiency metric strictly better (lower).
+A proposal is accepted only on an `eligible` verdict. `unresolved` (an
+undeclared tolerance, an unsettled run, parent and child on different cases,
+an unreported efficiency metric with no other gain) is not acceptance. A
+trial that failed has no vector, and a minibatch with one is rejected:
+nothing can be compared. GEPA's float scores play no part in the decision.
 
-All comparisons use `Decimal` on the vectors' decimal text; GEPA's float
-scores play no part in the decision. A trial that failed has no vector, and a
-proposal whose minibatch has one is rejected: nothing can be compared.
-
-`non_dominated` is the same ordering used for the final report: capability
-higher, false success lower, efficiency lower, each metric its own axis.
+`non_dominated` orders pool members' slice totals on every capability metric
+plus the spec's efficiency gate, with M3b's directions (`_gain`); an
+unreported value never dominates.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from decimal import Decimal
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol
 
-from onoda.optimize.contract import (
-    CAPABILITY_METRICS,
-    EFFICIENCY_METRICS,
-    GateSpec,
-    OutcomeVector,
-)
+from onoda.ablation.contract import CAPABILITY_METRICS, FALSE_SUCCESS, MetricCheck, OutcomeVector
+from onoda.ablation.gates import PooledArm, _gain, compare_arm, pool
+from onoda.optimize.contract import GateSpec
 
 
-def gate_decision(
-    parent: OutcomeVector, child: OutcomeVector, spec: GateSpec
-) -> tuple[bool, tuple[str, ...]]:
-    """Judge `child` against `parent` (slice totals over the same cases).
-
-    Returns (accepted, reasons). On rejection the reasons name every failed
-    gate; on acceptance they name the efficiency metrics that improved.
-    """
-    failures: list[str] = []
-    for m in CAPABILITY_METRICS:
-        p, c = Decimal(parent.capability[m]), Decimal(child.capability[m])
-        tol = spec.capability_tolerance[m]
-        assert tol is not None  # GateSpec refuses unset tolerances (A43)
-        if c < p - Decimal(tol):
-            failures.append(
-                f"capability regression: {m} {parent.capability[m]} -> "
-                f"{child.capability[m]} exceeds tolerance {tol}"
-            )
-    if child.false_success_claims > parent.false_success_claims + spec.false_success_tolerance:
-        failures.append(
-            f"false-success increase: {parent.false_success_claims} -> {child.false_success_claims}"
-        )
-    gains = [
-        f"efficiency gain: {m} {parent.efficiency[m]} -> {child.efficiency[m]}"
-        for m in EFFICIENCY_METRICS
-        if Decimal(child.efficiency[m]) < Decimal(parent.efficiency[m])
-    ]
-    if not gains:
-        failures.append("no efficiency gain: no efficiency metric strictly lower than the parent")
-    if failures:
-        return False, tuple(failures)
-    return True, tuple(gains)
-
-
-def _axes(v: OutcomeVector) -> tuple[Decimal, ...]:
-    """Every axis oriented so that larger is better."""
+def _capability_reason(c: MetricCheck) -> str:
+    if c.result == "unresolved":
+        return f"capability unresolved: {c.metric} {c.baseline} -> {c.candidate}"
+    if c.metric == FALSE_SUCCESS:
+        return f"false-success increase: {c.baseline} -> {c.candidate}"
     return (
-        *(Decimal(v.capability[m]) for m in CAPABILITY_METRICS),
-        Decimal(-v.false_success_claims),
-        *(-Decimal(v.efficiency[m]) for m in EFFICIENCY_METRICS),
+        f"capability regression: {c.metric} {c.baseline} -> {c.candidate} "
+        f"exceeds tolerance {c.tolerance}"
     )
 
 
-def dominates(a: OutcomeVector, b: OutcomeVector) -> bool:
-    """`a` is at least as good as `b` on every axis and strictly better on one."""
-    xa, xb = _axes(a), _axes(b)
-    return all(x >= y for x, y in zip(xa, xb, strict=True)) and xa != xb
+def gate_decision(
+    parent: PooledArm, child: PooledArm, spec: GateSpec
+) -> tuple[bool, tuple[str, ...]]:
+    """Judge `child` against `parent` (pooled over the same cases) with `compare_arm`.
+
+    Returns (accepted, reasons). accepted iff the verdict is `eligible`. On
+    rejection or `unresolved` the reasons name every failing or unresolved
+    check; on acceptance they name the efficiency metrics that improved.
+    """
+    cmp = compare_arm(parent, child, spec.tolerances, spec.efficiency_gate)
+    gains = tuple(
+        f"efficiency gain: {c.metric} {c.baseline} -> {c.candidate}"
+        for c in cmp.efficiency
+        if c.result == "pass"
+    )
+    if cmp.verdict == "eligible":
+        return True, gains
+    reasons: list[str] = []
+    if sorted(parent.case_ids) != sorted(child.case_ids):
+        reasons.append("parent and proposal were not run on the same cases")
+    unsettled = parent.unsettled + child.unsettled
+    if unsettled:
+        reasons.append(f"unsettled runs: {', '.join(unsettled)}")
+    reasons += [_capability_reason(c) for c in cmp.capability if c.result != "pass"]
+    if cmp.efficiency_gate == "fail":
+        reasons.append(
+            "no efficiency gain: no gated efficiency metric "
+            f"({', '.join(spec.efficiency_gate)}) strictly better than the parent"
+        )
+    elif cmp.efficiency_gate == "unresolved":
+        reasons += [
+            f"efficiency unresolved: {c.metric} {c.baseline} -> {c.candidate}"
+            for c in cmp.efficiency
+            if c.result == "unresolved"
+        ]
+    return False, tuple(reasons)
 
 
-def non_dominated(vectors: Sequence[OutcomeVector]) -> list[OutcomeVector]:
-    """The vectors no other vector dominates, in input order (ties are all kept)."""
-    return [v for v in vectors if not any(dominates(w, v) for w in vectors if w is not v)]
+def _dominates(a: PooledArm, b: PooledArm, spec: GateSpec) -> bool:
+    """`a` is no worse than `b` on every axis and better on one. Unknown never dominates."""
+    gains = [_gain(m, b.capability.get(m), a.capability.get(m)) for m in CAPABILITY_METRICS]
+    gains += [_gain(m, b.efficiency.get(m), a.efficiency.get(m)) for m in spec.efficiency_gate]
+    if any(g is None for g in gains):
+        return False
+    return all(g >= 0 for g in gains) and any(g > 0 for g in gains)
+
+
+def non_dominated(pooled: Mapping[str, PooledArm], spec: GateSpec) -> list[str]:
+    """Keys (candidate digests) of the totals no other total dominates, in input order.
+
+    Ties are all kept.
+    """
+    return [
+        k
+        for k, v in pooled.items()
+        if not any(_dominates(w, v, spec) for j, w in pooled.items() if j != k)
+    ]
 
 
 class CarriesOutcome(Protocol):
@@ -95,18 +109,20 @@ class CarriesOutcome(Protocol):
 
 # (proposal, parent total, child total, accepted, reasons); totals are None
 # when a failed trial left nothing to compare.
-DecisionObserver = Callable[
-    [Any, OutcomeVector | None, OutcomeVector | None, bool, tuple[str, ...]], None
-]
+DecisionObserver = Callable[[Any, PooledArm | None, PooledArm | None, bool, tuple[str, ...]], None]
 
 
-def _total(outputs: Sequence[CarriesOutcome] | None) -> OutcomeVector | None:
+def pool_outputs(outputs: Sequence[CarriesOutcome] | None) -> PooledArm | None:
+    """The pooled total of a batch's trials, or None if any failed or they span arms."""
     if not outputs:
         return None
     vectors = [o.outcome for o in outputs]
     if any(v is None for v in vectors):
         return None
-    return OutcomeVector.total([v for v in vectors if v is not None])
+    try:
+        return pool([v for v in vectors if v is not None])
+    except ValueError:  # trials recorded under different variants: not one arm
+        return None
 
 
 class SolPiGates:
@@ -124,12 +140,13 @@ class SolPiGates:
 
     def judge(self, proposal: Any) -> tuple[bool, tuple[str, ...]]:
         before, after = proposal.eval_before, proposal.eval_after
-        parent = _total(before.outputs if before is not None else None)
-        child = _total(after.outputs if after is not None else None)
+        parent = pool_outputs(before.outputs if before is not None else None)
+        child = pool_outputs(after.outputs if after is not None else None)
         if parent is None or child is None:
-            accepted, reasons = False, ("a minibatch trial failed; nothing to compare",)
-        elif sorted(parent.cases) != sorted(child.cases):
-            accepted, reasons = False, ("parent and proposal were not run on the same cases",)
+            accepted, reasons = (
+                False,
+                ("a minibatch trial failed or trials span variants; nothing to compare",),
+            )
         else:
             accepted, reasons = gate_decision(parent, child, self.spec)
         if self.on_decision is not None:

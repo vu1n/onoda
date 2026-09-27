@@ -9,6 +9,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from onoda.ablation.contract import CAPABILITY_METRICS, EFFICIENCY_METRICS, Tolerances
 from onoda.adapters.pi.contract import (
     COMPONENT_VALIDATORS,
     CTX_RLM_STATE,
@@ -33,14 +34,7 @@ from onoda.adapters.pi.contract import (
     parse_kernel_message,
     parse_spool_line,
 )
-from onoda.optimize.contract import (
-    CAPABILITY_METRICS,
-    EFFICIENCY_METRICS,
-    CandidateRecord,
-    GateSpec,
-    OutcomeVector,
-    SplitAssignment,
-)
+from onoda.optimize.contract import CandidateRecord, GateSpec, SplitAssignment
 
 H = "a" * 64
 
@@ -222,60 +216,46 @@ def test_candidate_digest_is_content_identity():
 
 # ------------------------------------------------------------------ optimizer
 
-FIXTURE_TOLERANCES = {m: "0" for m in CAPABILITY_METRICS}
+FIXTURE_TOLERANCES = {m: "0" for m in CAPABILITY_METRICS if m != "false_success_claims"}
+
+
+def _spec(capability: dict[str, str], gate: tuple[str, ...] = ("cost_usd",)) -> GateSpec:
+    return GateSpec(
+        tolerances=Tolerances(capability=capability, justification="fixture tolerances (A47)"),
+        efficiency_gate=gate,
+    )
 
 
 def test_gate_spec_refuses_an_unset_tolerance():
-    with pytest.raises(ValidationError, match="unresolved"):
-        GateSpec(
-            capability_tolerance={**FIXTURE_TOLERANCES, "supported_claims": None},
-            justification="fixture",
-        )
+    for missing in FIXTURE_TOLERANCES:
+        rest = {k: v for k, v in FIXTURE_TOLERANCES.items() if k != missing}
+        with pytest.raises(ValidationError, match=f"unresolved for {missing}"):
+            _spec(rest)
     with pytest.raises(ValidationError):
-        GateSpec(capability_tolerance={"supported_claims": "0"}, justification="fixture")
+        _spec({**FIXTURE_TOLERANCES, "count.supported": "-1"})
     with pytest.raises(ValidationError):
-        GateSpec(
-            capability_tolerance={**FIXTURE_TOLERANCES, "settled_runs": "-1"},
-            justification="fixture",
-        )
+        _spec({**FIXTURE_TOLERANCES, "count.supported": "1.5e"})  # not decimal text
+    with pytest.raises(ValidationError):
+        GateSpec(tolerances=None, efficiency_gate=("cost_usd",))
 
 
 def test_gate_spec_refuses_a_nonzero_false_success_tolerance():
     with pytest.raises(ValidationError, match="fixed at 0"):
-        GateSpec(
-            capability_tolerance=FIXTURE_TOLERANCES,
-            false_success_tolerance=1,
-            justification="fixture",
-        )
-    spec = GateSpec(capability_tolerance=FIXTURE_TOLERANCES, justification="fixture tolerances")
-    assert spec.false_success_tolerance == 0
+        _spec({**FIXTURE_TOLERANCES, "false_success_claims": "1"})
+    spec = _spec(FIXTURE_TOLERANCES)  # omitted: always 0 through tolerance_for
+    assert "false_success_claims" not in spec.tolerances.capability
+    assert _spec({**FIXTURE_TOLERANCES, "false_success_claims": "0"})
 
 
-def _vector(case: str, supported: str, requests: str) -> OutcomeVector:
-    return OutcomeVector(
-        candidate="sha256:" + "0" * 64,
-        cases=(case,),
-        runs=(f"run-{case}",),
-        capability={"supported_claims": supported, "settled_runs": "1"},
-        efficiency={"requests": requests, "total_tokens": "0", "cost_usd": "0"},
-        false_success_claims=0,
-    )
-
-
-def test_outcome_vector_metrics_are_decimal_text_and_total():
-    total = OutcomeVector.total([_vector("a", "2", "3"), _vector("b", "1", "4")])
-    assert total.capability == {"supported_claims": "3", "settled_runs": "2"}
-    assert total.efficiency["requests"] == "7"
-    assert total.cases == ("a", "b")
+def test_gate_spec_efficiency_gate_is_declared_and_known():
     with pytest.raises(ValidationError):
-        OutcomeVector(
-            candidate="x",
-            cases=("a",),
-            runs=(),
-            capability={"supported_claims": "1.5e", "settled_runs": "1"},
-            efficiency=dict.fromkeys(EFFICIENCY_METRICS, "0"),
-            false_success_claims=0,
-        )
+        _spec(FIXTURE_TOLERANCES, gate=())
+    with pytest.raises(ValidationError, match="unknown efficiency metric"):
+        _spec(FIXTURE_TOLERANCES, gate=("cost_usd", "requests"))  # the old M4 name
+    spec = _spec(FIXTURE_TOLERANCES, gate=tuple(EFFICIENCY_METRICS))
+    dumped = spec.model_dump(mode="json", by_alias=True)
+    assert dumped["schema"] == "onoda.gate-spec/2"
+    assert GateSpec.model_validate(dumped) == spec
 
 
 def test_split_is_deterministic_disjoint_and_labelled():

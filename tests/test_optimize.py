@@ -1,8 +1,9 @@
 """M4-006: SoL-Pi gates, the GEPA adapter, and the recorded optimization loop.
 
 Offline and fast: a fake `Runner` whose outcomes follow marker words in the
-candidate's text, and a scripted reflection callable. Gate tolerances here
-are test fixture values (A43), not operator-chosen ones.
+candidate's text, and a scripted reflection callable. Outcomes are M3b's
+ablation `OutcomeVector`s built by hand with every ablation metric key; gate
+tolerances here are test fixture values (A47), not operator-chosen ones.
 """
 
 from __future__ import annotations
@@ -14,6 +15,15 @@ from types import SimpleNamespace
 import pytest
 from gepa.core.adapter import EvaluationBatch
 
+from onoda.ablation.contract import (
+    ACTIVATION_METRICS,
+    CAPABILITY_METRICS,
+    EFFICIENCY_METRICS,
+    REDUCER_PROBE_METRICS,
+    OutcomeVector,
+    Tolerances,
+)
+from onoda.ablation.gates import PooledArm, pool
 from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate
 from onoda.clock import LogicalClock
 from onoda.errors import OnodaError
@@ -25,89 +35,165 @@ from onoda.optimize.adapter import (
     claim_score,
     objective_scores,
 )
-from onoda.optimize.contract import CandidateRecord, GateSpec, OutcomeVector, SplitAssignment
+from onoda.optimize.contract import CandidateRecord, GateSpec, SplitAssignment
 from onoda.optimize.gates import SolPiGates, gate_decision, non_dominated
 from onoda.optimize.loop import GEPA_STATE_FILE, run_optimization
 from onoda.store import Store
 
 REDUCER_MARKER = "REDUCER-RECEIPT-7f3a9c"
 EVALREF_MARKER = "EVALUATOR-REFERENCE-91c2e4"
+ARM = "S1r"  # the variant every optimizer trial runs under
 SPEC = GateSpec(
-    capability_tolerance={"supported_claims": "0", "settled_runs": "0"},
-    justification="test fixture tolerances (A43), not operator-chosen",
+    tolerances=Tolerances(
+        capability={m: "0" for m in CAPABILITY_METRICS},
+        justification="test fixture tolerances (A47), not operator-chosen",
+    ),
+    efficiency_gate=("requests.agent", "tokens.total", "cost_usd"),
 )
 SPLIT = SplitAssignment(seed=7, acceptance=("c1", "c2", "c3"), final=("f1", "f2"), exploratory=True)
 SEED_DIGEST = SEED_CANDIDATE.digest()
 
 
 def vec(
-    supported: str = "3",
-    settled: str = "1",
-    requests: str = "10",
-    tokens: str = "1000",
-    cost: str = "0.50",
+    supported: int = 3,
+    missing: int = 0,
     fs: int = 0,
-    candidate: str = "c",
-    cases: tuple[str, ...] = ("x",),
+    requests: str | None = "10",
+    tokens: str | None = "1000",
+    cost: str | None = "0.50",
+    case: str = "x",
+    run: str | None = None,
+    status: str | None = "settled",
 ) -> OutcomeVector:
-    return OutcomeVector(
-        candidate=candidate,
-        cases=cases,
-        runs=tuple(f"run-{c}" for c in cases),
-        capability={"supported_claims": supported, "settled_runs": settled},
-        efficiency={"requests": requests, "total_tokens": tokens, "cost_usd": cost},
-        false_success_claims=fs,
+    """One run's ablation vector; `fs` false-success claims are contradicted ones."""
+    capability = dict.fromkeys(CAPABILITY_METRICS, "0")
+    capability.update(
+        {
+            "count.supported": str(supported),
+            "count.missing": str(missing),
+            "count.contradicted": str(fs),
+            "false_success_claims": str(fs),
+        }
     )
+    efficiency: dict[str, str | None] = dict.fromkeys(EFFICIENCY_METRICS, "0")
+    efficiency.update({"requests.agent": requests, "tokens.total": tokens, "cost_usd": cost})
+    return OutcomeVector(
+        run_id=run or f"run-{case}",
+        arm=ARM,
+        case_id=case,
+        model="scripted",
+        synthetic=True,
+        status=status,
+        capability=capability,
+        efficiency=efficiency,
+        activation=dict.fromkeys(ACTIVATION_METRICS, "0"),
+        reducer_probe=dict.fromkeys(REDUCER_PROBE_METRICS, "0"),
+        mechanism_config=None,
+        evaluation_id=f"eval-{run or case}",
+    )
+
+
+def tot(**kw) -> PooledArm:
+    return pool([vec(**kw)])
 
 
 # ------------------------------------------------------------------- gates
 
 
-def test_gate_rejects_capability_regression_beyond_tolerance():
-    spec = GateSpec(
-        capability_tolerance={"supported_claims": "1", "settled_runs": "0"},
-        justification="fixture",
+def test_gate_spec_is_unified_on_ablation_tolerances():
+    assert SPEC.model_dump(by_alias=True)["schema"] == "onoda.gate-spec/2"
+    assert set(SPEC.tolerances.capability) == set(CAPABILITY_METRICS)
+    # false_success_claims may be left out: tolerance_for fixes it at 0.
+    rest = {m: "0" for m in CAPABILITY_METRICS if m != "false_success_claims"}
+    GateSpec(
+        tolerances=Tolerances(capability=rest, justification="f"), efficiency_gate=("cost_usd",)
     )
-    ok, reasons = gate_decision(vec(supported="3"), vec(supported="1", requests="5"), spec)
-    assert not ok and any("capability regression: supported_claims" in r for r in reasons)
+
+
+def test_gate_rejects_capability_regression_beyond_tolerance():
+    spec = SPEC.model_copy(
+        update={
+            "tolerances": Tolerances(
+                capability={**SPEC.tolerances.capability, "count.supported": "1"},
+                justification="fixture",
+            )
+        }
+    )
+    ok, reasons = gate_decision(tot(supported=3), tot(supported=1, requests="5"), spec)
+    assert not ok and any("capability regression: count.supported" in r for r in reasons)
     # Within tolerance, with an efficiency gain: accepted.
-    ok, reasons = gate_decision(vec(supported="3"), vec(supported="2", requests="5"), spec)
-    assert ok and reasons == ("efficiency gain: requests 10 -> 5",)
+    ok, reasons = gate_decision(tot(supported=3), tot(supported=2, requests="5"), spec)
+    assert ok and reasons == ("efficiency gain: requests.agent 10 -> 5",)
 
 
 def test_gate_rejects_any_false_success_increase():
-    ok, reasons = gate_decision(vec(fs=2), vec(fs=3, requests="1", cost="0.01"), SPEC)
-    assert not ok and reasons == ("false-success increase: 2 -> 3",)
+    ok, reasons = gate_decision(tot(fs=2), tot(fs=3, requests="1", cost="0.01"), SPEC)
+    assert not ok and "false-success increase: 2 -> 3" in reasons
+    assert any("capability regression: count.contradicted" in r for r in reasons)
 
 
 def test_gate_rejects_no_efficiency_gain():
-    ok, reasons = gate_decision(vec(), vec(), SPEC)
+    ok, reasons = gate_decision(tot(), tot(), SPEC)
     assert not ok and reasons[0].startswith("no efficiency gain")
     # Worse on one efficiency metric, equal elsewhere: still no gain.
-    ok, _ = gate_decision(vec(), vec(tokens="1200"), SPEC)
+    ok, _ = gate_decision(tot(), tot(tokens="1200"), SPEC)
+    assert not ok
+    # A metric outside the declared efficiency gate never counts as a gain.
+    cheaper_bytes = vec()
+    cheaper_bytes = cheaper_bytes.model_copy(
+        update={"efficiency": {**cheaper_bytes.efficiency, "context_bytes.total": "-1"}}
+    )
+    ok, _ = gate_decision(tot(), pool([cheaper_bytes]), SPEC)
     assert not ok
 
 
 def test_gate_accepts_otherwise():
     # Better capability, fewer false successes, cheaper on one metric, dearer on another.
     ok, reasons = gate_decision(
-        vec(supported="3", fs=1), vec(supported="4", fs=0, cost="0.40", tokens="1100"), SPEC
+        tot(supported=3, fs=1), tot(supported=4, fs=0, cost="0.40", tokens="1100"), SPEC
     )
     assert ok and reasons == ("efficiency gain: cost_usd 0.50 -> 0.40",)
     # Every failed gate is reported, not just the first.
-    ok, reasons = gate_decision(vec(), vec(supported="2", fs=1), SPEC)
-    assert not ok and len(reasons) == 3
+    ok, reasons = gate_decision(tot(), tot(supported=2, fs=1), SPEC)
+    assert not ok
+    assert any(r.startswith("capability regression: count.supported") for r in reasons)
+    assert "false-success increase: 0 -> 1" in reasons
+    assert any(r.startswith("no efficiency gain") for r in reasons)
+
+
+def test_gate_does_not_accept_unresolved():
+    # An unreported efficiency metric and no other gain: unresolved, not accepted.
+    ok, reasons = gate_decision(tot(cost=None), tot(cost=None), SPEC)
+    assert not ok and reasons == ("efficiency unresolved: cost_usd None -> None",)
+    # An unsettled run makes every check unresolved, however good the sums look.
+    ok, reasons = gate_decision(tot(), tot(requests="1", status="budget"), SPEC)
+    assert not ok and "unsettled runs: run-x" in reasons
+    # Parent and child on different cases: unresolved.
+    ok, reasons = gate_decision(tot(), tot(case="y", requests="1"), SPEC)
+    assert not ok and reasons[0] == "parent and proposal were not run on the same cases"
+    # A capability metric with no declared tolerance is unresolved (the spec forbids
+    # one, so drive compare_arm's unresolved path through a spec built unchecked).
+    loose = GateSpec.model_construct(
+        tolerances=Tolerances(capability={}, justification="none"),
+        efficiency_gate=SPEC.efficiency_gate,
+    )
+    ok, reasons = gate_decision(tot(), tot(requests="1"), loose)
+    assert not ok and any(r.startswith("capability unresolved: count.supported") for r in reasons)
 
 
 def test_non_dominated_on_hand_built_frontier():
-    a = vec(candidate="a", supported="5", cost="0.90")  # most capable, dearest
-    b = vec(candidate="b", supported="2", cost="0.10")  # least capable, cheapest
-    c = vec(candidate="c", supported="4", cost="0.95")  # dominated by a
-    d = vec(candidate="d", supported="5", cost="0.90")  # ties a: both kept
-    e = vec(candidate="e", supported="5", cost="0.90", fs=1)  # a with a false success
-    f = vec(candidate="f", supported="3", cost="0.50", requests="4")  # fewer requests: kept
-    front = non_dominated([a, b, c, d, e, f])
-    assert [v.candidate for v in front] == ["a", "b", "d", "f"]
+    pooled = {
+        "a": tot(supported=5, cost="0.90"),  # most capable, dearest
+        "b": tot(supported=2, missing=3, cost="0.10"),  # least capable, cheapest
+        "c": tot(supported=4, missing=1, cost="0.95"),  # dominated by a
+        "d": tot(supported=5, cost="0.90"),  # ties a: both kept
+        "e": tot(supported=5, cost="0.90", fs=1),  # a with a false success
+        "f": tot(supported=3, missing=2, cost="0.50", requests="4"),  # fewer requests: kept
+        "g": tot(supported=9, cost=None),  # unknown cost: kept, and dominates nothing
+    }
+    assert non_dominated(pooled, SPEC) == ["a", "b", "d", "f", "g"]
+    # Unknown never dominates: without g's unknown cost it would beat a, d and f.
+    assert non_dominated({"a": pooled["a"], "g": pooled["g"]}, SPEC) == ["a", "g"]
 
 
 def rollout_like(outcome):
@@ -124,21 +210,26 @@ def proposal(before, after):
 def test_solpi_gates_criterion_reads_vectors_through_gepa_outputs():
     seen = []
     gates = SolPiGates(SPEC, on_decision=lambda *a: seen.append(a))
-    p_before = [vec(candidate="p", cases=("c1",)), vec(candidate="p", cases=("c2",))]
-    better = [vec(candidate="k", cases=("c1",), requests="4"), vec(candidate="k", cases=("c2",))]
+    p_before = [vec(case="c1"), vec(case="c2")]
+    better = [vec(case="c1", requests="4"), vec(case="c2")]
     good = proposal(p_before, better)
     assert gates.should_accept(good, state=None)
     parent_total, child_total = seen[0][1], seen[0][2]
-    assert (
-        parent_total.efficiency["requests"] == "20" and child_total.efficiency["requests"] == "14"
-    )
+    assert isinstance(parent_total, PooledArm) and isinstance(child_total, PooledArm)
+    assert parent_total.efficiency["requests.agent"] == "20"
+    assert child_total.efficiency["requests.agent"] == "14"
 
     failed = proposal(p_before, [None, better[1]])
     assert not gates.should_accept(failed, state=None)
     assert "trial failed" in gates.reject_reason(failed, state=None)
 
-    elsewhere = proposal(p_before, [vec(candidate="k", cases=("c3",), requests="1")] * 2)
+    elsewhere = proposal(p_before, [vec(case="c3", requests="1")] * 2)
     assert not gates.should_accept(elsewhere, state=None)
+    assert "not run on the same cases" in gates.reject_reason(elsewhere, state=None)
+
+    other_arm = vec(case="c2", requests="1").model_copy(update={"arm": "S1"})
+    mixed = proposal(p_before, [better[0], other_arm])
+    assert not gates.should_accept(mixed, state=None)
 
 
 # ------------------------------------------------------------ fake runner
@@ -172,11 +263,12 @@ class SpyRunner:
             case_id=case_id,
             run_id=f"run-{trial_id}",
             outcome=vec(
-                supported=str(supported),
+                supported=supported,
+                missing=max(0, 3 - supported - fs),
                 requests=str(requests),
                 fs=fs,
-                candidate=digest,
-                cases=(case_id,),
+                case=case_id,
+                run=f"run-{trial_id}",
             ),
             steps=(
                 TraceStep(kind="request", source="agent", text=f"agent looks at {case_id}"),
@@ -259,7 +351,7 @@ def test_loop_gates_record_every_candidate_feedback_and_decision(tmp_path):
     seed_rec, accepted, regress, sloppy = records
     assert seed_rec.candidate == SEED_DIGEST and seed_rec.origin == "seed"
     assert accepted.parents == (SEED_DIGEST,) and accepted.reasons[0].startswith("efficiency gain")
-    assert any("capability regression: supported_claims" in r for r in regress.reasons)
+    assert any("capability regression: count.supported" in r for r in regress.reasons)
     assert any("false-success increase" in r for r in sloppy.reasons)
     assert result.accepted == (accepted,)
 
@@ -277,13 +369,20 @@ def test_loop_gates_record_every_candidate_feedback_and_decision(tmp_path):
         assert rec.feedback in {e.payload_refs["packet"] for e in feedback}
         assert rec.outcomes and all(store.has_object(o) for o in rec.outcomes)
         for o in rec.outcomes:
-            assert OutcomeVector.model_validate(store.get_json(o)).candidate == rec.candidate
+            assert "optimizer-outcome" in store.descriptor(o).labels
+            v = OutcomeVector.model_validate(store.get_json(o))
+            assert v.arm == ARM and v.case_id in SPLIT.acceptance
     for e in decisions:
         d = store.get_json(e.payload_refs["decision"])
-        assert d["parent_total"]["cases"] == d["child_total"]["cases"]
+        assert sorted(d["parent_total"]["case_ids"]) == sorted(d["child_total"]["case_ids"])
+    _, valsets = journal(tmp_path, "optimizer.valset")
+    for e in valsets:
+        assert "optimizer-valset" in store.descriptor(e.payload_refs["total"]).labels
+        total = PooledArm.model_validate(store.get_json(e.payload_refs["total"]))
+        assert sorted(total.case_ids) == sorted(SPLIT.acceptance)
 
     # The accepted child dominates the seed, so the final set is just the child.
-    assert [v.candidate for v in result.non_dominated] == [accepted.candidate]
+    assert list(result.non_dominated) == [accepted.candidate]
     assert store.get_json(result.final)["non_dominated"] == [accepted.candidate]
 
 
@@ -294,7 +393,9 @@ def test_runner_never_sees_a_final_split_case(tmp_path):
     assert seen and seen <= set(SPLIT.acceptance) and not seen & set(SPLIT.final)
 
     ledger = SearchLedger(Store(tmp_path / "x"), "s", max_trials=5, max_reflections=1)
-    adapter = OnodaAdapter(runner, ledger, cases=SPLIT.acceptance)
+    adapter = OnodaAdapter(
+        runner, ledger, cases=SPLIT.acceptance, efficiency_gate=SPEC.efficiency_gate
+    )
     before = len(runner.calls)
     with pytest.raises(OnodaError, match="outside the acceptance slice"):
         adapter.evaluate(["c1", "f1"], dict(SEED_CANDIDATE.components))
@@ -316,7 +417,7 @@ def test_invalid_proposal_is_recorded_and_never_run(tmp_path):
     assert len(invalid) == 2 and all(r.candidate is None and not r.outcomes for r in invalid)
     assert all(r.feedback and any("empty" in x for x in r.reasons) for r in invalid)
     assert result.accepted == ()
-    assert [v.candidate for v in result.non_dominated] == [SEED_DIGEST]
+    assert list(result.non_dominated) == [SEED_DIGEST]
 
 
 def test_reflective_dataset_and_records_exclude_reducer_and_reference_text(tmp_path):
@@ -341,12 +442,12 @@ def test_reflective_dataset_and_records_exclude_reducer_and_reference_text(tmp_p
 def test_adapter_drops_untrusted_steps_itself(tmp_path):
     runner = SpyRunner()
     ledger = SearchLedger(Store(tmp_path), "s", max_trials=5, max_reflections=1)
-    adapter = OnodaAdapter(runner, ledger, cases=("c1",))
+    adapter = OnodaAdapter(runner, ledger, cases=("c1",), efficiency_gate=SPEC.efficiency_gate)
     batch = adapter.evaluate(["c1"], dict(SEED_CANDIDATE.components), capture_traces=True)
     (r,) = batch.trajectories
     assert {s.source for s in r.steps} == {"agent", "raw_tool"}
     assert batch.scores == [1.0]
-    assert batch.objective_scores[0]["neg.efficiency.requests"] == -10.0
+    assert batch.objective_scores[0]["neg.efficiency.requests.agent"] == -10.0
     # Even a trajectory that smuggles a reducer step is filtered when reflecting.
     smuggled = EvaluationBatch(
         outputs=[r],
@@ -360,11 +461,23 @@ def test_adapter_drops_untrusted_steps_itself(tmp_path):
 
 
 def test_scores_and_objectives_are_exact_until_the_gepa_boundary():
-    assert str(claim_score({"a": "supported", "b": "missing", "c": "unresolved"})) == "0.5"
-    assert claim_score({"a": "unresolved"}) == 0
-    obj = objective_scores(vec(supported="2", fs=1, cost="0.25"))
-    assert obj["capability.supported_claims"] == 2.0
-    assert obj["neg.false_success_claims"] == -1.0 and obj["neg.efficiency.cost_usd"] == -0.25
+    # count.unresolved is excluded from the denominator.
+    half = vec(supported=1, missing=1)
+    half = half.model_copy(update={"capability": {**half.capability, "count.unresolved": "4"}})
+    assert str(claim_score(half)) == "0.5"
+    assert claim_score(vec(supported=0)) == 0
+    assert str(claim_score(vec(supported=1, fs=1))) == "0.5"  # contradicted is graded
+    obj = objective_scores(vec(supported=2, fs=1, cost="0.25"), SPEC.efficiency_gate)
+    assert obj["capability.count.supported"] == 2.0
+    assert obj["neg.capability.false_success_claims"] == -1.0
+    assert obj["neg.efficiency.cost_usd"] == -0.25
+    assert set(obj) == {
+        *(f"{'neg.' if d == 'lower' else ''}capability.{m}" for m, d in CAPABILITY_METRICS.items()),
+        *(f"neg.efficiency.{m}" for m in SPEC.efficiency_gate),
+    }
+    assert objective_scores(vec(cost=None), SPEC.efficiency_gate)[
+        "neg.efficiency.cost_usd"
+    ] == float("-inf")
     with pytest.raises(ValueError):
         Trial(case_id="c", run_id="r", outcome=vec(), verdicts={"m1.r1": "probably"})
 
@@ -377,7 +490,7 @@ def test_failed_trials_are_charged_and_their_text_not_kept(tmp_path):
     assert result.trials == len(runner.calls)
     assert EVALREF_MARKER.encode() not in all_bytes(tmp_path / "opt")
     # A pool member with a failed trial has no total, so the frontier is empty.
-    assert result.non_dominated == () and result.final is None
+    assert result.non_dominated == {} and result.final is None
 
 
 def test_resume_from_run_dir_does_not_reevaluate_the_seed(tmp_path):

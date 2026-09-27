@@ -21,9 +21,9 @@ search id:
   (`optimizer.feedback`);
 - every gate decision with the parent and child minibatch totals
   (`optimizer.decision`);
-- every trial's outcome vector (see `adapter.py`) and each pool member's
-  acceptance-slice total (`optimizer.valset`);
-- the final non-dominated set (`optimizer.final`).
+- every trial's ablation `OutcomeVector` (see `adapter.py`) and each pool
+  member's acceptance-slice `PooledArm` total (`optimizer.valset`);
+- the final non-dominated set over those totals (`optimizer.final`).
 
 Budgets are experiment-level and counted from the journal: `max_trials`
 counts runner calls, failed ones included; `max_reflections` counts calls to
@@ -31,7 +31,7 @@ the reflection callable. The loop stops before an iteration it could not
 finish (worst case: parent and child minibatches plus a full-slice
 evaluation), so a decision is never cut off mid-way by the trial budget.
 
-Resume: GEPA's `run_dir` holds its pickled state (`gepa_state.bin`, A42:
+Resume: GEPA's `run_dir` holds its pickled state (`gepa_state.bin`, A46:
 scratch, never imported or exported). GEPA 0.1.4's engine evaluates the seed
 on the validation set *before* it loads that state and then discards the
 result; `_ResumableFullEval` narrows that evaluation to nothing when the
@@ -52,6 +52,7 @@ from gepa.strategies.eval_policy import FullEvaluationPolicy
 from gepa.strategies.instruction_proposal import InstructionProposalSignature
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from onoda.ablation.gates import PooledArm
 from onoda.adapters.pi.contract import HarnessCandidate
 from onoda.errors import OnodaError
 from onoda.optimize.adapter import (
@@ -65,7 +66,6 @@ from onoda.optimize.contract import (
     CandidateRecord,
     Decision,
     GateSpec,
-    OutcomeVector,
     SplitAssignment,
 )
 from onoda.optimize.gates import SolPiGates, non_dominated
@@ -88,7 +88,7 @@ class OptimizationResult(BaseModel):
     search_id: str
     seed: str  # HarnessCandidate.digest()
     accepted: tuple[CandidateRecord, ...]
-    non_dominated: tuple[OutcomeVector, ...]  # acceptance-slice totals
+    non_dominated: dict[str, PooledArm]  # candidate digest -> acceptance-slice total
     final: str | None  # store digest of the final-set record
     stop_reason: str
     trials: int
@@ -207,8 +207,8 @@ class _Proposer:
 def _decision_observer(ledger: SearchLedger, adapter: OnodaAdapter, search_id: str):
     def observe(
         proposal: Any,
-        parent_total: OutcomeVector | None,
-        child_total: OutcomeVector | None,
+        parent_total: PooledArm | None,
+        child_total: PooledArm | None,
         accepted: bool,
         reasons: tuple[str, ...],
     ) -> None:
@@ -223,12 +223,8 @@ def _decision_observer(ledger: SearchLedger, adapter: OnodaAdapter, search_id: s
             "candidate": digest,
             "parent": pend.parent,
             "cases": [r.case_id for r in after],
-            "parent_total": parent_total.model_dump(mode="json", by_alias=True)
-            if parent_total
-            else None,
-            "child_total": child_total.model_dump(mode="json", by_alias=True)
-            if child_total
-            else None,
+            "parent_total": parent_total.model_dump(mode="json") if parent_total else None,
+            "child_total": child_total.model_dump(mode="json") if child_total else None,
             "accepted": accepted,
             "reasons": list(reasons),
         }
@@ -262,25 +258,27 @@ def _bind_search(ledger: SearchLedger, split: SplitAssignment, spec: GateSpec) -
     ledger.event("optimizer.search", refs={"split": split_ref, "gates": spec_ref}, once=True)
 
 
-def _final_set(ledger: SearchLedger) -> tuple[list[OutcomeVector], str | None]:
-    totals: dict[str, tuple[str, OutcomeVector]] = {}
+def _final_set(ledger: SearchLedger, spec: GateSpec) -> tuple[dict[str, PooledArm], str | None]:
+    refs: dict[str, str] = {}
+    totals: dict[str, PooledArm] = {}
     for e in ledger.events("optimizer.valset"):
         cand, ref = e.payload.get("candidate"), e.payload_refs.get("total")
         if ref is not None and cand not in totals:
-            totals[cand] = (ref, OutcomeVector.model_validate(ledger.store.get_json(ref)))
-    front = non_dominated([v for _, v in totals.values()])
+            refs[cand] = ref
+            totals[cand] = PooledArm.model_validate(ledger.store.get_json(ref))
+    front = non_dominated(totals, spec)
     if not front:
-        return [], None
+        return {}, None
     record = {
-        "schema": "onoda.optimizer-final/1",
+        "schema": "onoda.optimizer-final/2",
         "search_id": ledger.search_id,
-        "non_dominated": [v.candidate for v in front],
-        "totals": [totals[v.candidate][0] for v in front],
+        "non_dominated": front,
+        "totals": [refs[c] for c in front],
         "pool": sorted(totals),
     }
     ref = ledger.put(record, "optimizer-final")
     ledger.event("optimizer.final", refs={"final": ref}, once=True)
-    return front, ref
+    return {c: totals[c] for c in front}, ref
 
 
 def run_optimization(
@@ -322,7 +320,7 @@ def run_optimization(
     )
 
     cases = list(split.acceptance)
-    adapter = OnodaAdapter(runner, ledger, cases=cases)
+    adapter = OnodaAdapter(runner, ledger, cases=cases, efficiency_gate=gates.efficiency_gate)
     resuming = (run_path / GEPA_STATE_FILE).exists()
     if not any(
         e.payload.get("candidate") == seed_digest for e in ledger.events("optimizer.valset")
@@ -390,7 +388,7 @@ def run_optimization(
                 )
             adapter.pending.clear()
 
-    front, final_ref = _final_set(ledger)
+    front, final_ref = _final_set(ledger, gates)
     accepted = [
         CandidateRecord.model_validate(store.get_json(e.payload_refs["record"]))
         for e in ledger.events("optimizer.candidate")
@@ -400,7 +398,7 @@ def run_optimization(
         search_id=search_id,
         seed=seed_digest,
         accepted=tuple(accepted),
-        non_dominated=tuple(front),
+        non_dominated=front,
         final=final_ref,
         stop_reason=stop_reason,
         trials=ledger.trials,

@@ -7,17 +7,20 @@ adapter asks the injected `Runner` for one `Trial`: a real recorded run in
 the agent store, graded by the evaluator. M4-007 implements `Runner` over Pi;
 tests use a fake.
 
-Scores. GEPA's per-example score is the case's claim precision from the
-evaluator's verdict labels,
+Scores. A trial's outcome is M3b's per-run ablation `OutcomeVector`
+(`arm` = the run's variant). GEPA's per-example score is the case's claim
+precision from its capability counts,
 
-    supported / (supported + missing + contradicted + unsupported)
+    count.supported / (count.supported + count.missing
+                       + count.contradicted + count.unsupported)
 
-(`unresolved` claims are excluded; no graded claim scores 0). It is computed
+(`count.unresolved` is excluded; no graded claim scores 0). It is computed
 as a `Decimal` and turned into a float only at the GEPA boundary; it drives
 GEPA's candidate selection, never promotion, which is the SoL-Pi gates' job
-(`gates.py`) over the `OutcomeVector`. `objective_scores` carries the vector
-for GEPA's hybrid frontier, oriented higher-is-better: capability metrics as
-is, false-success claims and efficiency metrics negated.
+(`gates.py`). `objective_scores` carries every capability metric and the
+spec's gated efficiency metrics for GEPA's hybrid frontier, oriented
+higher-is-better with M3b's directions ("lower" metrics negated); an
+unreported value is `-inf`.
 
 Reflective dataset. Built only from trace steps whose source is `agent` or
 `raw_tool`, plus the verdict words per claim tag. Reducer receipts and
@@ -26,7 +29,9 @@ does not trust the runner to have filtered them. Nothing else from a trial
 (run ids aside) reaches reflection or the optimization store.
 
 Records. `SearchLedger` writes the optimization store: every trial's
-`OutcomeVector` (label `optimizer-outcome`) and a journal under the search id.
+ablation `OutcomeVector` (label `optimizer-outcome`), each pool member's
+acceptance-slice `PooledArm` (label `optimizer-valset`), and a journal under
+the search id.
 A trial is charged (journal event `optimizer.trial`) before the runner is
 called, so a crash can never un-spend budget, and the experiment-level trial
 and reflection budgets are counted from that journal, which survives resume.
@@ -44,15 +49,16 @@ from typing import Any, Literal, Protocol
 from gepa.core.adapter import EvaluationBatch
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from onoda.ablation.contract import CAPABILITY_METRICS, EFFICIENCY_METRICS, OutcomeVector
 from onoda.adapters.pi.contract import HarnessCandidate
 from onoda.adapters.pi.task import VERDICTS
 from onoda.errors import OnodaError
-from onoda.optimize.contract import CAPABILITY_METRICS, EFFICIENCY_METRICS, OutcomeVector
+from onoda.optimize.gates import pool_outputs
 from onoda.store import Store, check_safe_id
 
 AGENT_VISIBLE_SOURCES = ("agent", "raw_tool")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._?-]{0,63}$")
-_GRADED = ("supported", "missing", "contradicted", "unsupported")
+_GRADED = ("count.supported", "count.missing", "count.contradicted", "count.unsupported")
 
 
 class _Frozen(BaseModel):
@@ -97,28 +103,47 @@ class BudgetExhausted(OnodaError):
     """The search's trial or reflection budget is spent."""
 
 
-def claim_score(verdicts: Mapping[str, str]) -> Decimal:
-    """supported / graded claims (unresolved excluded); 0 when nothing was graded."""
-    words = list(verdicts.values())
-    graded = sum(words.count(w) for w in _GRADED)
-    return Decimal(words.count("supported")) / graded if graded else Decimal(0)
+def claim_score(outcome: OutcomeVector) -> Decimal:
+    """count.supported / graded claims (unresolved excluded); 0 when nothing was graded."""
+    graded = sum(Decimal(outcome.capability[m]) for m in _GRADED)
+    return Decimal(outcome.capability["count.supported"]) / graded if graded else Decimal(0)
 
 
-def objective_scores(v: OutcomeVector) -> dict[str, float]:
-    """The vector as GEPA objectives, all higher-is-better (floats only for GEPA)."""
-    out = {f"capability.{m}": float(Decimal(v.capability[m])) for m in CAPABILITY_METRICS}
-    out["neg.false_success_claims"] = float(-v.false_success_claims)
-    out.update(
-        {f"neg.efficiency.{m}": float(-Decimal(v.efficiency[m])) for m in EFFICIENCY_METRICS}
-    )
+def _objectives(efficiency_gate: Sequence[str]) -> list[tuple[str, str, str]]:
+    """(metric, vector field, direction) for every GEPA objective."""
+    return [
+        *((m, "capability", d) for m, d in CAPABILITY_METRICS.items()),
+        *((m, "efficiency", EFFICIENCY_METRICS[m]) for m in efficiency_gate),
+    ]
+
+
+def _key(field: str, metric: str, direction: str) -> str:
+    return f"{'neg.' if direction == 'lower' else ''}{field}.{metric}"
+
+
+def objective_scores(v: OutcomeVector, efficiency_gate: Sequence[str]) -> dict[str, float]:
+    """The vector as GEPA objectives, all higher-is-better (floats only for GEPA).
+
+    Capability metrics (all) and the gated efficiency metrics; "lower"
+    metrics are negated; an unreported value is -inf.
+    """
+    out: dict[str, float] = {}
+    for metric, fld, direction in _objectives(efficiency_gate):
+        x = getattr(v, fld).get(metric)
+        if x is None:
+            out[_key(fld, metric, direction)] = float("-inf")
+        else:
+            out[_key(fld, metric, direction)] = float(
+                -Decimal(x) if direction == "lower" else Decimal(x)
+            )
     return out
 
 
-def _failed_objectives() -> dict[str, float]:
-    out = {f"capability.{m}": 0.0 for m in CAPABILITY_METRICS}
-    out["neg.false_success_claims"] = float("-inf")
-    out.update({f"neg.efficiency.{m}": float("-inf") for m in EFFICIENCY_METRICS})
-    return out
+def _failed_objectives(efficiency_gate: Sequence[str]) -> dict[str, float]:
+    return {
+        _key(fld, metric, direction): 0.0 if direction == "higher" else float("-inf")
+        for metric, fld, direction in _objectives(efficiency_gate)
+    }
 
 
 @dataclass(frozen=True)
@@ -215,11 +240,10 @@ class SearchLedger:
 
     def record_valset(self, candidate: str, rollouts: Sequence[Rollout]) -> None:
         """A pool member's full acceptance-slice evaluation (for the final frontier)."""
-        vectors = [r.outcome for r in rollouts]
-        if any(v is None for v in vectors):
+        total = pool_outputs(rollouts)
+        if total is None:  # a trial failed, or the trials span variants
             self.event("optimizer.valset", payload={"candidate": candidate, "failed": True})
             return
-        total = OutcomeVector.total([v for v in vectors if v is not None])
         ref = self.put(total.model_dump(mode="json", by_alias=True), "optimizer-valset")
         self.event(
             "optimizer.valset", refs={"total": ref}, payload={"candidate": candidate}, once=True
@@ -244,10 +268,18 @@ class OnodaAdapter:
 
     propose_new_texts = None  # the loop passes its own proposer to GEPA
 
-    def __init__(self, runner: Runner, ledger: SearchLedger, *, cases: Sequence[str]):
+    def __init__(
+        self,
+        runner: Runner,
+        ledger: SearchLedger,
+        *,
+        cases: Sequence[str],
+        efficiency_gate: Sequence[str],
+    ):
         self.runner = runner
         self.ledger = ledger
         self.cases = frozenset(cases)
+        self.efficiency_gate = tuple(efficiency_gate)
         # Candidate digests whose next evaluation is GEPA's full-slice one
         # (the seed at start, a child right after its gates accept it).
         self.awaiting_valset: set[str] = set()
@@ -259,10 +291,11 @@ class OnodaAdapter:
             trial = self.runner.run(candidate, case_id, trial_id=trial_id)
             if not isinstance(trial, Trial):
                 raise TypeError("runner did not return a Trial")
-            if trial.case_id != case_id or trial.outcome.candidate != digest:
-                raise ValueError("runner returned a trial for another case or candidate")
-            if tuple(trial.outcome.cases) != (case_id,):
-                raise ValueError("trial outcome must cover exactly its case")
+            if trial.case_id != case_id or trial.outcome.case_id != case_id:
+                raise ValueError("runner returned a trial for another case")
+            if trial.outcome.run_id != trial.run_id:
+                raise ValueError("trial outcome is for another run")
+            score = claim_score(trial.outcome)  # a vector missing a count fails the trial
         except Exception as exc:  # a failed trial is data, not a crash (GEPA's contract)
             failed = type(exc).__name__  # never the message: it could quote anything
             self.ledger.event(
@@ -285,7 +318,7 @@ class OnodaAdapter:
             digest,
             trial.outcome,
             ref,
-            claim_score(trial.verdicts),
+            score,
             dict(trial.verdicts),
             steps,
         )
@@ -307,7 +340,9 @@ class OnodaAdapter:
             scores=[float(r.score) for r in rollouts],
             trajectories=list(rollouts) if capture_traces else None,
             objective_scores=[
-                objective_scores(r.outcome) if r.outcome is not None else _failed_objectives()
+                objective_scores(r.outcome, self.efficiency_gate)
+                if r.outcome is not None
+                else _failed_objectives(self.efficiency_gate)
                 for r in rollouts
             ],
         )

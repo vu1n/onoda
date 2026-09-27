@@ -2,10 +2,17 @@
 
 GEPA (`gepa==0.1.4`, provenance S17) searches over `HarnessCandidate`s
 (`onoda.adapters.pi.contract`). Every trial is a real recorded run; its
-evaluator verdicts become an `OutcomeVector`. SoL-Pi's two promotion gates,
-fixed by a `GateSpec`, decide acceptance: every capability metric within its
-predeclared tolerance of the parent, no increase at all in false-success
-claims, and at least one efficiency metric strictly better.
+outcome is M3b's per-run `onoda.ablation.contract.OutcomeVector` (built by
+`onoda.ablation.metrics.outcome_vector`, `arm` = the run's variant), and a
+minibatch or slice total is `onoda.ablation.gates.pool` -> `PooledArm`. The
+optimizer has no metric names of its own: capability and efficiency metrics
+are `onoda.ablation.contract.CAPABILITY_METRICS` / `EFFICIENCY_METRICS`.
+
+SoL-Pi's two promotion gates are M3b's `compare_arm`, fixed by a `GateSpec`:
+every capability metric within its predeclared tolerance of the parent (the
+false-success tolerance is always 0), and at least one declared efficiency
+metric strictly better. A candidate is promoted only on an `eligible`
+verdict; `unresolved` is never promotion.
 
 The optimizer sees only the acceptance slice of a `SplitAssignment`; the
 final slice is never evaluated during a search. Every candidate and decision
@@ -18,108 +25,49 @@ Metric values are decimal text; nothing here is a float.
 from __future__ import annotations
 
 import random
-from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from onoda.adapters.pi.contract import DECIMAL_RE
+from onoda.ablation.contract import (
+    CAPABILITY_METRICS,
+    EFFICIENCY_METRICS,
+    FALSE_SUCCESS,
+    Tolerances,
+)
 
-# Higher is better. `supported_claims`: claims the deterministic parser
-# supports; `settled_runs`: runs whose spool ended `settled`.
-CAPABILITY_METRICS = ("supported_claims", "settled_runs")
-# Lower is better. Parent and child runs both count (children charge the parent).
-EFFICIENCY_METRICS = ("requests", "total_tokens", "cost_usd")
+GATE_SPEC_SCHEMA = "onoda.gate-spec/2"
 
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
 
-def _decimals(v: dict[str, str], names: tuple[str, ...], what: str) -> dict[str, str]:
-    if set(v) != set(names):
-        raise ValueError(f"{what} metrics must be exactly {', '.join(names)}")
-    for k, x in v.items():
-        if not DECIMAL_RE.match(x):
-            raise ValueError(f"{what} metric {k} is not decimal text: {x!r}")
-    return v
-
-
-class OutcomeVector(_Frozen):
-    """One candidate on one case (or, via `total`, on a slice)."""
-
-    schema_: Literal["onoda.outcome-vector/1"] = Field("onoda.outcome-vector/1", alias="schema")
-    candidate: str  # HarnessCandidate.digest()
-    cases: tuple[str, ...]  # one case id, or the slice a total covers
-    runs: tuple[str, ...]  # run ids in the agent store
-    capability: dict[str, str]
-    efficiency: dict[str, str]
-    false_success_claims: int = Field(ge=0)  # contradicted + unsupported (evaluator metric)
-
-    @field_validator("capability")
-    @classmethod
-    def _cap(cls, v: dict[str, str]) -> dict[str, str]:
-        return _decimals(v, CAPABILITY_METRICS, "capability")
-
-    @field_validator("efficiency")
-    @classmethod
-    def _eff(cls, v: dict[str, str]) -> dict[str, str]:
-        return _decimals(v, EFFICIENCY_METRICS, "efficiency")
-
-    @classmethod
-    def total(cls, vectors: list[OutcomeVector]) -> OutcomeVector:
-        """Sum per-case vectors of one candidate into a slice total."""
-        if not vectors or len({v.candidate for v in vectors}) != 1:
-            raise ValueError("total() needs vectors of exactly one candidate")
-
-        def add(field: str, names: tuple[str, ...]) -> dict[str, str]:
-            return {n: str(sum(Decimal(getattr(v, field)[n]) for v in vectors)) for n in names}
-
-        return cls(
-            candidate=vectors[0].candidate,
-            cases=tuple(c for v in vectors for c in v.cases),
-            runs=tuple(r for v in vectors for r in v.runs),
-            capability=add("capability", CAPABILITY_METRICS),
-            efficiency=add("efficiency", EFFICIENCY_METRICS),
-            false_success_claims=sum(v.false_success_claims for v in vectors),
-        )
-
-
 class GateSpec(_Frozen):
     """SoL-Pi's promotion gates with operator-set tolerances (A18, A47).
 
-    Every capability metric needs a tolerance (decimal text, >= 0): a
-    candidate may fall at most that far below its parent. `None` means the
-    operator has not chosen one, and the spec refuses to exist, so the loop
-    cannot run on a guessed threshold. `false_success_tolerance` is fixed at
-    0 by SOL_PI_DELTA §5.
+    `tolerances` must declare every capability metric except
+    `false_success_claims` (always 0, via `tolerance_for`): an undeclared one
+    would leave every comparison `unresolved`, so the spec refuses to exist
+    and the loop cannot run on a missing threshold. `efficiency_gate` names
+    the efficiency metrics that may count as an improvement, declared before
+    the search (SOL_PI_DELTA §5).
     """
 
-    schema_: Literal["onoda.gate-spec/1"] = Field("onoda.gate-spec/1", alias="schema")
-    capability_tolerance: dict[str, str | None]
-    false_success_tolerance: int = 0
-    justification: str = Field(min_length=1)  # why these tolerances (A18: predeclared, justified)
+    schema_: Literal["onoda.gate-spec/2"] = Field(GATE_SPEC_SCHEMA, alias="schema")
+    tolerances: Tolerances
+    efficiency_gate: tuple[str, ...] = Field(min_length=1)
 
-    @field_validator("capability_tolerance")
-    @classmethod
-    def _tolerances(cls, v: dict[str, str | None]) -> dict[str, str | None]:
-        if set(v) != set(CAPABILITY_METRICS):
-            raise ValueError(f"a tolerance is required for each of {', '.join(CAPABILITY_METRICS)}")
-        unset = sorted(k for k, x in v.items() if x is None)
+    @model_validator(mode="after")
+    def _declared(self) -> GateSpec:
+        required = [m for m in CAPABILITY_METRICS if m != FALSE_SUCCESS]
+        unset = [m for m in required if m not in self.tolerances.capability]
         if unset:
             raise ValueError(f"gate tolerance unresolved for {', '.join(unset)} (A47)")
-        for k, x in v.items():
-            assert x is not None
-            if not DECIMAL_RE.match(x) or Decimal(x) < 0:
-                raise ValueError(f"tolerance for {k} is not a non-negative decimal: {x!r}")
-        return v
-
-    @field_validator("false_success_tolerance")
-    @classmethod
-    def _zero(cls, v: int) -> int:
-        if v != 0:
-            raise ValueError("false_success_tolerance is fixed at 0 (SOL_PI_DELTA §5)")
-        return v
+        unknown = [m for m in self.efficiency_gate if m not in EFFICIENCY_METRICS]
+        if unknown:
+            raise ValueError(f"unknown efficiency metric {', '.join(map(repr, unknown))}")
+        return self
 
 
 class SplitAssignment(_Frozen):
@@ -171,7 +119,7 @@ class CandidateRecord(_Frozen):
     """One proposed candidate and what happened to it. Written once, never updated.
 
     `invalid`: failed `HarnessCandidate` validation and was never run.
-    `outcomes`: store digests of the OutcomeVector JSON per evaluated case.
+    `outcomes`: store digests of the ablation OutcomeVector JSON per evaluated case.
     `feedback`: digest of the reflective-dataset packet the proposal came from.
     """
 
