@@ -10,12 +10,17 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import yaml
 
 from onoda.errors import OnodaError
 from onoda.store import Store
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+_M = TypeVar("_M", bound="BaseModel")
 
 
 def _store(path: str, *, evaluator: bool = False) -> Store:
@@ -424,7 +429,7 @@ def cmd_pi_evaluate(a) -> Any:
     }
 
 
-def _read_model(cls, path: str):
+def _read_model(cls: type[_M], path: str) -> _M:
     text = Path(path).read_text()
     data = yaml.safe_load(text) if path.endswith((".yaml", ".yml")) else json.loads(text)
     try:
@@ -466,8 +471,6 @@ def cmd_optimize_run(a) -> Any:
     from onoda.optimize.pi_runner import PiRunner
     from onoda.science.contract import CASES_ROOT, case_manifests, load_case
 
-    # A live search needs a live agent and a live reflection model; neither is
-    # authorized (A11, A35), so only the scripted mode exists.
     if a.live:
         raise OnodaError(
             "a live optimization needs live agent and reflection settings; none are "

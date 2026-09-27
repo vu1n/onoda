@@ -150,7 +150,12 @@ export interface RlmStateLine {
 
 export type RlmLine = RlmCellLine | RlmChildStartLine | RlmChildEndLine | RlmChildRefusedLine | RlmStateLine;
 
+/** `<nnnn>`: child index n as it appears in paths and the child-key message. */
+export function childTag(index: number): string {
+	return String(index).padStart(4, "0");
+}
+
 /** `children/<nnnn>` for child index n. */
 export function childSubdir(index: number): string {
-	return `children/${String(index).padStart(4, "0")}`;
+	return `children/${childTag(index)}`;
 }

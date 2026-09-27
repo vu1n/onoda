@@ -68,7 +68,7 @@ from onoda.optimize.contract import (
     GateSpec,
     SplitAssignment,
 )
-from onoda.optimize.gates import SolPiGates, non_dominated
+from onoda.optimize.gates import DecisionObserver, SolPiGates, non_dominated
 from onoda.store import Store
 
 ReflectionFn = Callable[[str], str]
@@ -179,7 +179,9 @@ class _Proposer:
 
         child = {**candidate, **new_texts}
 
-        def refuse(decision: Decision, reasons: tuple[str, ...], digest: str | None) -> dict:
+        def refuse(
+            decision: Decision, reasons: tuple[str, ...], digest: str | None
+        ) -> dict[str, str]:
             rec = CandidateRecord(
                 search_id=self.search_id,
                 iteration=iteration,
@@ -204,7 +206,9 @@ class _Proposer:
         return new_texts
 
 
-def _decision_observer(ledger: SearchLedger, adapter: OnodaAdapter, search_id: str):
+def _decision_observer(
+    ledger: SearchLedger, adapter: OnodaAdapter, search_id: str
+) -> DecisionObserver:
     def observe(
         proposal: Any,
         parent_total: PooledArm | None,

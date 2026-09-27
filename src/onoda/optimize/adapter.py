@@ -117,8 +117,8 @@ def _objectives(efficiency_gate: Sequence[str]) -> list[tuple[str, str, str]]:
     ]
 
 
-def _key(field: str, metric: str, direction: str) -> str:
-    return f"{'neg.' if direction == 'lower' else ''}{field}.{metric}"
+def _key(fld: str, metric: str, direction: str) -> str:
+    return f"{'neg.' if direction == 'lower' else ''}{fld}.{metric}"
 
 
 def objective_scores(v: OutcomeVector, efficiency_gate: Sequence[str]) -> dict[str, float]:

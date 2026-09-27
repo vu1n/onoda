@@ -88,9 +88,7 @@ class SplitAssignment(_Frozen):
         overlap = set(self.acceptance) & set(self.final)
         if overlap:
             raise ValueError(f"cases in both slices: {', '.join(sorted(overlap))}")
-        if len(set(self.acceptance)) != len(self.acceptance) or len(set(self.final)) != len(
-            self.final
-        ):
+        if any(len(set(s)) != len(s) for s in (self.acceptance, self.final)):
             raise ValueError("a slice lists a case twice")
         return self
 

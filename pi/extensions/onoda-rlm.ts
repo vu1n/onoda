@@ -33,6 +33,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
 	childSubdir,
+	childTag,
 	ENV_RLM_COMPONENTS,
 	ENV_RLM_DEPTH,
 	ENV_RLM_PYTHON,
@@ -167,6 +168,7 @@ function readChildSpool(dir: string): Omit<ChildOutcome, "exitCode" | "error"> {
 	try {
 		raw = readFileSync(join(dir, "events.jsonl"), "utf8");
 	} catch {
+		// No events file: the child never wrote a spool (ingest records it as such).
 		return { endStatus: null, requests: 0, costUsd: null, answer: null };
 	}
 	const agentRequests = new Set<number>();
@@ -330,7 +332,7 @@ export default function onodaRlm(pi: ExtensionAPI): void {
 		if (remaining < 1) return refuse("budget", `no requests left (${requestsUsed()} of ${s.policy.max_requests} used)`);
 
 		const index = childCount++;
-		const nnnn = String(index).padStart(4, "0");
+		const nnnn = childTag(index);
 		const subdir = childSubdir(index);
 		const childSpool = join(s.spoolDir, subdir);
 		const stage = join(s.work, nnnn);

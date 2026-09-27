@@ -19,7 +19,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import type { RlmLine } from "./rlm-protocol.ts";
+import { childTag, type RlmLine } from "./rlm-protocol.ts";
 
 export const ENV_SPOOL = "ONODA_PI_SPOOL";
 export const ENV_SCRIPT = "ONODA_PI_SCRIPT";
@@ -171,7 +171,7 @@ export class SpoolWriter {
 	 */
 	childKey(childIndex: number): Buffer | undefined {
 		if (!this.key) return undefined;
-		return createHmac("sha256", this.key).update(`onoda.pi-rlm-child/${String(childIndex).padStart(4, "0")}`, "utf8").digest();
+		return createHmac("sha256", this.key).update(`onoda.pi-rlm-child/${childTag(childIndex)}`, "utf8").digest();
 	}
 
 	/** Append an rlm.* line (rlm-protocol.ts shapes). */

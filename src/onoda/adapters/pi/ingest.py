@@ -507,7 +507,7 @@ def _analyze(
 
 
 def _check_rlm_line(
-    line: Any,
+    line: RlmCell | RlmChildStart | RlmChildEnd | RlmChildRefused | RlmState,
     spool: _Spool,
     call_for: Callable[..., _Call],
     cells: set[str],
@@ -620,9 +620,13 @@ class _Writer:
         self.done[key] = event
         return event
 
-    def obj(self, hexdigest: str, media_type: str, labels: list[str]) -> str:
+    def obj(
+        self, hexdigest: str, media_type: str, labels: list[str], *, encoding: str | None = None
+    ) -> str:
         data = self.spool.objects[hexdigest]
-        return self.store.put_bytes(data, media_type=media_type, labels=labels).digest
+        return self.store.put_bytes(
+            data, media_type=media_type, encoding=encoding, labels=labels
+        ).digest
 
     def invocation(
         self,
@@ -1101,12 +1105,9 @@ class _Writer:
     # ---- RLM (M4)
 
     def on_cell(self, line: RlmCell) -> None:
-        code = self.store.put_bytes(
-            self.spool.objects[line.code],
-            media_type="text/x-python",
-            encoding="utf-8",
-            labels=["rlm-cell-code", *self.synthetic],
-        ).digest
+        code = self.obj(
+            line.code, "text/x-python", ["rlm-cell-code", *self.synthetic], encoding="utf-8"
+        )
         output = self.obj(line.output, "application/json", ["rlm-cell-output"])
         self.cells[line.tool_call_id] = (line, code, output)
 
@@ -1151,12 +1152,12 @@ class _Writer:
             reason = "the child's spool has no spool.end"
         else:
             reason = None
-        prompt = self.store.put_bytes(
-            self.spool.objects[child.start.prompt],
-            media_type="text/plain",
+        prompt = self.obj(
+            child.start.prompt,
+            "text/plain",
+            ["rlm-child-prompt", *self.synthetic],
             encoding="utf-8",
-            labels=["rlm-child-prompt", *self.synthetic],
-        ).digest
+        )
         refs = {"prompt": prompt}
         if child.plan is not None:
             refs["run"] = record_ref("run", child.run_id)
@@ -1165,12 +1166,9 @@ class _Writer:
             refs["checkpoint"] = record_ref("checkpoint", finalized)
         end = child.end
         if end is not None and end.answer is not None:
-            refs["answer"] = self.store.put_bytes(
-                self.spool.objects[end.answer],
-                media_type="text/plain",
-                encoding="utf-8",
-                labels=["rlm-child-answer", *self.synthetic],
-            ).digest
+            refs["answer"] = self.obj(
+                end.answer, "text/plain", ["rlm-child-answer", *self.synthetic], encoding="utf-8"
+            )
         self.emit(
             key,
             "rlm.child",
