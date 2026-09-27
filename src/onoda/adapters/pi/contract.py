@@ -400,6 +400,8 @@ class SpoolStart(_Line):
     session_id: str
     session_dir: str
     max_cost_usd: str | None = None  # a live run's cost cap, as given (decimal text)
+    candidate_digest: str | None = None  # M4: the HarnessCandidate the run was launched with
+    rlm_limits: dict[str, int] | None = None  # M4: its RlmLimits (RLM variants)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
