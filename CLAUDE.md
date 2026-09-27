@@ -12,6 +12,8 @@ first agent adapter; Prime is an optional comparison arm).
 - Lint: `uv run ruff check .`
 - Format: `uv run ruff format .` (check with `--check`)
 - Demo: `scripts/demo.sh` runs the full clean-workspace sequence
+- CI: `.github/workflows/ci.yml` runs lint, format check, the Pi typecheck and
+  the full test suite (Pi installed, so `requires_pi` suites run) on every PR
 - Pi runtime (M3): `scripts/pi-setup.sh` installs the pinned Pi + SoL-Pi from
   `pi/package-lock.json` once (network). Suites marked `requires_pi` launch
   that real Pi offline under a scripted provider and skip without it.
