@@ -187,7 +187,7 @@ def compare_arm(
 ) -> ArmComparison:
     """One candidate arm against the baseline under SoL-Pi's two gates.
 
-    A9/A41: if the two arms' case sets differ, a run is missing on one side
+    A41: if the two arms' case sets differ, a run is missing on one side
     for at least one case, so every check is `unresolved` and the verdict is
     `unresolved` regardless of what the pooled sums happen to show.
     """
