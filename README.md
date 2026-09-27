@@ -87,23 +87,23 @@ onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
   --max-requests 20 --max-cost-usd 5   # S2b/S3 add --reducer-provider R --reducer-model RM
 ```
 
-M3b ablation (spec format: `tests/ablation_fixtures/spec.yaml`; tolerances are
-operator-declared and none are chosen yet, A18/A39):
+M3b ablation (spec format: `tests/ablation_fixtures/spec.yaml`; the chosen tolerances
+are `gates/tolerances.yaml`, zero worsening on every capability metric, A49):
 
 ```bash
 onoda ablation run spec.yaml --store ./store-a --evaluator-store ./evaluator --work-dir ./abl
 onoda ablation show sha256:... --evaluator-store ./evaluator   # the whole report
 ```
 
-M4 RLM and optimizer (the gates file is a `GateSpec`: every capability
-tolerance declared, none chosen yet, A47; a split over unreviewed cases is
+M4 RLM and optimizer (the gates file is a `GateSpec`, the chosen one is
+`gates/gate-spec.yaml`, A47/A49; a split over unreviewed cases is
 exploratory, A48):
 
 ```bash
 onoda pi run orca6-water-mp2 --variant S1r --ladder ladder.md --candidate cand.json ...  # default: the seed
 onoda optimize seed > seed.json          # the seed candidate and its provenance
 onoda optimize split --seed 1 --final-count 1 > split.json
-onoda optimize run --split split.json --gates gates.yaml --variant S1r --ladder ladder.md \
+onoda optimize run --split split.json --gates gates/gate-spec.yaml --variant S1r --ladder ladder.md \
   --scripts ./scripts --reflection-script replies.json \
   --search-id s1 --store ./store-a --evaluator-store ./evaluator \
   --optimizer-store ./optimizer --work-dir ./opt --max-trials 12 --max-reflections 2
@@ -166,7 +166,7 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Fork | Quiescent checkpoints; policy, parser, input, calc-config and memory interventions with invalidation | T03, T05, T07; `tests/test_forks.py` |
 | Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. No model has been called | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
 | Replay an agent run | Re-runs Pi under the recorded responses and fails closed on any change to what the model was shown | `tests/test_pi_end_to_end.py` |
-| Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because no tolerances are chosen (A39). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
+| Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because the fixture tolerances leave `count.unresolved` undeclared (the chosen ones, A49, are in `gates/`). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
 | RLM extension (S1r) | Real Pi with `ipython` cells, committed JSON state, a child Pi run recorded as its own run and charged to the parent, replay of the whole tree; scripted provider only | `tests/test_pi_rlm_extension.py`, `tests/test_rlm_end_to_end.py` |
 | Harness optimization (M4) | GEPA proposes candidate components from agent traces; SoL-Pi's gates accept or reject each on acceptance cases only. A scripted two-proposal search on real Pi rejects one (a false success) and accepts one (fewer context bytes). Synthetic, not an improvement (A32) | `tests/test_optimize*.py`, `scripts/demo.sh` |
 | Repeat experiment | Not implemented | — |
@@ -254,7 +254,7 @@ belong to later milestones.
   the same turns, so capability is identical by construction, and tokens and
   cost are the script's. Its `context_bytes` are measured payload sizes, a
   traffic proxy, not tokens. S2c's compaction does not trigger on runs this
-  short. Capability gates stay `unresolved` until tolerances are chosen (A39).
+  short. The fixture spec's capability gates stay `unresolved`; `gates/tolerances.yaml` (A49) resolves them.
   The reducer-loss probe (A15) has only seen scripted receipts.
 - Ablations do not resume: one that stops partway keeps its runs, and a rerun
   needs a new `ablation_id` (A41). Ablations do not run RLM arms yet.
@@ -264,15 +264,14 @@ belong to later milestones.
   with the same lack of sandbox as Pi's `bash` (A38).
 - The optimizer only runs scripted trials with a scripted reflection, so an
   accepted candidate says the loop works, not that the harness improved
-  (A32). Its gates need every capability tolerance declared and none is
-  chosen (A47); the only cases are unreviewed, so every split is exploratory
+  (A32). Its gates are `gates/gate-spec.yaml` (zero capability tolerances,
+  A47/A49); the only cases are unreviewed, so every split is exploratory
   (A48). GEPA's own state file is scratch, not the record (A46).
 
 ## Next: live runs
 
 Run the M3b ablation and an M4 search on a real model once a model and
-budget are authorized, with capability-gate tolerances predeclared (A18, A39,
-A47) and long-horizon cases (SOL_PI_DELTA §5); RLM arms in ablations;
+budget are authorized, with the predeclared zero capability tolerances in `gates/` (A49) and long-horizon cases (SOL_PI_DELTA §5); RLM arms in ablations;
 semantic restart of Pi runs from committed state (A36); a sandbox for `bash`
 and the kernel (A38). Before comparisons: a human review of the M2 cases, an
 ORCA run on licensed hardware, and justified tolerances (A6, A18).
