@@ -1,29 +1,69 @@
 # onoda
 
-Portable, forkable run records for scientific-agent experiments. An experiment
-belongs to its data and provenance, not to the agent framework that ran it:
-a run can be exported, imported on another machine, inspected offline,
-partially recomputed from raw bytes, and branched from an explicit checkpoint
-without losing lineage or cost accounting.
+onoda is an open harness for running AI agents on scientific computing tasks
+and keeping a complete, portable record of what they did. Every model call,
+tool call, file and cost is written to a content-addressed store that can be
+exported, imported on another machine, replayed offline, graded by a separate
+evaluator, and branched from any checkpoint. The first target is quantum
+chemistry with ORCA, following Lee and Rondinelli's multireference agent
+(arXiv 2609.13357), with NVIDIA's SoL-Pi harness mechanisms and promotion
+gates (arXiv 2609.20519) as the variants and acceptance rule.
 
-This is milestones **M0–M4** of the handoff in [`docs/handoff/`](docs/handoff/)
-(v0.2; [`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
-text, so Pi is the first agent adapter). M0–M1 run on a **completely synthetic
-fixture**. M2 adds scientific smoke tests over **authentic ORCA outputs** that
-were produced elsewhere (cclib's public regression data) and are recorded as
-acquired, not executed here. No ORCA has been run by this harness, and no
-chemistry experiment has been reproduced. M3 runs the real pinned **Pi coding
-agent** (0.85.1, optionally with **SoL-Pi** at a pinned commit) on those cases
-and records each run portably; with no model credentials authorized, every
-Pi run so far was driven by a **scripted provider** and is labelled synthetic.
-M3b adds the SoL-Pi add-one ablation (S1 baseline, each mechanism alone,
-S3) with SoL-Pi's two promotion gates; over scripted runs its report is a
-harness exercise, not a verdict about any mechanism. M4 adds onoda's own RLM
-Pi extension (a persistent `ipython` tool, `rlm()` child Pi runs recorded as
-their own runs, JSON state committed through the recorder; variant S1r) and a
-GEPA search over the harness's prompts, tool docs, helpers and limits behind
-the same two gates. So far that search has only run on scripted trials with a
-scripted reflection, so it exercises the loop and proves no improvement.
+## Why
+
+Agent results in science are hard to trust and hard to reproduce: the run
+lives inside one framework, costs are estimates, and the grader often sees
+the same text as the agent. onoda keeps the experiment independent of the
+agent that ran it. The evaluator grades claims against a deterministic parser
+of the solver's own output, never against the agent's summary, and its
+references never enter the agent's store. Anything unknown is recorded as
+unknown or `unresolved`, never as a default.
+
+## How it works
+
+- **Run records.** Immutable, hash-chained journals over a content-addressed
+  store; export/import bundles, offline replay that fails closed on any drift,
+  and forks with explicit lineage and cost accounting.
+- **Agent.** The pinned Pi coding agent (0.85.1), optionally with SoL-Pi's four
+  mechanisms at a pinned commit, plus onoda's own RLM extension (a persistent
+  Python kernel and recursive child runs). Live runs call a real model through
+  OpenRouter inside a bubblewrap sandbox, with every setting and spending cap
+  stated explicitly.
+- **Cases and grading.** Authentic ORCA 5/6 outputs pinned by sha256, a
+  deterministic ORCA parser, and a claim evaluator that marks each reported
+  value supported, contradicted, unsupported, missing or unresolved.
+- **Ablation.** SoL-Pi's add-one ablation: each mechanism alone and all
+  together, against a baseline, judged by the two promotion gates.
+- **Optimizer.** A GEPA search that rewrites the harness's prompts, tool docs,
+  helpers and limits. A candidate is kept only if no capability metric gets
+  worse (zero tolerance, zero new false-success claims) and something improves:
+  capability or efficiency. Every trial, reflection call and gate decision is
+  recorded with its cost.
+
+## What it has shown so far
+
+In live searches on 2026-09-27 (agent `deepseek/deepseek-v4-flash`, reflection
+`deepseek/deepseek-v4-pro`, under $5 in all), the optimizer found a tool-doc
+rewrite for the RLM arm that removed every false-success claim on the five
+acceptance cases: 54 supported and 0 false-success claims against the
+starting harness's 49 and 5. On two TD-DFT outputs it never saw, it went from
+55/105 and 101/125 correct claims to 105/105 and 125/125 over five runs each.
+The rewrite tells the agent to copy energies and units exactly as printed and
+to take each state's multiplicity only from the output's headers.
+
+Read this as a working loop, not a chemistry result. The agent reads and
+reports finished ORCA outputs; onoda has not yet run ORCA itself. The cases are
+small public regression outputs from cclib, none has had human review, the
+advisory ladder is a synthetic placeholder, and only one cheap model was used.
+
+## Status
+
+Milestones M0 to M4 of the handoff in [`docs/handoff/`](docs/handoff/) are
+done ([`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
+text there). Before any claim about chemistry: human review of the cases, ORCA
+runs on licensed hardware against the paper's targets, and a real advisory
+ladder. Open decisions are tracked in
+[`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 
 ## Quick start
 
@@ -82,7 +122,7 @@ onoda pi run orca6-water-mp2 --variant S0 --run-id s0 --store ./store-a \
 onoda pi run orca6-water-mp2 --variant S3 --ladder ladder.md ...  # S1 onward need a ladder
 onoda pi evaluate s0 --store ./store-a --evaluator-store ./evaluator
 onoda pi replay s0 --store ./store-a --work-dir ./replay   # fails closed on any drift
-# A live run needs every setting stated (none is authorized yet, A35):
+# A live run needs every setting stated (A35):
 onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
   --max-requests 20 --max-cost-usd 5   # S2b/S3 add --reducer-provider R --reducer-model RM
 ```
@@ -235,9 +275,8 @@ belong to later milestones.
   spend. Unknown costs are reported as unknown, never zero.
 - One authoritative writer per run; no locking for concurrent writers.
 - Forks require quiescent checkpoints. In-flight forks are not supported.
-- Pi runs have only used the scripted provider: scripts, claims and ladders
-  in the tests are synthetic, and no model result exists. Live runs are built
-  and refuse to start without every live setting (A35).
+- Live Pi runs have used one cheap model (`deepseek/deepseek-v4-flash`) on
+  unreviewed cases; scripts, claims and ladders in the tests are synthetic.
 - The advisory ladder and allowed documentation are unresolved (A33): S1
   onward, the RLM arm S1r included, refuse to run without an operator-supplied
   ladder.
@@ -289,15 +328,15 @@ belong to later milestones.
   restarting from committed state is not implemented (A36). The kernel runs
   in the same inner sandbox layer as Pi's `bash` when the run is sandboxed
   (A50).
-- The optimizer has only run scripted trials with a scripted reflection, so
-  an accepted candidate says the loop works, not that the harness improved
-  (A32). A live search (A51) exists but has not run. Its gates are `gates/gate-spec.yaml` (zero capability tolerances,
-  A47/A49); the only cases are unreviewed, so every split is exploratory
-  (A48). GEPA's own state file is scratch, not the record (A46).
+- Optimizer searches over the unreviewed cases are exploratory (A48). Its
+  gates are `gates/gate-spec.yaml` (zero capability tolerances, A47/A49;
+  capability gains accepted, A52), and reflection sees verdict words and
+  reason classes, never references (A53). Live runs of the same case vary, so
+  use `--repeats`. GEPA's own state file is scratch, not the record (A46).
 
-## Next: live runs
+## Next
 
-Run the M3b ablation and an M4 search on a real model once a model and
-budget are authorized, with the predeclared zero capability tolerances in `gates/` (A49) and long-horizon cases (SOL_PI_DELTA §5); RLM arms in ablations;
-semantic restart of Pi runs from committed state (A36). Before comparisons: a human review of the M2 cases, an
-ORCA run on licensed hardware, and justified tolerances (A6, A18).
+Human review of the M2 cases; ORCA runs on licensed hardware against the
+paper's targets; a real advisory ladder (A33); held-out cases beyond TD-DFT;
+the live ablation and RLM arms in ablations; semantic restart of Pi runs from
+committed state (A36); justified scientific tolerances (A6, A18).
