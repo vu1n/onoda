@@ -1,0 +1,44 @@
+case_id: orca4-1ttt-tddft
+title: 1-ttt full TD-DFT PBE/def2-SVP under ORCA 4.0.0, singlets only
+program: ORCA
+program_version: 4.0.0
+method: TD-DFT (no TDA) PBE/def2-SVP
+split: test
+input:
+  path: ORCA4.0/1-ttt_td.inp
+  sha256: sha256:3be46bca9440311a57286bc7604e1c2920c257b6d5f105b0c98306bc03cd0a06
+outputs:
+  log:
+    path: ORCA4.0/1-ttt_td.out
+    sha256: sha256:60a8e750914e7fb79b341314ef0616a4d750e6b6b6ccdbf64e7b2d72c2c3e51a
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's
+    regression suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA4.0/1-ttt_td.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-09-27'
+  executed_here: false
+  notes: "No .inp upstream; the input file here is the log's INPUT FILE echo with the '| n>' prefixes stripped (it references 1-ttt_opt.xyz, which is not included)."
+request:
+  roots_by_multiplicity:
+    1: 24
+  expects_final_energy: true
+  source_lines:
+  - nroots 24
+  - tda false
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only case, used with --cases-root cases-dev; request fields transcribed from
+    the log's input echo by the harness author; no human has reviewed this case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

@@ -1,0 +1,45 @@
+case_id: orca5-adbna-tddft
+title: ADBNA-Me-Mes-MesCz TD-DFT/TDA wPBEPP86/cc-pVDZ under ORCA 5.0.3, singlets and triplets
+program: ORCA
+program_version: 5.0.3
+method: TD-DFT/TDA wPBEPP86/cc-pVDZ
+split: test
+input:
+  path: ORCA5.0/ADBNA_Me_Mes_MesCz.inp
+  sha256: sha256:9a95544223b5370256fe33bc2a1ceead1f06094b2b6aec0d3ed6e550d6ced89a
+outputs:
+  log:
+    path: ORCA5.0/ADBNA_Me_Mes_MesCz.log
+    sha256: sha256:e7bed930a4f248e3ad621b76fe536f71574464ac804ae7a879f6b2d7bc3926a3
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's
+    regression suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA5.0/ADBNA_Me_Mes_MesCz.log
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-09-27'
+  executed_here: false
+  notes: "No .inp upstream; the input file here is the log's INPUT FILE echo with the '| n>' prefixes stripped."
+request:
+  roots_by_multiplicity:
+    1: 10
+    3: 10
+  expects_final_energy: true
+  source_lines:
+  - NRoots      10
+  - Triplets    true
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only case, used with --cases-root cases-dev; request fields transcribed from
+    the log's input echo by the harness author; no human has reviewed this case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

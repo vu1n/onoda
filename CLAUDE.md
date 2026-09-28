@@ -26,6 +26,8 @@ first agent adapter; Prime is an optional comparison arm).
   `HarnessCandidate` components, offline under scripts only.
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
   `onoda case list` shows them. Vendored bytes under `cases/` are never edited.
+- Dev-only cases: `cases-dev/` (cclib-data logs, no upstream license) for
+  held-out checks via `--cases-root cases-dev`; never part of `cases/` or a split.
 
 VCS is plain git. No project board; work items come from issues or goals.
 
