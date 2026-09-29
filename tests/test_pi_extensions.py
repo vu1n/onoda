@@ -130,6 +130,7 @@ def run_pi(
     tools: tuple[str, ...] | None = None,
     extra_extensions: tuple[Path, ...] = (),
     provider: tuple[str, str] = (C.SCRIPTED_PROVIDER, C.SCRIPTED_MODEL),
+    reducer: tuple[str, str] = (C.SCRIPTED_PROVIDER, C.SCRIPTED_REDUCER_MODEL),
     spool_key: bytes | None = None,
     **policy: Any,
 ) -> Run:
@@ -138,9 +139,7 @@ def run_pi(
     for d in ("ws", "agent", "sessions", "spool", "home", "bundle"):
         (root / d).mkdir(parents=True)
     bundle, output = stage_bundle(root / "bundle", ladder=v.ladder)
-    sol_pi = v.sol_pi_config(
-        reducer_provider=C.SCRIPTED_PROVIDER, reducer_model=C.SCRIPTED_REDUCER_MODEL
-    )
+    sol_pi = v.sol_pi_config(reducer_provider=reducer[0], reducer_model=reducer[1])
     if sol_pi:
         (root / "agent" / "sol-pi.json").write_text(json.dumps(sol_pi))
     tools = tools or v.tools()
@@ -599,6 +598,62 @@ def test_provider_error_does_not_end_settled(tmp_path):
     (response,) = run.of("provider.response")
     assert response.stop_reason == "error"
     assert run.of("provider.request")[0].source == "before_provider_request"
+
+
+LIVE = ("onoda-test-live", "live")  # tests/pi_fixtures/live-provider.ts
+
+
+def test_live_reducer_calls_are_spooled_by_role_even_on_the_agents_model(tmp_path):
+    # A real provider's reducer call fires no before_provider_request; the
+    # recorder's runtime hook spools it, tagged by role, with its response and
+    # cost, although the reducer and the agent share one model.
+    turns = [turn(call("b1", "bash", command=REDUCER_COMMAND)), turn(text("done"))]
+    reducer = [turn(text(receipt(sha(REDUCER_LOG.encode()))))]
+    run = run_pi(
+        tmp_path,
+        turns,
+        variant="S2b",
+        reducer_turns=reducer,
+        extra_extensions=(FIXTURES / "live-provider.ts",),
+        provider=LIVE,
+        reducer=LIVE,
+        max_cost_usd="1",
+    )
+    end = run.lines[-1]
+    assert (end.status, end.requests) == ("settled", 3)
+    requests = run.of("provider.request")
+    assert [(r.purpose, r.source, r.model) for r in requests] == [
+        ("agent", "before_provider_request", "live"),
+        ("reducer", "model_runtime", "live"),
+        ("agent", "before_provider_request", "live"),
+    ]
+    responses = {r.request_index: r for r in run.of("provider.response")}
+    assert sorted(responses) == [0, 1, 2]
+    assert responses[1].cost_usd == "0.001" and responses[1].usage_tokens["totalTokens"] == 15
+    (visible,) = run.results("b1", "visible")
+    assert run.json(visible.content)[0]["text"].startswith("sol_pi_evidence_receipt_v1")
+    assert requests[1].seq < responses[1].seq < visible.seq
+
+
+def test_live_reducer_request_past_the_budget_is_refused_unsent(tmp_path):
+    turns = [turn(call("b1", "bash", command=REDUCER_COMMAND)), turn(text("never served"))]
+    reducer = [turn(text(receipt(sha(REDUCER_LOG.encode()))))]
+    run = run_pi(
+        tmp_path,
+        turns,
+        variant="S2b",
+        reducer_turns=reducer,
+        extra_extensions=(FIXTURES / "live-provider.ts",),
+        provider=LIVE,
+        reducer=LIVE,
+        max_requests=1,
+    )
+    end = run.lines[-1]
+    assert (end.status, end.requests) == ("budget-exhausted", 1)
+    assert [r.purpose for r in run.of("provider.request")] == ["agent"]
+    (raw,) = run.results("b1", "raw")
+    (visible,) = run.results("b1", "visible")
+    assert raw.content == visible.content  # SoL-Pi fell back to the raw output
 
 
 def test_gateway_blocks_then_run_without_a_string_command(tmp_path):

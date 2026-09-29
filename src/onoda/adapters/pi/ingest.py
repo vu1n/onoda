@@ -379,7 +379,6 @@ class _Analysis:
     request_of: dict[int, ProviderRequest]  # response seq -> its request
     unanswered: list[ProviderRequest]
     observation_of: dict[int, str]  # visible result seq -> archived obs id
-    reducer_models: frozenset[str]
     child_starts: dict[int, RlmChildStart] = field(default_factory=dict)
     child_ends: dict[int, RlmChildEnd] = field(default_factory=dict)
 
@@ -429,11 +428,6 @@ def _analyze(
         raise OnodaError(f"spool scripted={start.scripted} contradicts mode {config['mode']!r}")
     if start.sandbox != config.get("sandbox"):
         raise OnodaError(f"spool sandbox={start.sandbox!r} contradicts the run's")
-    reducer_models = frozenset(
-        m for m in (SCRIPTED_REDUCER_MODEL, config.get("reducer_model")) if m is not None
-    )
-    if start.model in reducer_models:
-        raise OnodaError(f"agent model {start.model!r} is also the reducer model")
     tokens = tuple(t.lower() for t in (*UNFUSABLE_COMMAND_TOKENS, *config.get("unfusable", ())))
     fusion = "actionFusion" in variant.mechanisms
     depth = config.get("depth", 0)
@@ -457,6 +451,20 @@ def _analyze(
     for line in spool.lines:
         match line:
             case ProviderRequest():
+                # A request's role is its spooled purpose, never its model id, so the
+                # reducer may share the agent's model. Each source writes only its roles.
+                if (line.source == "before_provider_request") != (line.purpose == "agent") and (
+                    line.source != "scripted-provider"
+                ):
+                    raise IntegrityError(
+                        f"request at seq {line.seq}: source {line.source} cannot write "
+                        f"a {line.purpose} request"
+                    )
+                if (line.source == "scripted-provider") != start.scripted:
+                    raise IntegrityError(
+                        f"request at seq {line.seq}: source {line.source} in a "
+                        f"{'scripted' if start.scripted else 'live'} run"
+                    )
                 pending[line.request_index].append(line)
             case ProviderResponse():
                 if not pending[line.request_index]:
@@ -506,9 +514,7 @@ def _analyze(
                     raise IntegrityError(f"{line.type} at seq {line.seq} in non-RLM {variant.id}")
                 _check_rlm_line(line, spool, call_for, cells, child_starts, child_ends, depth)
     unanswered = sorted((r for rs in pending.values() for r in rs), key=lambda r: r.seq)
-    return _Analysis(
-        calls, request_of, unanswered, observation_of, reducer_models, child_starts, child_ends
-    )
+    return _Analysis(calls, request_of, unanswered, observation_of, child_starts, child_ends)
 
 
 def _check_rlm_line(
@@ -785,7 +791,7 @@ class _Writer:
         self.obj(line.context, "application/json", ["pi-context", *self.synthetic])
 
     def decision(self, req: ProviderRequest, resp: ProviderResponse | None) -> None:
-        reducer = req.purpose == "reducer" or req.model in self.a.reducer_models
+        reducer = req.purpose == "reducer"
         provider = self.spool.start.provider
         if reducer:
             provider = self.run.config.get("reducer_provider") or (

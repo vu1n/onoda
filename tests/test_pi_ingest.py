@@ -87,7 +87,9 @@ class SpoolBuilder:
         )
         return self
 
-    def turn(self, *blocks: dict, model: str = SCRIPTED_MODEL) -> int:
+    def turn(
+        self, *blocks: dict, model: str = SCRIPTED_MODEL, source="scripted-provider", purpose=None
+    ) -> int:
         """One provider request and its response; returns the request index."""
         index = self.request_index
         self.request_index += 1
@@ -99,8 +101,9 @@ class SpoolBuilder:
             request_index=index,
             model=model,
             context=self.put(context),
-            source="scripted-provider",
+            source=source,
             replay_key=key,
+            purpose=purpose or ("reducer" if model == SCRIPTED_REDUCER_MODEL else "agent"),
         )
         message = {"role": "assistant", "content": list(blocks), "stopReason": "toolUse"}
         self.line(
@@ -714,3 +717,58 @@ def test_live_spool_start_with_cost_cap_and_provider_error_ingests(tmp_path):
     store, task = make_store(tmp_path / "store")
     result = ingest(store, task, sb.dir, config={"mode": "pi-live", "variant": "S0"})
     assert (result.status, result.complete) == ("provider-error", True)
+
+
+LIVE_S2B = {
+    "mode": "pi-live",
+    "variant": "S2b",
+    "reducer_provider": "openrouter",
+    "reducer_model": "shared-model",
+}
+
+
+def live_s2b_spool(root: Path, reducer_source="model_runtime", reducer_purpose="reducer"):
+    """A live S2b run whose reducer uses the agent's own model."""
+    sb = SpoolBuilder(root, variant="S2b").start()
+    sb.lines[0].update(provider="openrouter", model="shared-model", scripted=False)
+    live = {"model": "shared-model", "source": "before_provider_request"}
+    index = sb.turn({"type": "toolCall", "id": "c1", "name": "bash", "arguments": {}}, **live)
+    sb.line(
+        "tool.call", tool_call_id="c1", tool_name="bash", input=sb.put({}),
+        request_index=index, decision="allowed", reason=None,
+    )  # fmt: skip
+    sb.turn(
+        {"type": "text", "text": "reducer receipt"},
+        model="shared-model",
+        source=reducer_source,
+        purpose=reducer_purpose,
+    )
+    sb.result("c1", "bash", "log")
+    sb.turn({"type": "text", "text": "done"}, **live)
+    sb.end()
+    sb.write()
+    return sb
+
+
+def test_live_reducer_on_the_agents_model_ingests_by_role(tmp_path):
+    sb = live_s2b_spool(tmp_path / "w")
+    store, task = make_store(tmp_path / "store")
+    result = ingest(store, task, sb.dir, config=LIVE_S2B)
+    receipts = [store.receipt(i) for i in result.invocations]
+    roles = [r.metadata["role"] for r in receipts if r.invocation_kind == "decision"]
+    assert roles == ["agent", "reducer", "agent"]
+
+
+@pytest.mark.parametrize(
+    "source, purpose",
+    [
+        ("model_runtime", "agent"),
+        ("before_provider_request", "reducer"),
+        ("scripted-provider", "reducer"),
+    ],
+)
+def test_a_request_source_writes_only_its_own_roles(tmp_path, source, purpose):
+    sb = live_s2b_spool(tmp_path / "w", reducer_source=source, reducer_purpose=purpose)
+    store, task = make_store(tmp_path / "store")
+    with pytest.raises(IntegrityError, match="request at seq"):
+        ingest(store, task, sb.dir, config=LIVE_S2B)

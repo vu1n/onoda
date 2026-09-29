@@ -418,10 +418,11 @@ class ProviderRequest(_Line):
     request_index: int = Field(ge=0)
     model: str
     context: Sha256  # raw JSON bytes of the context / provider payload
-    source: Literal["scripted-provider", "before_provider_request"]
+    # `model_runtime`: a real-provider reducer or summary call (the recorder's runtime hook).
+    source: Literal["scripted-provider", "before_provider_request", "model_runtime"]
     replay_key: Sha256  # sha256 of the normalized context (timestamps dropped, paths aliased)
     # agent: the main loop; reducer: SoL-Pi's reducer; summary: a compaction summary.
-    # Only the scripted provider sees reducer and summary requests (ADAPTER_SEAM §2).
+    # The role is the spooled purpose, never the model id (ADAPTER_SEAM §2).
     purpose: Literal["agent", "reducer", "summary"] = "agent"
 
 

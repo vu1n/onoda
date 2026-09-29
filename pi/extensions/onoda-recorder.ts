@@ -4,7 +4,8 @@
  *
  * It writes `spool.start`, provider requests for real providers (the scripted
  * provider spools its own requests and its reducer responses), main-model
- * responses, every tool call with the gateway decision (before the tool runs),
+ * responses, real-provider reducer and compaction-summary requests with their
+ * responses (see `recordSideRequests`), every tool call with the gateway decision (before the tool runs),
  * the visible tool results, compactions, and exactly one `spool.end`.
  * `spool.end` is always the last line: other extensions ask for a terminal
  * status with `requestEnd`; the recorder aborts at the next turn and writes it
@@ -165,6 +166,89 @@ function usageTokens(m: AssistantMessage): Record<string, number> {
 	};
 }
 
+type SideMessage = AssistantMessage;
+interface SideStream {
+	result(): Promise<SideMessage>;
+}
+type RuntimeCall = (
+	model: { id: string; provider: string },
+	context: unknown,
+	options?: Record<string, unknown>,
+) => SideStream;
+
+/**
+ * Record real-provider requests Pi sends outside the agent loop. Those fire no
+ * `before_provider_request` (Pi emits it only from the agent's own `onPayload`)
+ * and no `message_end`, so without this a live run's reducer and compaction
+ * calls would be neither spooled nor charged to the budget.
+ *
+ * Pi 0.85.1 routes every call through one `ModelRuntime`, shared by the model
+ * registry: the agent loop and compaction call `streamSimple` (only the agent
+ * passes `onPayload`), and SoL-Pi's reducer calls `modelRegistry.complete`,
+ * which is `runtime.stream`. So the role comes from the call path, never from
+ * the model id, and the reducer may use the agent's own model. The scripted
+ * provider spools its own requests and is left alone.
+ */
+function recordSideRequests(
+	ctx: ExtensionContext,
+	w: SpoolWriter,
+	policy: GatewayPolicy,
+	aliases: Record<string, string>,
+): void {
+	const runtime = (ctx.modelRegistry as unknown as { runtime?: Record<string, RuntimeCall> }).runtime;
+	if (typeof runtime?.stream !== "function" || typeof runtime.streamSimple !== "function") {
+		throw new Error("onoda-recorder: Pi's model runtime has no stream/streamSimple to record through");
+	}
+	const roles = [
+		["stream", "reducer"],
+		["streamSimple", "summary"],
+	] as const;
+	for (const [method, purpose] of roles) {
+		const original = runtime[method].bind(runtime);
+		runtime[method] = (model, context, options) => {
+			if (options?.onPayload || model.provider === SCRIPTED_PROVIDER) return original(model, context, options);
+			let index: number | undefined;
+			const onPayload = async (payload: unknown) => {
+				const refused =
+					requestsUsed() >= policy.max_requests ? `max_requests ${policy.max_requests} reached` : costExhausted(policy);
+				if (refused) {
+					// Refused before it is sent: nothing to spool, nothing counted.
+					requestEnd("budget-exhausted", `${purpose} request refused: ${refused}`);
+					throw new Error(`onoda: ${purpose} request refused: ${refused}`);
+				}
+				index = counters().requests++;
+				w.line({
+					type: "provider.request",
+					request_index: index,
+					model: model.id,
+					context: w.putJson(payload),
+					source: "model_runtime",
+					replay_key: replayKey(payload, aliases),
+					purpose,
+				});
+				return payload;
+			};
+			const stream = original(model, context, { ...options, onPayload });
+			// Attached before the caller awaits the result, so the response is spooled first.
+			stream.result().then(
+				(m) => {
+					if (index === undefined) return;
+					w.line({
+						type: "provider.response",
+						request_index: index,
+						message: w.putJson(m),
+						stop_reason: m.stopReason,
+						usage_tokens: usageTokens(m),
+						cost_usd: addCost(m.usage?.cost?.total),
+					});
+				},
+				() => undefined,
+			);
+			return stream;
+		};
+	}
+}
+
 export default function onodaRecorder(pi: ExtensionAPI): void {
 	const w = spool();
 	if (!w) throw new Error("onoda-recorder: ONODA_PI_SPOOL is not set");
@@ -199,6 +283,7 @@ export default function onodaRecorder(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
 		if (started) return;
 		started = true;
+		recordSideRequests(ctx, w, policy, aliases);
 		const sessionId = ctx.sessionManager.getSessionId();
 		if (sessionId) aliases[sessionId] = "$SESSION";
 		w.line({

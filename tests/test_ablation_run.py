@@ -253,7 +253,6 @@ def test_a_scripted_ablation_needs_every_script(tmp_path):
         (False, {"sandbox": None}, "sandbox"),
         (False, {"max_cost_usd": None}, "max_cost_usd"),
         (False, {"reducer": None}, "Reducer"),
-        (False, {"reducer": ("openrouter", "m")}, "must differ"),
     ],
 )
 def test_live_ablation_refusals(tmp_path, monkeypatch, scripted, kwargs, match):
@@ -265,7 +264,7 @@ def test_live_ablation_refusals(tmp_path, monkeypatch, scripted, kwargs, match):
         "live": live_settings(monkeypatch),
         "sandbox": object(),
         "max_cost_usd": Decimal("1"),
-        "reducer": ("openrouter", "r"),
+        "reducer": ("openrouter", "m"),
     } | kwargs
     with pytest.raises(OnodaError, match=match):
         run_ablation(spec, store=store, evaluator_store=evaluator, work_dir=tmp_path / "w", **args)

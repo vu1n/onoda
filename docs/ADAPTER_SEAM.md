@@ -82,17 +82,18 @@ Findings that differ from the M0 sketch:
   provider does.
 - Pi exits 0 even when a run ends because the script ran out or a replay key
   differed; the outcome is read from `spool.end`, never the exit code.
-- SoL-Pi's reducer calls its model through `modelRegistry.complete()`, which
-  fires no hooks. The scripted provider spools reducer calls itself; a real
-  reducer provider's calls would not be spooled (open before any live S2b/S3
-  run).
-- Pi's compaction summaries call the provider directly, without
-  `options.onPayload`, so they fire no `before_provider_request` and no
-  `message_end`. The scripted provider recognizes them by that missing
-  `onPayload`, serves them from `Script.summary_turns`, and spools them with
-  `purpose: "summary"` (ingest: `compaction-summary` receipts). A live
-  provider's compaction-summary calls are not spooled (the same gap as the
-  reducer's; open before any live S2c/S3 run).
+- SoL-Pi's reducer calls its model through `modelRegistry.complete()`, and
+  Pi's compaction summaries call the provider without `options.onPayload`;
+  neither fires `before_provider_request` or `message_end`. The scripted
+  provider spools both itself (a summary is recognized by the missing
+  `onPayload`, served from `Script.summary_turns`, spooled with `purpose:
+  "summary"`; ingest: `compaction-summary` receipts). For a real provider the
+  recorder wraps the shared `ModelRuntime`'s `stream` (the reducer's path) and
+  `streamSimple` (compaction's path; the agent's calls carry `onPayload` and
+  are left to `before_provider_request`), and spools each call with
+  `source: "model_runtime"`, its role as `purpose`, its response and cost,
+  charged to `max_requests` and `max_cost_usd`. Roles come from the call path,
+  never from the model id, so the reducer may use the agent's model.
 - Pi rejects some tool calls before `tool_call` fires (unknown or disallowed
   tool name, arguments failing the schema, a message truncated at the token
   limit) and still shows the model an error result. The recorder spools a
