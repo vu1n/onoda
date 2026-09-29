@@ -135,6 +135,22 @@ onoda ablation run spec.yaml --store ./store-a --evaluator-store ./evaluator --w
 onoda ablation show sha256:... --evaluator-store ./evaluator   # the whole report
 ```
 
+A live ablation (`--live`) takes a spec without scripts
+(`experiments/ablation-live/spec.yaml`: the six development cases, three
+repeats) and runs every arm in the sandbox (A50), one round (every arm on one
+case) at a time. It stops before a round the remaining
+`--ablation-max-cost-usd` cannot cover at the per-run cap, so the compared arms
+always hold the same runs:
+
+```bash
+export OPENROUTER_API_KEY=...
+onoda ablation run experiments/ablation-live/spec.yaml --live \
+  --provider openrouter --model deepseek/deepseek-v4-flash --credential-env OPENROUTER_API_KEY \
+  --max-requests 30 --max-cost-usd 0.05 --ablation-max-cost-usd 2.00 \
+  --reducer-provider openrouter --reducer-model deepseek/deepseek-v4-flash \
+  --store ./store-a --evaluator-store ./evaluator --work-dir ./abl
+```
+
 M4 RLM and optimizer (the gates file is a `GateSpec`, the chosen one is
 `gates/gate-spec.yaml`, A47/A49; a split over unreviewed cases is
 exploratory, A48):
@@ -338,5 +354,5 @@ belong to later milestones.
 
 Human review of the M2 cases; ORCA runs on licensed hardware against the
 paper's targets; a real advisory ladder (A33); held-out cases beyond TD-DFT;
-the live ablation and RLM arms in ablations; semantic restart of Pi runs from
+RLM arms in ablations; semantic restart of Pi runs from
 committed state (A36); justified scientific tolerances (A6, A18).

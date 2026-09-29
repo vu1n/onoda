@@ -1,0 +1,18 @@
+# Live SoL-Pi add-one ablation (paper Table 4 shape) on the six development
+# ORCA cases: S1 baseline, each mechanism alone (S2a-d), the full stack (S3).
+# Run with `onoda ablation run --live ...` (README). The ladder is the synthetic
+# test fixture (A33); tolerances.yaml is a copy of gates/tolerances.yaml (A49).
+schema: onoda.ablation-spec/1
+ablation_id: live-add-one-1
+repeats: 3
+cases:
+  - case_id: orca6-water-mp2
+  - case_id: orca5-dvb-tddft
+  - case_id: orca6-dvb-tddft
+  - case_id: orca6-dvb-eom-ccsd
+  - case_id: orca6-dvb-adc2
+  - case_id: orca6-dvb-steom-ccsd
+ladder: ladder.md
+synthetic_ladder: true
+tolerances: tolerances.yaml
+efficiency_gate: [tokens.total, cost_usd, context_bytes.total]

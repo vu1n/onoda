@@ -1,0 +1,11 @@
+# Operator-chosen capability tolerances (A49). Zero worsening on every capability
+# metric; pass this file as an ablation spec's `tolerances`.
+schema: onoda.ablation-tolerances/1
+justification: "A49: zero worsening on every capability metric, chosen by Vu 2026-09-27"
+capability:
+  false_success_claims: "0"
+  count.supported: "0"
+  count.contradicted: "0"
+  count.unsupported: "0"
+  count.missing: "0"
+  count.unresolved: "0"

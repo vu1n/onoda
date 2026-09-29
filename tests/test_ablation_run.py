@@ -214,3 +214,125 @@ def test_spec_paths_stay_in_the_spec_directory(tmp_path, key):
             evaluator_store=evaluator,
             work_dir=tmp_path / "w",
         )
+
+
+# Live ablations (offline checks: the refusals, and the round/budget logic with
+# `run_case` faked; the live path itself needs a provider key).
+
+LIVE_SPEC = Path(__file__).resolve().parents[1] / "experiments" / "ablation-live" / "spec.yaml"
+
+
+def live_settings(monkeypatch, max_cost_usd="0.05"):
+    from onoda.adapters.pi.runtime import LiveSettings
+
+    monkeypatch.setenv("FAKE_KEY", "x")
+    return LiveSettings(
+        provider="openrouter",
+        model="m",
+        credential_env="FAKE_KEY",
+        max_requests=10,
+        max_cost_usd=max_cost_usd,
+    )
+
+
+def live_spec(tmp_path: Path, **changes) -> Path:
+    cases = [{"case_id": CASE_ID}]
+    return spec_copy(tmp_path, cases=cases, **changes)
+
+
+def test_a_scripted_ablation_needs_every_script(tmp_path):
+    store, evaluator = stores(tmp_path)
+    with pytest.raises(OnodaError, match="script for every case"):
+        run_ablation(live_spec(tmp_path), store=store, evaluator_store=evaluator, work_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "scripted, kwargs, match",
+    [
+        (True, {}, "takes no scripts"),
+        (False, {"sandbox": None}, "sandbox"),
+        (False, {"max_cost_usd": None}, "max_cost_usd"),
+        (False, {"reducer": None}, "Reducer"),
+    ],
+)
+def test_live_ablation_refusals(tmp_path, monkeypatch, scripted, kwargs, match):
+    from decimal import Decimal
+
+    store, evaluator = stores(tmp_path)
+    spec = spec_copy(tmp_path) if scripted else live_spec(tmp_path)
+    args = {
+        "live": live_settings(monkeypatch),
+        "sandbox": object(),
+        "max_cost_usd": Decimal("1"),
+        "reducer": ("openrouter", "m"),
+    } | kwargs
+    with pytest.raises(OnodaError, match=match):
+        run_ablation(spec, store=store, evaluator_store=evaluator, work_dir=tmp_path / "w", **args)
+    assert store.list_record_ids("run") == []
+
+
+def test_live_ablation_runs_whole_rounds_within_the_cap(tmp_path, monkeypatch):
+    """Rounds interleave arms per case and repeat; the cap stops before a round, never inside."""
+    from decimal import Decimal
+
+    from test_ablation_gates import make_vector
+
+    import onoda.ablation.run as ab
+
+    launched: list[str] = []
+    monkeypatch.setattr(
+        ab, "run_case", lambda store, case, *, run_id, **kw: launched.append(run_id)
+    )
+    monkeypatch.setattr(ab, "run_claim", lambda store, run_id: None)
+    monkeypatch.setattr(ab, "evaluate_claims", lambda *a, run_id, **kw: run_id)
+    efficiency = {"context_bytes.total": "10", "acquisitions": "1", "cost_usd": "0.01"}
+
+    def vector(store, run_id, *, arm):
+        v = make_vector(arm=arm, case_id=CASE_ID, run_id=run_id, efficiency=efficiency)
+        return v.model_copy(update={"synthetic": False})
+
+    monkeypatch.setattr(ab, "outcome_vector", vector)
+    store, evaluator = stores(tmp_path)
+    # A round of two arms reserves 2 x 0.05; after two rounds 0.04 is spent, and
+    # 0.04 + 0.10 > 0.12 stops the third.
+    _, report = run_ablation(
+        live_spec(tmp_path, arms=["S1", "S2a"], repeats=3),
+        store=store,
+        evaluator_store=evaluator,
+        work_dir=tmp_path / "w",
+        live=live_settings(monkeypatch),
+        sandbox=object(),
+        max_cost_usd=Decimal("0.12"),
+    )
+    assert launched == [f"fixture-{a}-{CASE_ID}-r{r}" for r in (1, 2) for a in ("S1", "S2a")]
+    assert report["mode"] == "live" and report["evidence"] == "measured"
+    assert report["rounds"] == {"planned": 3, "completed": 2}
+    assert report["spent_usd"] == "0.04" and report["stopped"].startswith("budget")
+    assert "not a mechanism verdict" in report["caveat"]
+
+
+def test_the_shipped_live_spec_loads(tmp_path):
+    from onoda.ablation.contract import DEFAULT_ARMS, AblationSpec, Tolerances
+
+    spec = AblationSpec.model_validate(yaml.safe_load(LIVE_SPEC.read_text()))
+    assert spec.arms == DEFAULT_ARMS and spec.repeats == 3
+    assert all(c.script is None for c in spec.cases)
+    gates = LIVE_SPEC.parents[2] / "gates" / "tolerances.yaml"
+    assert (LIVE_SPEC.parent / "tolerances.yaml").read_bytes() == gates.read_bytes()
+    Tolerances.model_validate(yaml.safe_load(gates.read_text()))
+
+
+@requires_pi
+def test_repeats_name_each_run(tmp_path):
+    store, evaluator = stores(tmp_path)
+    _, report = run_ablation(
+        spec_copy(tmp_path, arms=["S1", "S2a"], repeats=2),
+        store=store,
+        evaluator_store=evaluator,
+        work_dir=tmp_path / "w",
+    )
+    assert [r["run_id"] for r in report["runs"]] == [
+        f"fixture-{a}-{CASE_ID}-r{r}" for a in ("S1", "S2a") for r in (1, 2)
+    ]
+    assert report["mode"] == "scripted" and report["spent_usd"] is None
+    assert report["rounds"] == {"planned": 2, "completed": 2}

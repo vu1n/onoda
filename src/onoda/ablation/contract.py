@@ -171,7 +171,9 @@ def tolerance_for(metric: str, tolerances: Tolerances | None) -> Decimal | None:
 
 class AblationCase(_Frozen):
     case_id: str
-    script: str  # path to an onoda.pi-script/1 JSON, relative to the spec file; used for every arm
+    # Path to an onoda.pi-script/1 JSON, relative to the spec file; used for every arm.
+    # A scripted ablation needs one per case; a live ablation refuses any.
+    script: str | None = None
 
 
 class AblationSpec(_Frozen):
@@ -188,7 +190,9 @@ class AblationSpec(_Frozen):
     # Efficiency metrics the efficiency gate may count as an improvement. SOL_PI_DELTA §5
     # asks for them to be declared before the comparison.
     efficiency_gate: tuple[str, ...] = ("context_bytes.total", "acquisitions")
-    max_requests: int = Field(16, ge=1)
+    max_requests: int = Field(16, ge=1)  # scripted runs; a live run uses its own cap (A35)
+    # Runs of every arm on every case. Live runs vary, so repeats pool several.
+    repeats: int = Field(1, ge=1, le=20)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 

@@ -633,9 +633,30 @@ def cmd_optimize_status(a) -> Any:
 
 
 def cmd_ablation_run(a) -> Any:
+    from decimal import Decimal
+
     from onoda.ablation.run import run_ablation
+    from onoda.adapters.pi.contract import DECIMAL_RE
+    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
     from onoda.science.contract import CASES_ROOT
 
+    if bool(a.reducer_provider) != bool(a.reducer_model):
+        raise OnodaError("give both --reducer-provider and --reducer-model, or neither")
+    live = sandbox = cap = None
+    if a.live:
+        # Every live setting explicit (A35); nothing defaults.
+        live = LiveSettings(
+            provider=a.provider,
+            model=a.model,
+            credential_env=a.credential_env,
+            max_requests=a.max_requests,
+            max_cost_usd=a.max_cost_usd,
+        )
+        live.validate()
+        if not a.ablation_max_cost_usd or not DECIMAL_RE.match(a.ablation_max_cost_usd):
+            raise OnodaError("--live needs --ablation-max-cost-usd (decimal USD)")
+        cap = Decimal(a.ablation_max_cost_usd)
+        sandbox = detect_sandbox()
     digest, report = run_ablation(
         a.spec,
         store=_store(a.store),
@@ -643,6 +664,10 @@ def cmd_ablation_run(a) -> Any:
         work_dir=Path(a.work_dir),
         cases_root=Path(a.cases_root) if a.cases_root else CASES_ROOT,
         timeout_s=a.timeout,
+        live=live,
+        reducer=(a.reducer_provider, a.reducer_model) if a.reducer_provider else None,
+        sandbox=sandbox,
+        max_cost_usd=cap,
     )
     if a.full:
         return {"report": digest, **report}
@@ -653,6 +678,9 @@ def cmd_ablation_run(a) -> Any:
         "caveat": report["caveat"],
         "verdicts": {c["arm"]: c["verdict"] for c in report["comparisons"]},
         "non_dominated": report["non_dominated"],
+        "rounds": report["rounds"],
+        "stopped": report["stopped"],
+        "spent_usd": report["spent_usd"],
     }
 
 
@@ -830,6 +858,15 @@ def build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
     ar.add_argument("--cases-root")
     ar.add_argument("--full", action="store_true", help="print the whole report")
+    ar.add_argument("--live", action="store_true", help="real provider in the sandbox, no scripts")
+    ar.add_argument("--provider", help="live: Pi provider for the agent")
+    ar.add_argument("--model", help="live: agent model")
+    ar.add_argument("--credential-env", help="live: env var holding the API key")
+    ar.add_argument("--max-requests", type=int, help="live: request cap per run")
+    ar.add_argument("--max-cost-usd", help="live: cost cap per run")
+    ar.add_argument("--ablation-max-cost-usd", help="live: cost cap for the whole ablation")
+    ar.add_argument("--reducer-provider", help="live: reducer provider for S2b/S3")
+    ar.add_argument("--reducer-model", help="live: reducer model for S2b/S3")
     ar.set_defaults(func=cmd_ablation_run)
     ash = ab.add_parser("show", help="print a stored ablation report")
     ash.add_argument("report", help="report digest (sha256:...)")
