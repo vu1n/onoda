@@ -140,14 +140,15 @@ A live ablation (`--live`) takes a spec without scripts
 repeats) and runs every arm in the sandbox (A50), one round (every arm on one
 case) at a time. It stops before a round the remaining
 `--ablation-max-cost-usd` cannot cover at the per-run cap, so the compared arms
-always hold the same runs:
+always hold the same runs. The reducer model must differ from the agent
+model, because ingest tells their requests apart by model id:
 
 ```bash
 export OPENROUTER_API_KEY=...
 onoda ablation run experiments/ablation-live/spec.yaml --live \
   --provider openrouter --model deepseek/deepseek-v4-flash --credential-env OPENROUTER_API_KEY \
   --max-requests 30 --max-cost-usd 0.05 --ablation-max-cost-usd 2.00 \
-  --reducer-provider openrouter --reducer-model deepseek/deepseek-v4-flash \
+  --reducer-provider openrouter --reducer-model deepseek/deepseek-v3.2 \
   --store ./store-a --evaluator-store ./evaluator --work-dir ./abl
 ```
 

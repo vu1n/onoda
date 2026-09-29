@@ -168,6 +168,10 @@ def _check_mode(
         "evidencePreservingReducer" in VARIANTS[a].mechanisms for a in spec.arms
     ):
         raise OnodaError("an arm runs the Evidence-Preserving Reducer; name a reducer model")
+    if reducer is not None and reducer[1] == live.model:
+        # Ingest tells reducer requests from agent requests by model id, so it
+        # refuses a shared model; refuse here, before any run spends money.
+        raise OnodaError(f"the reducer model must differ from the agent model {live.model!r}")
 
 
 def build_report(
