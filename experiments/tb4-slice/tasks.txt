@@ -1,0 +1,12 @@
+# Terminal-Bench 4.0.0 (terminal-bench/terminal-bench@4.0.0), CPU-only, single container,
+# at most 4 CPUs / 8 GB. Picked by an operator for build or test output; not a sample.
+mvcc-lsm-compaction
+react-lead-form
+wal-recovery-ordering
+session-window-debug
+batched-eval-parity
+vf2-speedup-networkx
+ks-solver-cpp
+retro-console-soc
+coq-block-bound
+bun-sourcemap-leak
