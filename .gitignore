@@ -6,3 +6,6 @@ __pycache__/
 dist/
 /scratch/
 pi/node_modules
+.env
+.env.*
+!.env.example
