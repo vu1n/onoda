@@ -9,9 +9,10 @@ cclib-data ships no LICENSE file. These cases are for development and
 held-out checks only, used with `--cases-root cases-dev`; they are not part
 of `cases/` and no optimizer split draws from them.
 
-The two TD-DFT logs above have no upstream `.inp`. Each `.inp` for them is the log's own
-INPUT FILE echo with the `| n>` prefixes stripped (for the six cclib cases
-in `cases/`, that procedure reproduces the vendored `.inp` byte for byte).
+The two TD-DFT logs (orca5-adbna-tddft, orca4-1ttt-tddft) have no upstream
+`.inp`. Each `.inp` for them is the log's own INPUT FILE echo with the `| n>`
+prefixes stripped (for the six cclib cases in `cases/`, that procedure
+reproduces the vendored `.inp` byte for byte).
 
 ## Held-out cases beyond TD-DFT (added 2026-10-02)
 
