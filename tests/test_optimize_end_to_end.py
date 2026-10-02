@@ -18,7 +18,7 @@ from conftest import requires_pi
 from test_pi_end_to_end import LADDER, stores
 
 from onoda.ablation.contract import CAPABILITY_METRICS, Tolerances
-from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate, Script
+from onoda.adapters.pi.contract import INITIAL_SEED_CANDIDATE, HarnessCandidate, Script
 from onoda.cli import main
 from onoda.clock import LogicalClock
 from onoda.optimize.contract import CandidateRecord, GateSpec, SplitAssignment
@@ -39,6 +39,9 @@ SPEC = GateSpec(
     ),
     efficiency_gate=("context_bytes.total",),
 )
+
+# Loop-mechanics fixtures: their scripted reflections edit the initial seed's texts.
+SEED = INITIAL_SEED_CANDIDATE
 SLOPPY = "SLOPPY: estimate values instead of copying them."
 TERSE = "Use the ipython REPL; copy every value exactly as printed."
 
@@ -101,7 +104,7 @@ def test_two_proposals_one_rejected_one_accepted_on_real_pi(tmp_path):
     opt = Store(tmp_path / "opt", clock=LogicalClock())
     result = run_optimization(
         runner=runner,
-        seed=SEED_CANDIDATE,
+        seed=SEED,
         split=SPLIT,
         gates=SPEC,
         reflect=reflect,
@@ -123,7 +126,7 @@ def test_two_proposals_one_rejected_one_accepted_on_real_pi(tmp_path):
     assert rejected.components["rlm.system_prompt"] == SLOPPY
     assert any("false-success" in r or "capability" in r for r in rejected.reasons)
     # GEPA's round-robin selector moves on to the next component (the tool doc).
-    changed = {k for k, v in accepted.components.items() if SEED_CANDIDATE.components[k] != v}
+    changed = {k for k, v in accepted.components.items() if SEED.components[k] != v}
     assert changed == {"rlm.tool_doc"} and accepted.components["rlm.tool_doc"] == TERSE
     assert any("context_bytes.total" in r for r in accepted.reasons)
     assert [r.candidate for r in result.accepted] == [accepted.candidate]

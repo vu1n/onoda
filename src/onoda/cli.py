@@ -602,6 +602,66 @@ def _live_search(a) -> tuple[Any, Any, Any, Any]:
     return live, reflect, spend, detect_sandbox()
 
 
+def cmd_optimize_compare(a) -> Any:
+    """Gate check of --candidate against --baseline (default: the seed) on the acceptance slice."""
+    from decimal import Decimal
+
+    from onoda.adapters.pi.contract import DECIMAL_RE, SEED_CANDIDATE, HarnessCandidate
+    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
+    from onoda.optimize.compare import compare_candidates
+    from onoda.optimize.contract import GateSpec, SplitAssignment
+    from onoda.optimize.pi_runner import PiRunner
+    from onoda.science.contract import CASES_ROOT
+
+    if not a.live:
+        raise OnodaError("compare runs live only (a scripted check would compare the script)")
+    gates = _read_model(GateSpec, a.gates)
+    split = _read_model(SplitAssignment, a.split)
+    baseline = _read_model(HarnessCandidate, a.baseline) if a.baseline else SEED_CANDIDATE
+    candidate = _read_model(HarnessCandidate, a.candidate)
+    live = LiveSettings(
+        provider=a.provider,
+        model=a.model,
+        credential_env=a.credential_env,
+        max_requests=a.max_requests,
+        max_cost_usd=a.max_cost_usd,
+    )
+    live.validate()
+    if not a.compare_max_cost_usd or not DECIMAL_RE.match(a.compare_max_cost_usd):
+        raise OnodaError("--live needs --compare-max-cost-usd (decimal USD)")
+    assert live.max_cost_usd is not None
+    evaluator_store = _store(a.evaluator_store, evaluator=True)
+    runner = PiRunner(
+        store=_store(a.store),
+        evaluator_store=evaluator_store,
+        work_dir=Path(a.work_dir) / a.check_id,
+        variant_id=a.variant,
+        live=live,
+        sandbox=detect_sandbox(),
+        ladder=Path(a.ladder).read_bytes() if a.ladder else None,
+        synthetic_ladder=a.synthetic_ladder,
+        max_requests=a.max_requests,
+        timeout_s=a.timeout,
+        cases_root=Path(a.cases_root) if a.cases_root else CASES_ROOT,
+    )
+    check = compare_candidates(
+        runner,
+        check_id=a.check_id,
+        baseline=baseline,
+        candidate=candidate,
+        cases=split.acceptance,  # never the final slice
+        gates=gates,
+        repeats=a.repeats,
+        max_cost_usd=Decimal(a.compare_max_cost_usd),
+        run_reserve_usd=Decimal(live.max_cost_usd),
+    )
+    check["exploratory_split"] = split.exploratory
+    digest = evaluator_store.put_json(
+        check, visibility="evaluator", labels=["promotion-check"]
+    ).digest
+    return {"check": digest, **check}
+
+
 def cmd_optimize_status(a) -> Any:
     from onoda.optimize.contract import CandidateRecord
 
@@ -923,6 +983,31 @@ def build_parser() -> argparse.ArgumentParser:
     orun.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
     orun.add_argument("--cases-root")
     orun.set_defaults(func=cmd_optimize_run)
+    ocmp = op.add_parser(
+        "compare", help="gate check of one candidate against another (promotion, A54)"
+    )
+    ocmp.add_argument("--candidate", required=True, help="HarnessCandidate JSON")
+    ocmp.add_argument("--baseline", help="HarnessCandidate JSON (default: the seed candidate)")
+    ocmp.add_argument("--split", required=True, help="onoda.split/1 JSON; runs its acceptance")
+    ocmp.add_argument("--gates", required=True, help="onoda.gate-spec/2 YAML/JSON")
+    ocmp.add_argument("--check-id", required=True)
+    ocmp.add_argument("--store", required=True, help="agent store for the runs")
+    ocmp.add_argument("--evaluator-store", required=True)
+    ocmp.add_argument("--work-dir", required=True)
+    ocmp.add_argument("--repeats", type=int, default=2, help="runs per case per candidate")
+    ocmp.add_argument("--live", action="store_true", help="real agent model (required)")
+    ocmp.add_argument("--provider", help="live: Pi provider for the agent")
+    ocmp.add_argument("--model", help="live: agent model")
+    ocmp.add_argument("--credential-env", help="live: env var holding the agent's API key")
+    ocmp.add_argument("--max-requests", type=int, help="live: request cap per run")
+    ocmp.add_argument("--max-cost-usd", help="live: cost cap per run")
+    ocmp.add_argument("--compare-max-cost-usd", help="live: cost cap for the whole check")
+    ocmp.add_argument("--variant", default="S1r")
+    ocmp.add_argument("--ladder")
+    ocmp.add_argument("--synthetic-ladder", action="store_true")
+    ocmp.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
+    ocmp.add_argument("--cases-root")
+    ocmp.set_defaults(func=cmd_optimize_compare)
     ost = op.add_parser("status", help="candidates, decisions and the final set of a search")
     ost.add_argument("--optimizer-store", required=True)
     ost.add_argument("--search-id", required=True)

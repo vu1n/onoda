@@ -336,3 +336,45 @@ def test_repeats_name_each_run(tmp_path):
     ]
     assert report["mode"] == "scripted" and report["spent_usd"] is None
     assert report["rounds"] == {"planned": 2, "completed": 2}
+
+
+@requires_pi
+def test_an_rlm_ablation_runs_every_arm_on_the_seed_candidate(tmp_path):
+    from onoda.adapters.pi.contract import SEED_CANDIDATE
+
+    store, evaluator = stores(tmp_path)
+    _, report = run_ablation(
+        spec_copy(tmp_path, arms=["S1", "S2a"], rlm=True),
+        store=store,
+        evaluator_store=evaluator,
+        work_dir=tmp_path / "w",
+    )
+    assert [r["arm"] for r in report["runs"]] == ["S1", "S2a"]
+    assert report["rlm_seed"] == SEED_CANDIDATE.digest()
+    s1, s2a = (store.run_record(run_id_for("fixture", a, CASE_ID)).config for a in ("S1", "S2a"))
+    assert s1["variant"] == s2a["variant"] == "S1r"
+    assert s1["candidate"] == SEED_CANDIDATE.digest() and "sol_pi_config_override" not in s1
+    assert s2a["sol_pi_config_override"] == {"observationPack": True}
+    assert report["arms"]["S1"]["mechanism_config"] == ["none"]
+    assert report["arms"]["S2a"]["activation_by_model"]["scripted"]["observationPack"] == "1/1"
+
+
+def test_an_rlm_ablation_refuses_an_arm_without_the_ladder(tmp_path):
+    store, evaluator = stores(tmp_path)
+    with pytest.raises(OnodaError, match="needs the ladder"):
+        run_ablation(
+            spec_copy(tmp_path, arms=["S0", "S1"], rlm=True),
+            store=store,
+            evaluator_store=evaluator,
+            work_dir=tmp_path / "w",
+        )
+
+
+def test_the_shipped_rlm_live_spec_loads():
+    from onoda.ablation.contract import DEFAULT_ARMS, AblationSpec
+
+    rlm_spec = LIVE_SPEC.parents[1] / "ablation-live-rlm" / "spec.yaml"
+    spec = AblationSpec.model_validate(yaml.safe_load(rlm_spec.read_text()))
+    assert spec.rlm and spec.arms == DEFAULT_ARMS
+    for name in ("ladder.md", "tolerances.yaml"):
+        assert (rlm_spec.parent / name).read_bytes() == (LIVE_SPEC.parent / name).read_bytes()

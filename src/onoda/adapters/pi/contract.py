@@ -941,7 +941,9 @@ _SEED_HELPERS = (
     "    return [(n, ln) for n, ln in enumerate(text.splitlines(), 1) if needle in ln]\n"
 )
 
-SEED_CANDIDATE = HarnessCandidate(
+# The first seed (M4): DSPy's prompt plus onoda's minimal tool doc and helpers.
+# Kept as the reference a promotion is checked against (A54).
+INITIAL_SEED_CANDIDATE = HarnessCandidate(
     components={
         "rlm.system_prompt": _SEED_SYSTEM_PROMPT,
         "rlm.tool_doc": _SEED_TOOL_DOC,
@@ -953,15 +955,7 @@ SEED_CANDIDATE = HarnessCandidate(
     }
 )
 
-
-def candidate_for(variant_id: str, candidate: HarnessCandidate | None) -> HarnessCandidate | None:
-    """The candidate a run launches with: the given one, else the seed for an RLM variant."""
-    if candidate is None and VARIANTS[variant_id].rlm:
-        return SEED_CANDIDATE
-    return candidate
-
-
-SEED_PROVENANCE = {
+INITIAL_SEED_PROVENANCE = {
     "rlm.system_prompt": "adapted from dspy 3.4.0 dspy/predict/rlm.py "
     "ACTION_INSTRUCTIONS_TEMPLATE (MIT, provenance S18)",
     "rlm.tool_doc": "onoda",
@@ -969,6 +963,32 @@ SEED_PROVENANCE = {
     "rlm.helpers": "onoda",
     "rlm.limits": "onoda defaults, not tuned (A45)",
 }
+
+# The current seed: live search `live3`'s best candidate (783ec4ea), promoted
+# after `onoda optimize compare` passed the gates against INITIAL_SEED_CANDIDATE
+# (A54). Its components are GEPA's text verbatim, typos included: the gates
+# measured exactly these bytes, so an edit is a new candidate.
+SEED_FILE = Path(__file__).with_name("seed_candidate.json")
+SEED_CANDIDATE = HarnessCandidate.model_validate_json(SEED_FILE.read_text())
+SEED_DIGEST = "sha256:783ec4eade9b71fa00deeb950b9e99226c4026be6f8b3480fcacb92b74dd7bcc"
+if SEED_CANDIDATE.digest() != SEED_DIGEST:  # the promoted bytes, or nothing
+    raise RuntimeError(f"{SEED_FILE.name} is not the promoted seed {SEED_DIGEST}")
+
+_LIVE3 = "GEPA live search live3 (2026-09-27, reflection deepseek-v4-pro) from the initial seed"
+SEED_PROVENANCE = {
+    "rlm.system_prompt": f"{_LIVE3}; rewrite of the DSPy-adapted prompt (S18)",
+    "rlm.tool_doc": _LIVE3,
+    "rlm.child_prompt": "onoda (unchanged from the initial seed)",
+    "rlm.helpers": _LIVE3,
+    "rlm.limits": "onoda defaults, not tuned (A45)",
+}
+
+
+def candidate_for(variant_id: str, candidate: HarnessCandidate | None) -> HarnessCandidate | None:
+    """The candidate a run launches with: the given one, else the seed for an RLM variant."""
+    if candidate is None and VARIANTS[variant_id].rlm:
+        return SEED_CANDIDATE
+    return candidate
 
 
 # ------------------------------------------------------------ record mapping

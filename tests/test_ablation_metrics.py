@@ -395,3 +395,13 @@ def test_a_partly_unpriced_run_has_unknown_cost_and_tokens():
     out = _efficiency(store, [*priced, decision("reducer", None, None)], [])
     assert (out["cost_usd"], out["tokens.total"]) == (None, None)
     assert out["context_bytes.total"] == "20"
+
+
+def test_an_rlm_run_counts_as_the_arm_whose_mechanisms_it_ran():
+    from onoda.ablation.metrics import _rlm_run_of
+
+    plain = {"variant": "S1r"}
+    packed = {"variant": "S1r", "sol_pi_config_override": {"observationPack": True}}
+    assert _rlm_run_of(plain, "S1") and not _rlm_run_of(plain, "S2a")
+    assert _rlm_run_of(packed, "S2a") and not _rlm_run_of(packed, "S1")
+    assert not _rlm_run_of(packed, "S3") and not _rlm_run_of({"variant": "S1"}, "S2a")

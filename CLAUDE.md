@@ -23,7 +23,8 @@ first agent adapter; Prime is an optional comparison arm).
 - RLM and optimizer (M4): `pi/extensions/onoda-rlm.ts` plus the stdlib-only
   kernel `pi/rlm/onoda_rlm_kernel.py` make variant S1r; `onoda optimize
   seed|split|run|status` runs GEPA (pinned `gepa==0.1.4`) over
-  `HarnessCandidate` components, offline under scripts only.
+  `HarnessCandidate` components; `onoda optimize compare` is the live gate
+  check that promotes a candidate to seed (A54).
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;
   `onoda case list` shows them. Vendored bytes under `cases/` are never edited.
 - Dev-only cases: `cases-dev/` (cclib-data logs, no upstream license) for
@@ -73,9 +74,13 @@ VCS is plain git. No project board; work items come from issues or goals.
   requests and cost are charged to the parent's budget and metrics.
 - Optimizer: trials run on acceptance cases only, never the final split;
   reflection sees agent traces plus verdict words and reason classes (A53),
-  never reducer receipts or evaluator references; a candidate is accepted only on an `eligible` gate verdict, so
-  an unresolved capability gate never accepts; candidates change only the
-  allowlisted components (A45).
+  never reducer receipts or evaluator references; a candidate is accepted on an
+  `eligible` gate verdict or, with `capability_gain` (A52), on a passing
+  capability gate with a strict capability gain, so an unresolved capability
+  gate never accepts; candidates change only the allowlisted components (A45).
+  The seed changes only by promotion (A54): `onoda optimize compare` passes
+  the gates against the current seed, and `seed_candidate.json` holds exactly
+  the bytes it measured.
 
 Read `docs/ASSUMPTIONS.md` before changing scientific behavior, and record
 new assumptions there instead of inventing thresholds or API methods.

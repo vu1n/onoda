@@ -13,9 +13,12 @@ from onoda.ablation.contract import CAPABILITY_METRICS, EFFICIENCY_METRICS, Tole
 from onoda.adapters.pi.contract import (
     COMPONENT_VALIDATORS,
     CTX_RLM_STATE,
+    INITIAL_SEED_CANDIDATE,
+    INITIAL_SEED_PROVENANCE,
     KERNEL_PROTOCOL,
     REQUIRED_COMPONENTS,
     SEED_CANDIDATE,
+    SEED_DIGEST,
     SEED_PROVENANCE,
     VARIANTS,
     HarnessCandidate,
@@ -151,6 +154,16 @@ def test_seed_candidate_validates_and_has_provenance():
     rc = SEED_CANDIDATE.rlm_components()
     assert rc.candidate_digest == SEED_CANDIDATE.digest()
     assert "{prompt}" in rc.child_prompt
+
+
+def test_seed_is_the_promoted_live3_candidate_and_the_initial_seed_is_kept():
+    # A54: the seed file holds exactly the bytes the promotion check measured.
+    assert SEED_CANDIDATE.digest() == SEED_DIGEST
+    assert INITIAL_SEED_CANDIDATE.digest() == (
+        "sha256:c76c4d0b5096f0e947b348664dac9e61abb559f076e7739d33498271dde10fa2"
+    )
+    assert set(INITIAL_SEED_PROVENANCE) == set(INITIAL_SEED_CANDIDATE.components)
+    assert "never convert units" in SEED_CANDIDATE.components["rlm.tool_doc"].lower()
 
 
 def _with(**changes: str) -> dict[str, str]:

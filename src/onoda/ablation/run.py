@@ -22,6 +22,7 @@ is labelled measured and carries the short-run caveat instead.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,7 @@ from onoda.ablation.contract import (
 )
 from onoda.ablation.gates import compare_arm, interaction, non_dominated, pool
 from onoda.ablation.metrics import outcome_vector
-from onoda.adapters.pi.contract import VARIANTS, Script
+from onoda.adapters.pi.contract import SEED_CANDIDATE, VARIANTS, HarnessCandidate, Script
 from onoda.adapters.pi.ingest import run_claim
 from onoda.adapters.pi.run import run_case
 from onoda.adapters.pi.runtime import LiveSettings
@@ -97,6 +98,18 @@ def run_id_for(ablation_id: str, arm: str, case_id: str, repeat: int | None = No
     """`repeat` (1-based) is appended only for specs with `repeats` > 1."""
     base = f"{ablation_id}-{arm}-{case_id}"
     return base if repeat is None else f"{base}-r{repeat}"
+
+
+RLM_BASE = "S1r"
+
+
+def rlm_arm(arm: str) -> HarnessCandidate:
+    """The seed candidate with `arm`'s mechanisms as its `sol_pi.config` (A55)."""
+    mechanisms = VARIANTS[arm].mechanisms
+    if not mechanisms:
+        return SEED_CANDIDATE
+    config = json.dumps(dict.fromkeys(mechanisms, True), sort_keys=True)
+    return HarnessCandidate(components={**SEED_CANDIDATE.components, "sol_pi.config": config})
 
 
 def _prepare(
@@ -274,7 +287,8 @@ def run_ablation(
                 store,
                 case,
                 run_id=run_id,
-                variant_id=arm,
+                variant_id=RLM_BASE if spec.rlm else arm,
+                candidate=rlm_arm(arm) if spec.rlm else None,
                 work_dir=work_dir / arm / case_id / (f"r{repeat}" if repeat else ""),
                 script=script,
                 live=live,
@@ -311,6 +325,7 @@ def run_ablation(
     report["mode"] = "live" if live else "scripted"
     report["rounds"] = {"planned": len(repeats) * len(cases), "completed": rounds}
     report["stopped"] = stopped
+    report["rlm_seed"] = SEED_CANDIDATE.digest() if spec.rlm else None
     report["spent_usd"] = str(spent) if live else None  # scripted costs are synthetic
     report["spec"] = evaluator_store.put_json(
         spec.model_dump(mode="json", by_alias=True),

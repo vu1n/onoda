@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 
 from onoda.ablation.contract import ACTIVATION_METRICS, CAPABILITY_METRICS, OutcomeVector
-from onoda.adapters.pi.contract import CTX_MECHANISMS
+from onoda.adapters.pi.contract import CTX_MECHANISMS, VARIANTS, mechanisms_on
 from onoda.adapters.pi.task import CLAIM_EVALUATOR
 from onoda.budgets import descendant_receipts
 from onoda.canonical import digest_of
@@ -41,12 +41,14 @@ def outcome_vector(store: Store, evaluation: Evaluation, *, arm: str) -> Outcome
 
     Refuses (`OnodaError`) before reading anything else if the run's own
     recorded variant differs from `arm`, or `evaluation` was not written by
-    the claim evaluator (`onoda.adapters.pi.task.evaluate_claims`).
+    the claim evaluator (`onoda.adapters.pi.task.evaluate_claims`). An RLM
+    ablation's run (A55) is recorded as S1r with the arm's mechanisms as its
+    `sol_pi.config` override, and counts as that arm.
     """
     run_id = evaluation.run_id
     run = store.run_record(run_id)
     recorded_variant = run.config.get("variant")
-    if recorded_variant != arm:
+    if recorded_variant != arm and not _rlm_run_of(run.config, arm):
         raise OnodaError(
             f"run {run_id} was recorded under variant {recorded_variant!r}, not arm {arm!r}"
         )
@@ -82,6 +84,16 @@ def outcome_vector(store: Store, evaluation: Evaluation, *, arm: str) -> Outcome
         mechanism_config=digest_of(sol_pi_config) if sol_pi_config is not None else None,
         evaluation_id=evaluation.evaluation_id,
     )
+
+
+def _rlm_run_of(config: dict, arm: str) -> bool:
+    """Whether a run recorded under an RLM variant ran exactly `arm`'s mechanisms."""
+    variant = VARIANTS.get(config.get("variant", ""))
+    if variant is None or not variant.rlm or arm not in VARIANTS or VARIANTS[arm].rlm:
+        return False
+    override = config.get("sol_pi_config_override")
+    ran = variant.mechanisms if override is None else mechanisms_on(override)
+    return set(ran) == set(VARIANTS[arm].mechanisms)
 
 
 def _with_children(

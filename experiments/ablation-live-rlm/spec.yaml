@@ -1,0 +1,20 @@
+# Live SoL-Pi add-one ablation on the RLM harness (A55): the same arms, cases and
+# gates as experiments/ablation-live, but every arm runs S1r with the seed
+# candidate (the promoted live3 rewrite, A54) and its mechanisms set through the
+# candidate's sol_pi.config. The seed's copy-as-printed rules remove most of the
+# TD-DFT claim noise that masked the arms in the first live ablation.
+schema: onoda.ablation-spec/1
+ablation_id: live-add-one-rlm-1
+rlm: true
+repeats: 3
+cases:
+  - case_id: orca6-water-mp2
+  - case_id: orca5-dvb-tddft
+  - case_id: orca6-dvb-tddft
+  - case_id: orca6-dvb-eom-ccsd
+  - case_id: orca6-dvb-adc2
+  - case_id: orca6-dvb-steom-ccsd
+ladder: ladder.md
+synthetic_ladder: true
+tolerances: tolerances.yaml
+efficiency_gate: [tokens.total, cost_usd, context_bytes.total]

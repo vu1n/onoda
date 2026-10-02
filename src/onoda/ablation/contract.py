@@ -193,6 +193,10 @@ class AblationSpec(_Frozen):
     max_requests: int = Field(16, ge=1)  # scripted runs; a live run uses its own cap (A35)
     # Runs of every arm on every case. Live runs vary, so repeats pool several.
     repeats: int = Field(1, ge=1, le=20)
+    # A55: every arm also loads the RLM extension with the seed candidate (S1r), its
+    # mechanisms set through the candidate's `sol_pi.config`, so the add-one question
+    # is asked on the RLM harness. Arm names keep their mechanism meaning.
+    rlm: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -202,10 +206,12 @@ class AblationSpec(_Frozen):
             if arm not in VARIANTS:
                 raise ValueError(f"unknown arm {arm!r}")
             if VARIANTS[arm].rlm:
-                # M4 built the RLM arm, but ablation scripts carry no RLM children yet.
-                raise ValueError(f"arm {arm} is an RLM arm; ablations do not run RLM arms yet")
+                # An RLM ablation names the mechanism arms and sets `rlm` (A55).
+                raise ValueError(f"arm {arm} is an RLM arm; set `rlm: true` to run arms on S1r")
         if len(set(self.arms)) != len(self.arms):
             raise ValueError("arms repeat")
+        if self.rlm and any(not VARIANTS[a].ladder for a in self.arms):
+            raise ValueError("an RLM ablation runs every arm on S1r, which needs the ladder")
         if self.baseline not in self.arms:
             raise ValueError(f"baseline {self.baseline!r} is not one of the arms")
         ids = [c.case_id for c in self.cases]

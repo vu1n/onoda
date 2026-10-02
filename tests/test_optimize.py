@@ -26,7 +26,7 @@ from onoda.ablation.contract import (
     Tolerances,
 )
 from onoda.ablation.gates import PooledArm, pool
-from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate
+from onoda.adapters.pi.contract import INITIAL_SEED_CANDIDATE, HarnessCandidate
 from onoda.clock import LogicalClock
 from onoda.errors import OnodaError
 from onoda.optimize.adapter import (
@@ -55,7 +55,9 @@ SPEC = GateSpec(
     efficiency_gate=("requests.agent", "tokens.total", "cost_usd"),
 )
 SPLIT = SplitAssignment(seed=7, acceptance=("c1", "c2", "c3"), final=("f1", "f2"), exploratory=True)
-SEED_DIGEST = SEED_CANDIDATE.digest()
+# Loop-mechanics fixtures: their scripted reflections edit the initial seed's texts.
+SEED = INITIAL_SEED_CANDIDATE
+SEED_DIGEST = SEED.digest()
 
 
 def vec(
@@ -330,7 +332,7 @@ class ScriptedReflection:
 def optimize(tmp_path: Path, runner, reflect, **kw):
     args = dict(
         runner=runner,
-        seed=SEED_CANDIDATE,
+        seed=SEED,
         split=SPLIT,
         gates=SPEC,
         reflect=reflect,
@@ -423,7 +425,7 @@ def test_runner_never_sees_a_final_split_case(tmp_path):
     )
     before = len(runner.calls)
     with pytest.raises(OnodaError, match="outside the acceptance slice"):
-        adapter.evaluate(["c1", "f1"], dict(SEED_CANDIDATE.components))
+        adapter.evaluate(["c1", "f1"], dict(SEED.components))
     assert len(runner.calls) == before
 
 
@@ -468,7 +470,7 @@ def test_adapter_drops_untrusted_steps_itself(tmp_path):
     runner = SpyRunner()
     ledger = SearchLedger(Store(tmp_path), "s", max_trials=5, max_reflections=1)
     adapter = OnodaAdapter(runner, ledger, cases=("c1",), efficiency_gate=SPEC.efficiency_gate)
-    batch = adapter.evaluate(["c1"], dict(SEED_CANDIDATE.components), capture_traces=True)
+    batch = adapter.evaluate(["c1"], dict(SEED.components), capture_traces=True)
     (r,) = batch.trajectories
     assert {s.source for s in r.steps} == {"agent", "raw_tool"}
     assert batch.scores == [1.0]
