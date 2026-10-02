@@ -1,0 +1,11 @@
+{
+  "case_id": "orca6-dvb-eom-ccsd",
+  "excited_states_status": "present",
+  "mode": "case-live",
+  "observation": "sha256:f72ae12a93c88ac5db993603acf7907b49f65d2b7fcb34cf39224a909ff4aec3",
+  "problems": [],
+  "run_id": "exec-orca6-dvb-eom-ccsd",
+  "scf": "converged",
+  "states": 2,
+  "termination": "normal"
+}

@@ -1,0 +1,32 @@
+{
+  "case_id": "orca6-dvb-steom-ccsd",
+  "excited_states_status": "error",
+  "mode": "case-live",
+  "observation": "sha256:eb7ea9df28b7fd9659f742ed75270013bb7afd59e863bdc5206e6ba9e420588a",
+  "problems": [
+    {
+      "detail": "state line does not have 3 value/unit pairs",
+      "evidence": {
+        "artifact": "sha256:8bb017f892c2c643c598f1feb9e60c8f42696aa281e231e5135f36a953804567",
+        "line": 3160,
+        "text": "IROOT=  1:  0.172386 au     4.691 eV   37834.3 cm**-1 <S**2> =   0.000000"
+      },
+      "field": "excited_states",
+      "state": "error"
+    },
+    {
+      "detail": "state line does not have 3 value/unit pairs",
+      "evidence": {
+        "artifact": "sha256:8bb017f892c2c643c598f1feb9e60c8f42696aa281e231e5135f36a953804567",
+        "line": 3176,
+        "text": "IROOT=  2:  0.281108 au     7.649 eV   61696.0 cm**-1 <S**2> =   0.000000"
+      },
+      "field": "excited_states",
+      "state": "error"
+    }
+  ],
+  "run_id": "exec-orca6-dvb-steom-ccsd",
+  "scf": "converged",
+  "states": 0,
+  "termination": "normal"
+}

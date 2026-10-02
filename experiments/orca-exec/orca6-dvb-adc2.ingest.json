@@ -1,0 +1,11 @@
+{
+  "case_id": "orca6-dvb-adc2",
+  "excited_states_status": "present",
+  "mode": "case-live",
+  "observation": "sha256:6e630e5a5a932254cdd8dff26e29c86aa3545ed024468f10fc25821e6d34e816",
+  "problems": [],
+  "run_id": "exec-orca6-dvb-adc2",
+  "scf": "converged",
+  "states": 2,
+  "termination": "normal"
+}

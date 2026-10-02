@@ -1,0 +1,40 @@
+{
+  "assignments": {
+    "execution_status": "pass",
+    "parse_integrity": "pass",
+    "reference_comparison": "unresolved",
+    "state_identification": "pass"
+  },
+  "evaluation_id": "exec2-orca6-dvb-steom-ccsd.orca-smoke-v1.001",
+  "evaluator": "orca-smoke",
+  "evaluator_version": "1",
+  "metrics": {
+    "case.id": "orca6-dvb-steom-ccsd",
+    "case.manifest": "sha256:9d68d6243f2dff42c3e7dfc6b27bfca8c012c01b5256724330004593f11b7b1f",
+    "case.review": "pending-human-review",
+    "diff.energy_au.m1.r1": "0.000005",
+    "diff.energy_au.m1.r1.units": "au",
+    "diff.energy_au.m1.r2": "0.000018",
+    "diff.energy_au.m1.r2.units": "au",
+    "diff.final_energy": "0.172385713237",
+    "diff.final_energy.units": "Eh",
+    "execution.receipt_status": "succeeded",
+    "observation.synthetic": "false",
+    "pair.m1.r1": "candidate root 1 sym -; reference root 1 sym -",
+    "pair.m1.r2": "candidate root 2 sym -; reference root 2 sym -",
+    "policy": "orca-reexecution@1",
+    "policy.kind": "reexecution",
+    "policy.tolerance": "unresolved",
+    "policy.tolerance_source": "A6",
+    "problems.count": "0",
+    "reference.case_id": "orca6-dvb-steom-ccsd",
+    "reference.synthetic": "false",
+    "reference_comparison.reason": "tolerance unresolved (A6)",
+    "states.expected.m1": "2",
+    "states.observed.m1": "2"
+  },
+  "reference_version": "case:orca6-dvb-steom-ccsd@0de928d463b8",
+  "unresolved": [
+    "reference_comparison"
+  ]
+}

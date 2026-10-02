@@ -1,0 +1,35 @@
+{
+  "assignments": {
+    "execution_status": "pass",
+    "parse_integrity": "pass",
+    "reference_comparison": "unresolved",
+    "state_identification": "unresolved"
+  },
+  "evaluation_id": "exec-orca6-dvb-eom-ccsd.orca-smoke-v1.001",
+  "evaluator": "orca-smoke",
+  "evaluator_version": "1",
+  "metrics": {
+    "case.id": "orca6-dvb-eom-ccsd",
+    "case.manifest": "sha256:b437bc6cd22ec8391443a8eda074a2d05e027fb2dba9843f2b76ca042eee027e",
+    "case.review": "pending-human-review",
+    "diff.final_energy": "0.201083684615",
+    "diff.final_energy.units": "Eh",
+    "execution.receipt_status": "succeeded",
+    "observation.synthetic": "false",
+    "policy": "orca-reexecution@1",
+    "policy.kind": "reexecution",
+    "policy.tolerance": "unresolved",
+    "policy.tolerance_source": "A6",
+    "problems.count": "0",
+    "reference.case_id": "orca6-dvb-eom-ccsd",
+    "reference.synthetic": "false",
+    "reference_comparison.reason": "candidate: excited state without a stated multiplicity; reference: excited state without a stated multiplicity; tolerance unresolved (A6)",
+    "state_identification.reason": "excited state without a stated multiplicity",
+    "states.expected.m1": "2"
+  },
+  "reference_version": "case:orca6-dvb-eom-ccsd@71ae659e8c92",
+  "unresolved": [
+    "state_identification",
+    "reference_comparison"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "case_id": "orca6-dvb-steom-ccsd",
+  "excited_states_status": "present",
+  "mode": "case-live",
+  "observation": "sha256:814bf3ed1a28468ebe5fc590c5c20b62c164901dc3d191a53751d3f345e6a128",
+  "problems": [],
+  "run_id": "exec2-orca6-dvb-steom-ccsd",
+  "scf": "converged",
+  "states": 2,
+  "termination": "normal"
+}

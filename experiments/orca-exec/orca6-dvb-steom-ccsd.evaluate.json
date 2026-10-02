@@ -1,0 +1,36 @@
+{
+  "assignments": {
+    "execution_status": "pass",
+    "parse_integrity": "fail",
+    "reference_comparison": "unresolved",
+    "state_identification": "unresolved"
+  },
+  "evaluation_id": "exec-orca6-dvb-steom-ccsd.orca-smoke-v1.001",
+  "evaluator": "orca-smoke",
+  "evaluator_version": "1",
+  "metrics": {
+    "case.id": "orca6-dvb-steom-ccsd",
+    "case.manifest": "sha256:9d68d6243f2dff42c3e7dfc6b27bfca8c012c01b5256724330004593f11b7b1f",
+    "case.review": "pending-human-review",
+    "diff.final_energy": "0.172385713237",
+    "diff.final_energy.units": "Eh",
+    "execution.receipt_status": "succeeded",
+    "observation.synthetic": "false",
+    "parse_integrity.reason": "error in excited_states",
+    "policy": "orca-reexecution@1",
+    "policy.kind": "reexecution",
+    "policy.tolerance": "unresolved",
+    "policy.tolerance_source": "A6",
+    "problems.count": "2",
+    "reference.case_id": "orca6-dvb-steom-ccsd",
+    "reference.synthetic": "false",
+    "reference_comparison.reason": "candidate: excited states error; tolerance unresolved (A6)",
+    "state_identification.reason": "excited states error",
+    "states.expected.m1": "2"
+  },
+  "reference_version": "case:orca6-dvb-steom-ccsd@0de928d463b8",
+  "unresolved": [
+    "state_identification",
+    "reference_comparison"
+  ]
+}
