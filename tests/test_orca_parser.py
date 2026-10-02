@@ -403,6 +403,32 @@ def test_numeric_garbage_in_a_unit_slot_is_an_error_not_a_skipped_row():
     assert [s.root for s in obs.excited_states] == [2]
 
 
+def test_steom_iroot_lines_with_the_orca_611_s2_suffix_are_read():
+    # ORCA 6.1.1 prints `<S**2> = value` after the STEOM energies (A56).
+    data = mutate(
+        output("orca6-dvb-steom-ccsd"),
+        "IROOT=  1:  0.172381 au     4.691 eV   37833.3 cm**-1",
+        "IROOT=  1:  0.172381 au     4.691 eV   37833.3 cm**-1 <S**2> =   0.000000",
+    )
+    obs = parse_orca_output(data, synthetic=True)
+    assert obs.excited_states_status == "present"
+    assert obs.problems == parse_orca_output(output("orca6-dvb-steom-ccsd")).problems
+    assert [s.energy_au.value for s in obs.excited_states] == ["0.172381", "0.281090"]
+    assert [s.multiplicity for s in obs.excited_states] == [1, 1]  # from the header only
+
+
+@pytest.mark.parametrize("suffix", ["<S**2> =   0.0x0000", "<S**2> =", "Sym: Bu"])
+def test_other_text_after_the_iroot_energies_is_an_error(suffix):
+    data = mutate(
+        output("orca6-dvb-steom-ccsd"),
+        "IROOT=  1:  0.172381 au     4.691 eV   37833.3 cm**-1",
+        f"IROOT=  1:  0.172381 au     4.691 eV   37833.3 cm**-1 {suffix}",
+    )
+    obs = parse_orca_output(data, synthetic=True)
+    assert obs.excited_states_status == "error"
+    assert [s.root for s in obs.excited_states] == [2]
+
+
 def test_corruption_in_the_discarded_steom_cis_guess_leaves_steom_roots_reported():
     data = mutate(
         output("orca6-dvb-steom-ccsd"),

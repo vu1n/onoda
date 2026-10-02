@@ -18,7 +18,8 @@ Honesty rules:
   listing in it carries an `unresolved` Problem.
 
 Excited states come from TD-DFT/CIS `STATE n: E= ...` lines and MDCI
-(EOM/ADC/STEOM) `IROOT= n: ... au ... eV ... cm**-1` lines. Each state line is
+(EOM/ADC/STEOM) `IROOT= n: ... au ... eV ... cm**-1` lines, which ORCA 6.1.1
+ends with `<S**2> = value` for STEOM roots (A56). Each state line is
 attributed to the most recent section header (`... EXCITED STATES (SINGLETS)`,
 `... RESULTS (RHS)`). Repeated listings of the same root (e.g. ORCA's
 "APPROXIMATE EOM LHS" reprint) are deduplicated only when every printed value
@@ -311,6 +312,12 @@ def _read_state(r: _Reader, section: _Section, line: str, n: int) -> ExcitedStat
 def _read_iroot(
     r: _Reader, section: _Section, m: re.Match, tokens: list[str], n: int
 ) -> ExcitedState | None:
+    if tokens[6:8] == ["<S**2>", "="] and len(tokens) == 9:
+        # Validated, not recorded, and never turned into a multiplicity (A28, A56).
+        if not _NUMBER.fullmatch(tokens[8]):
+            r.problem("excited_states", "error", f"malformed <S**2> {tokens[8]!r}", n)
+            return None
+        tokens = tokens[:6]
     energies = r.energies(tokens, n)
     if energies is None:
         return None
