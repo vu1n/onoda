@@ -1,0 +1,44 @@
+case_id: orca42-dvb-gopt
+title: Divinylbenzene geometry optimisation B3LYP/STO-3G under ORCA 4.2.0
+program: ORCA
+program_version: 4.2.0
+method: geometry optimisation (RKS B3LYP/STO-3G)
+split: test
+input:
+  path: ORCA4.2/dvb_gopt.inp
+  sha256: sha256:12dcc5da6bdac3a6658781d3ae6d32b6e7ce513ee3df338f0eaca348d18c4f51
+outputs:
+  log:
+    path: ORCA4.2/dvb_gopt.out
+    sha256: sha256:dc3617cacb55024ce33267b137c1a7723ab08f389f053591535b77ddda1de1f8
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA4.2/dvb_gopt.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: Upstream input file. The log prints FINAL SINGLE POINT ENERGY 4 times; the graded
+    final energy is the last one (parser rule).
+request:
+  roots_by_multiplicity: {}
+  expects_final_energy: true
+  source_lines:
+  - '! rks b3lyp sto-3g usesym opt'
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

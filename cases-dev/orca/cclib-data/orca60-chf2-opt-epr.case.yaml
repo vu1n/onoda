@@ -1,0 +1,45 @@
+case_id: orca60-chf2-opt-epr
+title: CHF2 radical UHF geometry optimisation then EPR/NMR property job under ORCA 6.0.0
+program: ORCA
+program_version: 6.0.0
+method: 'compound job: UHF geometry optimisation followed by an EPR g-tensor/hyperfine job'
+split: test
+input:
+  path: ORCA6.0/1618.inp
+  sha256: sha256:64478678cf4a75434cfab33cf1a4d02bf14a82012122a92111304cead4c70a20
+outputs:
+  log:
+    path: ORCA6.0/1618.out
+    sha256: sha256:61ec63b44b09d3561ccc01c469bd7fb92843e9e0fd868889c0a6dc124e16ef0b
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA6.0/1618.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: No .inp upstream; the input file here is the log's INPUT FILE echo with the '| n>'
+    prefixes stripped. The log prints FINAL SINGLE POINT ENERGY 6 times; the graded final
+    energy is the last one (parser rule).
+request:
+  roots_by_multiplicity: {}
+  expects_final_energy: true
+  source_lines:
+  - '!HF'
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

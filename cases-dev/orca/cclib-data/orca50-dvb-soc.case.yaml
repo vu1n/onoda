@@ -1,0 +1,49 @@
+case_id: orca50-dvb-soc
+title: Divinylbenzene TD-DFT/TDA PBE0/6-31G** with spin-orbit coupling under ORCA 5.0.3, singlets
+  and triplets
+program: ORCA
+program_version: 5.0.3
+method: TD-DFT/TDA PBE0/6-31G** with DoSOC
+split: test
+input:
+  path: ORCA5.0/dvb_soc.inp
+  sha256: sha256:d9eadbe399908e9f9bf83e074129bcf18d3f28a3161fdf58e041afb882725dc7
+outputs:
+  log:
+    path: ORCA5.0/dvb_soc.log
+    sha256: sha256:84fd96c04e2d1ffdb64c825095721c6e834d3f111e91a5927f19eae32f812870
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA5.0/dvb_soc.log
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: No .inp upstream; the input file here is the log's INPUT FILE echo with the '| n>'
+    prefixes stripped.
+request:
+  roots_by_multiplicity:
+    1: 10
+    3: 10
+  expects_final_energy: true
+  source_lines:
+  - NRoots      10
+  - Triplets    true
+  - DoSOC       true
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

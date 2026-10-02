@@ -1,0 +1,42 @@
+case_id: orca60-be-casscf
+title: Beryllium atom CASSCF with symmetry under ORCA 6.0.0
+program: ORCA
+program_version: 6.0.0
+method: CASSCF(2,4)/def2-QZVPP
+split: test
+input:
+  path: ORCA6.0/casscf_beryllium_atom_sym.in
+  sha256: sha256:43c385b17d9beec7353dc6cb903be035980dd9b33fe7184e23f115796fe25296
+outputs:
+  log:
+    path: ORCA6.0/casscf_beryllium_atom_sym.out
+    sha256: sha256:1e084feb793771f734276ec9153c49c9ffde4c39cee18ae70676d41371faf524
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA6.0/casscf_beryllium_atom_sym.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: Upstream input file.
+request:
+  roots_by_multiplicity: {}
+  expects_final_energy: true
+  source_lines: []
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

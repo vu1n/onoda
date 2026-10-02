@@ -1,0 +1,44 @@
+case_id: orca61-zindo-cis
+title: ZINDO/S CIS on a 1509-atom-file system under ORCA 6.1.1, 50 singlets
+program: ORCA
+program_version: 6.1.1
+method: ZINDO/S CIS (semi-empirical excited states)
+split: test
+input:
+  path: ORCA6.1/1509.in
+  sha256: sha256:c2e00234b20a0c81380e78c5c05b50f8e57c1b19c1699a4b17bda15f54e089fa
+outputs:
+  log:
+    path: ORCA6.1/1509.out
+    sha256: sha256:12873a94bf34d6fbd7eb975876f0d95ba9a396ba26cadf355d05e2ee627198d8
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: 127b2229d584d54fb84a74e383edb18a271fc283
+  upstream_path: ORCA/ORCA6.1/1509.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: Upstream input file. It references an .xyz file that is not included.
+request:
+  roots_by_multiplicity:
+    1: 50
+  expects_final_energy: true
+  source_lines:
+  - nroots 50
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

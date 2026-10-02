@@ -1,0 +1,42 @@
+case_id: orca42-water-ccsd-t
+title: Water CCSD(T) single point under ORCA 4.2.0
+program: ORCA
+program_version: 4.2.0
+method: CCSD(T)/STO-3G
+split: test
+input:
+  path: ORCA4.2/water_ccsd_t.inp
+  sha256: sha256:5fe517608d6d0a4c4ef7aa6d45e836e07e7b552ea338138fa58e4a80c8d27225
+outputs:
+  log:
+    path: ORCA4.2/water_ccsd_t.out
+    sha256: sha256:d00098676de9addc7564783ecae3ef9909df45dc6927cadd9321fb0768d78ec4
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA4.2/water_ccsd_t.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: Upstream input file.
+request:
+  roots_by_multiplicity: {}
+  expects_final_energy: true
+  source_lines: []
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only

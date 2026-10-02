@@ -1,0 +1,42 @@
+case_id: orca42-dvb-sp-un
+title: Divinylbenzene cation unrestricted single point under ORCA 4.2.0
+program: ORCA
+program_version: 4.2.0
+method: unrestricted single point (UKS B3LYP/STO-3G, charge +1, doublet)
+split: test
+input:
+  path: ORCA4.2/dvb_sp_un.inp
+  sha256: sha256:ed05e02700b00bf67383f105b2f00cf2fb8fe3a0eaad692984dee0fd4a26bd92
+outputs:
+  log:
+    path: ORCA4.2/dvb_sp_un.out
+    sha256: sha256:0775e1fbeb095a033e4d673e06495d545c7046102ad0b495fc51be4635cde285
+provenance:
+  origin: cclib-data regression file (authentic ORCA output contributed to cclib's regression
+    suite)
+  repository: https://github.com/cclib/cclib-data
+  commit: a16cc80ea29e8baec60abd0df346ce6862f52531
+  upstream_path: ORCA/ORCA4.2/dvb_sp_un.out
+  license: none stated (cclib-data has no LICENSE file; cclib asks for attribution)
+  license_file: README.md
+  retrieved: '2026-10-02'
+  executed_here: false
+  notes: Upstream input file.
+request:
+  roots_by_multiplicity: {}
+  expects_final_energy: true
+  source_lines: []
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only held-out case beyond TD-DFT, used with --cases-root cases-dev; request fields
+    transcribed from the log's input echo by the harness author; no human has reviewed this
+    case.
+labels:
+- authentic
+- acquired
+- not-executed-here
+- held-out
+- license-unstated
+- dev-only
