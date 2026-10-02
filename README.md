@@ -216,7 +216,7 @@ and `onoda pi run --sandbox` runs a scripted run inside it.
 | `context` | SoL-Pi mechanisms as recorded fixtures: ObservationPack, compaction, reducer, action fusion |
 | `adapters.agents` | The `AgentAdapter` seam for Pi (and Prime), with a deterministic mock |
 | `science.contract` | M2 observation schema (exact decimal text, units, line evidence, explicit problems) and sha256-pinned case manifests |
-| `science.orca_parser` | Deterministic ORCA 5/6 output parser (`orca-parser@1`) |
+| `science.orca_parser` | Deterministic ORCA 5/6 output parser (`orca-parser@2`) |
 | `science.orca_local` | Local ORCA scheduler for an operator-supplied binary; disabled by default, idempotent by key |
 | `science.evaluator` | External evaluator skeleton: execution, parse integrity, state identification, reference comparison under a declared policy |
 | `adapters.pi.contract` | M3 contract: runtime pins, spool wire format, scripted-provider script, task bundle, claim, variants S0–S3 and their `sol-pi.json`, gateway policy |

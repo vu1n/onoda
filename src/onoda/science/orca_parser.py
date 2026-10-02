@@ -49,7 +49,9 @@ from onoda.science.contract import (
     Quantity,
 )
 
-PARSER_ID = "orca-parser@1"
+# @2 reads the `<S**2> = value` suffix ORCA 6.1.1 prints on STEOM `IROOT` lines
+# (A56), which @1 reported as an error. Records written by @1 keep that id.
+PARSER_ID = "orca-parser@2"
 
 _NUMBER = re.compile(r"-?\d+\.\d+")
 _VERSION = re.compile(r"^\s*Program Version (\d+\.\d+\.\d+)\b")

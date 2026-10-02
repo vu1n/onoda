@@ -6,7 +6,7 @@ fixture resume, fork, and reanalysis do not apply. Phases:
 
     run.created -> initialized
     -> acquire (authentic outputs produced elsewhere) | execute (local ORCA)
-    -> job-collected -> parse (orca-parser@1) -> diagnostics-committed
+    -> job-collected -> parse (orca-parser@2) -> diagnostics-committed
     -> finalized (visible["final"] is the observation)
 
 Acquired outputs are recorded as a `read` invocation with the upstream
