@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +57,13 @@ from onoda.adapters.pi.ingest import (
 from onoda.adapters.pi.runtime import Launch, LaunchResult, LiveSettings, build_launch, launch
 from onoda.adapters.pi.sandbox import Sandbox, SeatbeltSandbox
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
-from onoda.adapters.pi.vte import VTE_EVALUATOR, VteJob, evaluate_vte_claims, stage_vte_bundle
+from onoda.adapters.pi.vte import (
+    VTE_EVALUATOR,
+    VteJob,
+    evaluate_vte_claims,
+    mean_ev,
+    stage_vte_bundle,
+)
 from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS, ENV_BROKER, VteTaskBundle
 from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
@@ -201,11 +207,7 @@ def run_case(
     "candidate"`), and its `sol_pi.config`, when set, is recorded as
     `sol_pi_config_override`.
     """
-    check_safe_id(run_id, "run id")
-    if variant_id not in VARIANTS:
-        raise OnodaError(f"unknown variant {variant_id!r}; see `onoda pi variants`")
-    if store.has_record("run", run_id):
-        raise OnodaError(f"run {run_id} already exists")
+    _check_new_run(store, run_id, variant_id)
     candidate = candidate_for(variant_id, candidate)
     max_requests = _request_cap(live, max_requests)
     work_dir = Path(work_dir)
@@ -264,10 +266,34 @@ def run_case(
             config["sol_pi_config_override"] = sol_pi_override
     _record_driver(store, config, script, live)
     result = launch(prepared, timeout_s=timeout_s)
+    return _ingest_launch(store, prepared, result, run_id=run_id, task=task, config=config)
+
+
+def _check_new_run(store: Store, run_id: str, variant_id: str) -> None:
+    check_safe_id(run_id, "run id")
+    if variant_id not in VARIANTS:
+        raise OnodaError(f"unknown variant {variant_id!r}; see `onoda pi variants`")
+    if store.has_record("run", run_id):
+        raise OnodaError(f"run {run_id} already exists")
+
+
+def _ingest_launch(
+    store: Store,
+    prepared: Launch,
+    result: LaunchResult,
+    *,
+    run_id: str,
+    task: TaskManifest,
+    config: dict[str, Any],
+    journal_path: Path | None = None,
+) -> PiRun:
+    """Ingest a finished launch's spool as `run_id`, against the broker journal if given."""
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
         raise OnodaError(
             f"pi exited {result.exit_code} before writing a spool: {result.stderr[-2000:]}"
         )
+    # A case run's ingest call stays exactly as M3 made it (no `broker_journal` keyword).
+    journal = {} if journal_path is None else {"broker_journal": read_journal(journal_path)}
     ingested = ingest_spool(
         store,
         result.spool_dir,
@@ -276,6 +302,7 @@ def run_case(
         config=config,
         key=result.spool_key,
         expected_session_dir=prepared.session_dir,
+        **journal,
     )
     return PiRun(ingested, result.exit_code, result.stderr[-2000:])
 
@@ -439,11 +466,7 @@ def run_vte_case(
     (checked before anything is committed). RLM variants are refused here.
     Request caps, `reducer` and `sandbox` are as for `run_case`.
     """
-    check_safe_id(run_id, "run id")
-    if variant_id not in VARIANTS:
-        raise OnodaError(f"unknown variant {variant_id!r}; see `onoda pi variants`")
-    if store.has_record("run", run_id):
-        raise OnodaError(f"run {run_id} already exists")
+    _check_new_run(store, run_id, variant_id)
     max_requests = _request_cap(live, max_requests)
     scheduler = OrcaLocalScheduler(orca)  # resolves the settings; fails closed
     work_dir = Path(work_dir)
@@ -514,25 +537,22 @@ def run_vte_case(
     config["broker_journal"] = store.put_bytes(
         journal_path.read_bytes(), media_type="application/jsonl", labels=["broker-journal"]
     ).digest
-    if not (result.spool_dir / SPOOL_EVENTS).is_file():
-        raise OnodaError(
-            f"pi exited {result.exit_code} before writing a spool: {result.stderr[-2000:]}"
-        )
-    ingested = ingest_spool(
+    return _ingest_launch(
         store,
-        result.spool_dir,
+        prepared,
+        result,
         run_id=run_id,
         task=task,
         config=config,
-        key=result.spool_key,
-        expected_session_dir=prepared.session_dir,
-        broker_journal=read_journal(journal_path),
+        journal_path=journal_path,
     )
-    return PiRun(ingested, result.exit_code, result.stderr[-2000:])
 
 
 def _vte_jobs(store: Store, run_id: str) -> dict[str, VteJob]:
-    """Every broker job of the run as its record holds it: log bytes and how it was obtained."""
+    """Every broker job of the run as its record holds it: log bytes and how it was obtained.
+
+    Reads the receipt metadata `ingest._Writer.on_execute` writes per `task.execute`.
+    """
     jobs: dict[str, VteJob] = {}
     for event in store.events(run_id):
         if event.type != "invocation.committed":
@@ -574,17 +594,6 @@ def evaluate_vte_run(
         jobs=_vte_jobs(store, run_id),
         claim_ref=claims[-1].payload_refs["claim"] if claims else None,
         synthetic=synthetic,
-    )
-
-
-_REPORT_PLACES = Decimal("0.000001")
-
-
-def _mean(values: list[Decimal]) -> str:
-    if not values:
-        return "unresolved"
-    return format(
-        (sum(values, Decimal(0)) / len(values)).quantize(_REPORT_PLACES, ROUND_HALF_EVEN), "f"
     )
 
 
@@ -639,7 +648,7 @@ def vte_report(
                 target = (m["case.id"], key.removesuffix(".error_ev"))
                 by_target.setdefault(target, []).append(abs(Decimal(value)))
     for arm, a in per_arm.items():
-        a["mae_ev"] = _mean([e for errs in errors[arm].values() for e in errs])
+        a["mae_ev"] = mean_ev([e for errs in errors[arm].values() for e in errs])
         a["identified_targets"] = len(errors[arm])
     report: dict[str, Any] = {
         "arms": per_arm,
@@ -655,7 +664,7 @@ def vte_report(
         common = set(errors[compared[0]]) & set(errors[compared[1]])
         report["common_targets"] = [f"{case}:{ref}" for case, ref in sorted(common)]
         report["common_target_mae_ev"] = {
-            arm: _mean(
+            arm: mean_ev(
                 [sum(errors[arm][t], Decimal(0)) / len(errors[arm][t]) for t in sorted(common)]
             )
             for arm in compared

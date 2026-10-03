@@ -72,16 +72,25 @@ REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
 
 # Parser fields whose Problems make a job's transition energies untrustworthy.
 _BLOCKING_FIELDS = frozenset({"mr_states", "casscf_converged"})
-# `mae_ev` places: the inputs print 3; the mean of n of them is rounded, not truncated.
-_MAE_PLACES = Decimal("0.000001")
+# Mean places: the inputs print 3; the mean of n of them is rounded, not truncated.
+_MEAN_PLACES = Decimal("0.000001")
 
 
 class VteJob(NamedTuple):
-    """One broker job of the run, as the run record holds it."""
+    """One broker job of the run, as the run record holds it (see `run._vte_jobs`)."""
 
     output: bytes
     executed_here: bool
     cache_hit: bool
+
+
+def mean_ev(values: list[Decimal]) -> str:
+    """Mean of eV errors as decimal text (`_MEAN_PLACES`), or `unresolved` over nothing."""
+    if not values:
+        return "unresolved"
+    return format(
+        (sum(values, Decimal(0)) / len(values)).quantize(_MEAN_PLACES, ROUND_HALF_EVEN), "f"
+    )
 
 
 def stage_vte_bundle(
@@ -308,13 +317,8 @@ def evaluate_vte_claims(
         metrics[f"count.reference.{v}"] = str(ref_verdicts.count(v))
     metrics["coverage"] = str(len(errors))
     metrics["coverage.total"] = str(len(rows))
-    total = sum(errors, Decimal(0))
-    metrics["abs_error_sum_ev"] = format(total, "f")
-    metrics["mae_ev"] = (
-        format((total / len(errors)).quantize(_MAE_PLACES, ROUND_HALF_EVEN), "f")
-        if errors
-        else "unresolved"
-    )
+    metrics["abs_error_sum_ev"] = format(sum(errors, Decimal(0)), "f")
+    metrics["mae_ev"] = mean_ev(errors)
     metrics["false_success_claims"] = str(
         claim_verdicts.count("contradicted") + claim_verdicts.count("unsupported")
     )

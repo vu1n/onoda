@@ -201,10 +201,10 @@ def load_case(manifest_path: str | Path) -> LoadedCase:
 CASES_ROOT = Path(__file__).resolve().parents[3] / "cases"
 
 
-def case_manifests(root: Path = CASES_ROOT) -> dict[str, Path]:
-    """case_id -> manifest path for every `*.case.yaml` under `root`."""
+def case_manifests(root: Path = CASES_ROOT, *, suffix: str = ".case.yaml") -> dict[str, Path]:
+    """case_id -> manifest path for every `*<suffix>` under `root`."""
     found: dict[str, Path] = {}
-    for path in sorted(root.glob("**/*.case.yaml")):
+    for path in sorted(root.glob(f"**/*{suffix}")):
         case_id = yaml.safe_load(path.read_text())["case_id"]
         if case_id in found:
             raise OnodaError(f"duplicate case id {case_id!r}: {found[case_id]} and {path}")

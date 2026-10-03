@@ -131,10 +131,12 @@ from onoda.adapters.pi.contract import (
 )
 from onoda.adapters.pi.vte_contract import JOB_ID_RE, VTE_CLAIM_SCHEMA, VteClaim
 from onoda.budgets import child_links
-from onoda.canonical import canonical_bytes, sha256_digest
+from onoda.canonical import DIGEST_PREFIX, canonical_bytes, sha256_digest
 from onoda.context import decompose_fused_call, record_compaction
 from onoda.errors import CapabilityError, IntegrityError, MissingObjectError, OnodaError
 from onoda.records import Checkpoint, Event, InvocationReceipt, Run, StepSpec, TaskManifest, Usage
+from onoda.science.orca_local import _ORCA_LABELS
+from onoda.science.orca_local import _STAND_IN_LABELS as _SCHEDULER_STAND_IN_LABELS
 from onoda.store import Store, check_safe_id, record_ref
 
 ACTOR = "pi-ingest"
@@ -148,8 +150,9 @@ READ_TOOLS = frozenset(
     {TOOL_CASE_INPUT, TOOL_ORCA_RUN, TOOL_STRUCTURE, TOOL_ORCA_SUBMIT, "read", "obs_recall"}
 )
 CLAIM_TOOLS = {TOOL_REPORT: Claim, TOOL_REPORT_VTE: VteClaim}
-_JOB_LABELS = ["orca-local"]
-_STAND_IN_LABELS = ["stand-in", "not-orca", "synthetic"]  # as orca_local labels a stand-in
+# The scheduler's own job labels; a stand-in's observations are also synthetic.
+_JOB_LABELS = _ORCA_LABELS
+_STAND_IN_LABELS = [*_SCHEDULER_STAND_IN_LABELS, "synthetic"]
 FUSED_TOOLS = frozenset({"edit", "write"})
 OBS_RECALL = "obs_recall"
 _OBS_ID = re.compile(r"^obs_[0-9a-f]{24}$")
@@ -592,7 +595,8 @@ def _analyze(
 
 
 def _bare(sha: str | None) -> str | None:
-    return sha.removeprefix("sha256:") if sha is not None else None
+    """A journal's `sha256:<hex>` as the spool's bare hex."""
+    return sha.removeprefix(DIGEST_PREFIX) if sha is not None else None
 
 
 def _broker_jobs(journal: Iterable[BrokerJournalRecord]) -> dict[str, BrokerJournalRecord]:
@@ -1201,6 +1205,7 @@ class _Writer:
             {"input": inp},
             {"log": output},
             status="succeeded" if line.status == "completed" else "failed",
+            # `run._vte_jobs` reads job_id, executed_here and cache_hit back for grading.
             metadata={
                 "executed_here": line.executed_here,
                 "cache_hit": line.cache_hit,

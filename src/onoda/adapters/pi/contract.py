@@ -35,7 +35,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from onoda.canonical import digest_of
 from onoda.records import Frozen as _Frozen
@@ -249,6 +256,25 @@ class GatewayPolicy(_Frozen):
 # ------------------------------------------------------------------ task bundle
 
 
+def _instruction(v: str) -> str:
+    # Pi reads a leading `@` as a file include and a leading `-` as a flag.
+    if v.startswith(("@", "-")):
+        raise ValueError("instruction must not start with '@' or '-'")
+    return v
+
+
+def _doc_names(v: tuple[str, ...]) -> tuple[str, ...]:
+    for name in v:
+        if not DOC_NAME_RE.match(name):
+            raise ValueError(f"doc name {name!r} is not a plain *.md file name")
+    return v
+
+
+# Shared by `TaskBundle` and `vte_contract.VteTaskBundle`.
+Instruction = Annotated[str, AfterValidator(_instruction)]
+DocNames = Annotated[tuple[str, ...], AfterValidator(_doc_names)]
+
+
 class TaskBundle(_Frozen):
     """`task.json` at the root of a staged bundle directory.
 
@@ -260,34 +286,18 @@ class TaskBundle(_Frozen):
 
     schema_: Literal["onoda.pi-task/1"] = Field("onoda.pi-task/1", alias="schema")
     case_id: str
-    instruction: str  # the user prompt handed to `pi -p`
+    instruction: Instruction  # the user prompt handed to `pi -p`
     input_name: str
     input_sha256: str
     output_name: str
     output_sha256: str
     output_provenance: Literal["acquired"] = "acquired"  # executed_here is always false in M3
     review_status: str
-    docs: tuple[str, ...] = ()  # file names under docs/
+    docs: DocNames = ()  # file names under docs/
     ladder_sha256: str | None = None
     synthetic_ladder: bool = False  # a test fixture, never a reconstruction of the paper's
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
-
-    @field_validator("instruction")
-    @classmethod
-    def _instruction(cls, v: str) -> str:
-        # Pi reads a leading `@` as a file include and a leading `-` as a flag.
-        if v.startswith(("@", "-")):
-            raise ValueError("instruction must not start with '@' or '-'")
-        return v
-
-    @field_validator("docs")
-    @classmethod
-    def _docs(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        for name in v:
-            if not DOC_NAME_RE.match(name):
-                raise ValueError(f"doc name {name!r} is not a plain *.md file name")
-        return v
 
 
 class ClaimedQuantity(_Frozen):

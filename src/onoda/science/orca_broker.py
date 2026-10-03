@@ -51,7 +51,7 @@ from onoda.adapters.pi.vte_contract import (
     BrokerReply,
     BrokerSubmit,
 )
-from onoda.canonical import digest_of, sha256_digest
+from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import OnodaError
 from onoda.records import Frozen as _Frozen
 from onoda.science.orca_local import OrcaLocalScheduler, _sha256_file
@@ -247,7 +247,7 @@ class _Cache:
         root.mkdir(parents=True, exist_ok=True)
 
     def _dir(self, key: str) -> Path:
-        return self.root / key.removeprefix("sha256:")
+        return self.root / key.removeprefix(DIGEST_PREFIX)
 
     def get(self, key: str) -> tuple[bytes, dict[str, tuple[str, Path]], bool] | None:
         d = self._dir(key)
@@ -584,6 +584,7 @@ class OrcaBroker:
     # --- socket server ---------------------------------------------------------------
 
     def _send(self, wfile: BinaryIO, reply: BrokerReply) -> None:
+        """Write one reply line; a separate method so tests can interpose on the send."""
         wfile.write(reply.model_dump_json().encode() + b"\n")
         wfile.flush()
 

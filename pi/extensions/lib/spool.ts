@@ -56,7 +56,7 @@ export const VTE_CLAIM_SCHEMA = "onoda.pi-vte-claim/1";
 export const BROKER_PROTOCOL = "onoda.orca-broker/1";
 /** Broker job ids are per run (`j0001`, ...). */
 export const JOB_ID_RE = /^j\d{4}$/;
-/** A file an earlier job produced, named as the job directory holds it. */
+/** A file an earlier job produced, named as the job directory holds it (orca_local.py FILE_NAME_RE). */
 export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const MAX_INPUT_CHARS = 65536;
 

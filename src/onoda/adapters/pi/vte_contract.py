@@ -26,22 +26,23 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from onoda.adapters.pi.contract import (  # noqa: F401 (tool names re-exported)
-    DOC_NAME_RE,
+# The tool names live in `contract` (the variant table needs them) and are re-exported here.
+from onoda.adapters.pi.contract import (  # noqa: F401
     TOOL_ORCA_SUBMIT,
     TOOL_REPORT_VTE,
     TOOL_STRUCTURE,
     VTE_TASK_TOOLS,
     ClaimedQuantity,
+    DocNames,
+    Instruction,
 )
 from onoda.records import Frozen as _Frozen
+from onoda.science.orca_local import FILE_NAME_RE
 from onoda.science.vte import Spin, VteTarget
 
 VTE_TASK_SCHEMA = "onoda.pi-vte-task/1"
 VTE_CLAIM_SCHEMA = "onoda.pi-vte-claim/1"
 BROKER_PROTOCOL = "onoda.orca-broker/1"
-
-# The tool names live in `contract` (the variant table needs them) and are re-exported here.
 
 ENV_BROKER = "ONODA_PI_BROKER"  # path of the broker's Unix socket
 
@@ -51,8 +52,8 @@ DEFAULT_MAX_EXECUTIONS = 24
 
 # Broker job ids are per run (`j0001`, ...), never the scheduler's own ids.
 JOB_ID_RE = re.compile(r"^j\d{4}$")
-# A file an earlier job produced, named as the job directory holds it (e.g. `job.gbw`).
-FILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# `FILE_NAME_RE` (the scheduler's rule): a file an earlier job produced, named as
+# the job directory holds it (e.g. `job.gbw`).
 MAX_INPUT_CHARS = 65536
 
 
@@ -66,40 +67,25 @@ class VteTaskBundle(_Frozen):
 
     schema_: Literal["onoda.pi-vte-task/1"] = Field(VTE_TASK_SCHEMA, alias="schema")
     case_id: str
-    instruction: str
+    instruction: Instruction
     molecule: str
     point_group: str
     structure_name: str
     structure_sha256: str
     targets: tuple[VteTarget, ...]
     review_status: str
-    docs: tuple[str, ...] = ()
+    docs: DocNames = ()
     ladder_sha256: str | None = None
     synthetic_ladder: bool = False
     max_executions: int = Field(DEFAULT_MAX_EXECUTIONS, gt=0)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
-    @field_validator("instruction")
-    @classmethod
-    def _instruction(cls, v: str) -> str:
-        if v.startswith(("@", "-")):
-            raise ValueError("instruction must not start with '@' or '-'")
-        return v
-
     @field_validator("structure_name")
     @classmethod
     def _structure_name(cls, v: str) -> str:
         if not FILE_NAME_RE.match(v):
             raise ValueError(f"structure name {v!r} is not a plain file name")
-        return v
-
-    @field_validator("docs")
-    @classmethod
-    def _docs(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        for name in v:
-            if not DOC_NAME_RE.match(name):
-                raise ValueError(f"doc name {name!r} is not a plain *.md file name")
         return v
 
 

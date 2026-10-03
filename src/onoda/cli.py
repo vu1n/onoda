@@ -331,10 +331,37 @@ def cmd_pi_variants(a) -> Any:
     ]
 
 
+def _live_settings(a):
+    from onoda.adapters.pi.runtime import LiveSettings
+
+    if not a.live:
+        return None
+    return LiveSettings(
+        provider=a.provider,
+        model=a.model,
+        credential_env=a.credential_env,
+        max_requests=a.max_requests,
+        max_cost_usd=a.max_cost_usd,
+    )
+
+
+def _pi_run_summary(pi) -> dict[str, Any]:
+    r = pi.ingest
+    return {
+        "run_id": r.run_id,
+        "status": r.status,
+        "complete": r.complete,
+        "invocations": len(r.invocations),
+        "claim": r.claim,
+        "observation_pack": r.observation_pack,
+        "pi_exit_code": pi.exit_code,
+    }
+
+
 def cmd_pi_run(a) -> Any:
     from onoda.adapters.pi.contract import HarnessCandidate, Script
     from onoda.adapters.pi.run import DEFAULT_INSTRUCTION, run_case
-    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
+    from onoda.adapters.pi.runtime import detect_sandbox
 
     if bool(a.script) == bool(a.live):
         raise OnodaError("give exactly one of --script (offline) or --live")
@@ -345,15 +372,7 @@ def cmd_pi_run(a) -> Any:
     if bool(a.reducer_provider) != bool(a.reducer_model):
         raise OnodaError("give both --reducer-provider and --reducer-model, or neither")
     script = Script.model_validate_json(Path(a.script).read_text()) if a.script else None
-    live = None
-    if a.live:
-        live = LiveSettings(
-            provider=a.provider,
-            model=a.model,
-            credential_env=a.credential_env,
-            max_requests=a.max_requests,
-            max_cost_usd=a.max_cost_usd,
-        )
+    live = _live_settings(a)
     pi = run_case(
         _store(a.store),
         _case(a.case_id, a.cases_root),
@@ -378,16 +397,7 @@ def cmd_pi_run(a) -> Any:
         ),
         sandbox=detect_sandbox() if (a.live or a.sandbox) else None,
     )
-    r = pi.ingest
-    return {
-        "run_id": r.run_id,
-        "status": r.status,
-        "complete": r.complete,
-        "invocations": len(r.invocations),
-        "claim": r.claim,
-        "observation_pack": r.observation_pack,
-        "pi_exit_code": pi.exit_code,
-    }
+    return _pi_run_summary(pi)
 
 
 def _vte_case(case_id: str, cases_root: str | None):
@@ -403,7 +413,7 @@ def _vte_case(case_id: str, cases_root: str | None):
 def cmd_pi_run_vte(a) -> Any:
     from onoda.adapters.pi.contract import Script
     from onoda.adapters.pi.run import VTE_INSTRUCTION, run_vte_case
-    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
+    from onoda.adapters.pi.runtime import detect_sandbox
     from onoda.science.orca_local import OrcaSettings
 
     if bool(a.script) == bool(a.live):
@@ -414,15 +424,7 @@ def cmd_pi_run_vte(a) -> Any:
         raise OnodaError("--max-executions must be greater than 0")
     if bool(a.reducer_provider) != bool(a.reducer_model):
         raise OnodaError("give both --reducer-provider and --reducer-model, or neither")
-    live = None
-    if a.live:
-        live = LiveSettings(
-            provider=a.provider,
-            model=a.model,
-            credential_env=a.credential_env,
-            max_requests=a.max_requests,
-            max_cost_usd=a.max_cost_usd,
-        )
+    live = _live_settings(a)
     pi = run_vte_case(
         _store(a.store),
         _vte_case(a.case_id, a.cases_root),
@@ -450,16 +452,7 @@ def cmd_pi_run_vte(a) -> Any:
         timeout_s=a.timeout,
         sandbox=detect_sandbox() if (a.live or a.sandbox) else None,
     )
-    r = pi.ingest
-    return {
-        "run_id": r.run_id,
-        "status": r.status,
-        "complete": r.complete,
-        "invocations": len(r.invocations),
-        "claim": r.claim,
-        "observation_pack": r.observation_pack,
-        "pi_exit_code": pi.exit_code,
-    }
+    return _pi_run_summary(pi)
 
 
 def cmd_pi_evaluate_vte(a) -> Any:

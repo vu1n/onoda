@@ -31,10 +31,9 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from onoda.canonical import sha256_digest
-from onoda.errors import IntegrityError, OnodaError
+from onoda.errors import IntegrityError
 from onoda.records import Frozen as _Frozen
-from onoda.science.contract import PinnedFile, Provenance, Review
+from onoda.science.contract import PinnedFile, Provenance, Review, _read_pinned, case_manifests
 
 VTE_MANIFEST_SUFFIX = ".vte.yaml"
 REFERENCES_SCHEMA = "onoda.vte-references/1"
@@ -147,16 +146,6 @@ class VteReferences(_Frozen):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
 
-def _read_pinned(root: Path, pinned: PinnedFile) -> bytes:
-    path = (root / pinned.path).resolve()
-    if not path.is_relative_to(root.resolve()):
-        raise OnodaError(f"case file {pinned.path!r} escapes its case directory")
-    data = path.read_bytes()
-    if sha256_digest(data) != pinned.sha256:
-        raise IntegrityError(f"{pinned.path}: bytes do not match pinned {pinned.sha256}")
-    return data
-
-
 def load_vte_case(manifest_path: str | Path) -> LoadedVteCase:
     """Parse a VTE manifest and verify the structure and the references file pins.
 
@@ -184,10 +173,4 @@ def load_vte_references(case: LoadedVteCase) -> VteReferences:
 
 def vte_case_manifests(root: Path) -> dict[str, Path]:
     """case_id -> manifest path for every `*.vte.yaml` under `root`."""
-    found: dict[str, Path] = {}
-    for path in sorted(root.glob(f"**/*{VTE_MANIFEST_SUFFIX}")):
-        case_id = yaml.safe_load(path.read_text())["case_id"]
-        if case_id in found:
-            raise OnodaError(f"duplicate case id {case_id!r}: {found[case_id]} and {path}")
-        found[case_id] = path
-    return found
+    return case_manifests(root, suffix=VTE_MANIFEST_SUFFIX)
