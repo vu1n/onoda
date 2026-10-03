@@ -389,3 +389,11 @@ flowchart TD
   `task.execute` line as a mismatch. RLM children copy the parent policy
   without subtracting executions; VTE runs do not enable RLM in this slice,
   and the broker's own per-run cap still bounds them.
+- VTE-002 (notes for VTE-009): an attached file is placed next to the new
+  input as `<job_id><suffix>` (`j0001` + `job.gbw` -> `j0001.gbw`), so the
+  `orca_submit` tool doc must tell the agent to read it with
+  `%moinp "j0001.gbw"`. Only completed jobs are cached; the broker counts
+  only submissions that got a job, the recorder counts every call. Replay
+  needs the recorded produced-file digests (`BrokerReplay.from_journal`). The
+  cache key covers the ORCA driver binary's sha256 only, not its sibling
+  programs or MPI (review item).
