@@ -397,3 +397,9 @@ flowchart TD
   needs the recorded produced-file digests (`BrokerReplay.from_journal`). The
   cache key covers the ORCA driver binary's sha256 only, not its sibling
   programs or MPI (review item).
+- VTE-004: a broker job no `task.execute` line cites (the extension stopped
+  between the reply and its spool write) is recorded as a
+  `pi.broker-unspooled` event, not refused: the run's spool is still
+  consistent and the job's existence is kept on record. Ingest refuses a
+  spool with `task.execute` lines when no journal is passed, so VTE-009 must
+  pass `read_journal(...)` to `ingest_spool(broker_journal=...)`.
