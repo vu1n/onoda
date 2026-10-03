@@ -48,8 +48,9 @@ from onoda.science.orca_broker import (  # noqa: F401
     BrokerAttach,
     BrokerReply,
     BrokerSubmit,
+    JobId,
+    PlainFileName,
 )
-from onoda.science.orca_local import FILE_NAME_RE
 from onoda.science.vte import Spin, VteTarget
 
 VTE_TASK_SCHEMA = "onoda.pi-vte-task/1"
@@ -71,7 +72,7 @@ class VteTaskBundle(_Frozen):
     instruction: Instruction
     molecule: str
     point_group: str
-    structure_name: str
+    structure_name: PlainFileName
     structure_sha256: str
     targets: tuple[VteTarget, ...]
     review_status: str
@@ -82,13 +83,6 @@ class VteTaskBundle(_Frozen):
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
-    @field_validator("structure_name")
-    @classmethod
-    def _structure_name(cls, v: str) -> str:
-        if not FILE_NAME_RE.match(v):
-            raise ValueError(f"structure name {v!r} is not a plain file name")
-        return v
-
 
 class ClaimedVte(_Frozen):
     """One reported state: who it is, where it was read, and its energy as printed."""
@@ -97,14 +91,7 @@ class ClaimedVte(_Frozen):
     irrep: str  # as the agent names it; normalized by the grader
     character: str = Field(default="", max_length=64)  # e.g. "n,pi*", "pi,3s"
     energy: ClaimedQuantity  # excitation energy, unit "eV"
-    job_id: str
-
-    @field_validator("job_id")
-    @classmethod
-    def _job(cls, v: str) -> str:
-        if not JOB_ID_RE.match(v):
-            raise ValueError(f"job id {v!r} is not a broker job id (j0001, ...)")
-        return v
+    job_id: JobId
 
     @field_validator("energy")
     @classmethod

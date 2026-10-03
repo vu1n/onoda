@@ -46,9 +46,9 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import BinaryIO, Literal
+from typing import Annotated, BinaryIO, Literal
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import AfterValidator, Field, ValidationError, model_validator
 
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import IntegrityError, OnodaError
@@ -72,6 +72,23 @@ JOB_ID_RE = re.compile(r"^j\d{4}$")
 # `FILE_NAME_RE` (the scheduler's rule): a file an earlier job produced, named as
 # the job directory holds it (e.g. `job.gbw`).
 MAX_INPUT_CHARS = 65536
+
+
+def _job_id(v: str) -> str:
+    if not JOB_ID_RE.match(v):
+        raise ValueError(f"job id {v!r} is not a broker job id (j0001, ...)")
+    return v
+
+
+def _plain_file_name(v: str) -> str:
+    if not FILE_NAME_RE.match(v):
+        raise ValueError(f"file name {v!r} is not a plain file name")
+    return v
+
+
+# Shared by the broker protocol and `vte_contract` (`VteTaskBundle`, `ClaimedVte`).
+JobId = Annotated[str, AfterValidator(_job_id)]
+PlainFileName = Annotated[str, AfterValidator(_plain_file_name)]
 
 RefusalReason = Literal[
     "max_executions",
@@ -97,22 +114,8 @@ def _check_outcome(
 class BrokerAttach(_Frozen):
     """A file an earlier job of this run produced, copied next to the new input."""
 
-    job_id: str
-    name: str
-
-    @field_validator("job_id")
-    @classmethod
-    def _job(cls, v: str) -> str:
-        if not JOB_ID_RE.match(v):
-            raise ValueError(f"job id {v!r} is not a broker job id")
-        return v
-
-    @field_validator("name")
-    @classmethod
-    def _name(cls, v: str) -> str:
-        if not FILE_NAME_RE.match(v):
-            raise ValueError(f"file name {v!r} is not a plain file name")
-        return v
+    job_id: JobId
+    name: PlainFileName
 
 
 class BrokerSubmit(_Frozen):
