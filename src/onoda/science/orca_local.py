@@ -100,7 +100,12 @@ class ResolvedOrcaSettings(BaseModel):
     stand_in: bool
 
 
-def _sha256_file(path: str | os.PathLike[str]) -> str:
+def job_labels(stand_in: bool) -> list[str]:
+    """The labels a job's metadata carries: a stand-in is labelled as not ORCA."""
+    return list(_STAND_IN_LABELS if stand_in else _ORCA_LABELS)
+
+
+def sha256_file(path: str | os.PathLike[str]) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -172,7 +177,7 @@ class OrcaLocalScheduler:
 
         binary = self._settings.binary
         command = [binary, "job.inp"]
-        binary_sha256 = _sha256_file(binary)
+        binary_sha256 = sha256_file(binary)
 
         # Persist submission intent BEFORE launching, so a crash mid-run is
         # visible as `submitted` with no terminal marker, never a silent re-run.
@@ -299,7 +304,6 @@ class OrcaLocalScheduler:
 
     def job_metadata(self, job_id: str) -> dict[str, Any]:
         job = self._load()["jobs"][job_id]
-        labels = _STAND_IN_LABELS if job["stand_in"] else _ORCA_LABELS
         return {
             "command": job["command"],
             "binary": job["binary"],
@@ -308,7 +312,7 @@ class OrcaLocalScheduler:
             "max_wall_seconds": job["max_wall_seconds"],
             "duration_ms": job["duration_ms"],
             "stand_in": job["stand_in"],
-            "labels": labels,
+            "labels": job_labels(job["stand_in"]),
             "reason": job["reason"],
         }
 

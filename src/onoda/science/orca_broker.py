@@ -53,7 +53,7 @@ from pydantic import AfterValidator, Field, ValidationError, model_validator
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import IntegrityError, OnodaError
 from onoda.records import Frozen as _Frozen
-from onoda.science.orca_local import FILE_NAME_RE, OrcaLocalScheduler, _sha256_file
+from onoda.science.orca_local import FILE_NAME_RE, OrcaLocalScheduler, sha256_file
 
 BROKER_PROTOCOL = "onoda.orca-broker/1"
 JOURNAL_NAME = "broker.jsonl"
@@ -354,7 +354,7 @@ class _Cache:
         files: dict[str, tuple[str, Path]] = {}
         for f in entry.files:
             p = d / "files" / f.name
-            if not p.is_file() or _sha256_file(p) != f.sha256:
+            if not p.is_file() or sha256_file(p) != f.sha256:
                 raise _CacheCorrupt(f"cache entry {key}: file {f.name} does not match")
             files[f.name] = (f.sha256, p)
         return log, files, entry.stand_in
@@ -437,7 +437,7 @@ class OrcaBroker:
         self._cache = _Cache(Path(cache_dir)) if cache_dir is not None else None
         self.max_executions = max_executions
         if scheduler is not None:
-            self.binary_sha256 = _sha256_file(scheduler.settings.binary)
+            self.binary_sha256 = sha256_file(scheduler.settings.binary)
         else:
             assert replay is not None
             self.binary_sha256 = replay.binary_sha256
@@ -645,7 +645,7 @@ class OrcaBroker:
         meta = sched.job_metadata(sid)
         produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
         files: dict[str, tuple[str, Path | None]] = {
-            n: (_sha256_file(p), p) for n, p in produced.items()
+            n: (sha256_file(p), p) for n, p in produced.items()
         }
         if status == "completed" and self._cache is not None:
             self._cache.put(

@@ -135,8 +135,7 @@ from onoda.canonical import DIGEST_PREFIX, canonical_bytes, sha256_digest
 from onoda.context import decompose_fused_call, record_compaction
 from onoda.errors import CapabilityError, IntegrityError, MissingObjectError, OnodaError
 from onoda.records import Checkpoint, Event, InvocationReceipt, Run, StepSpec, TaskManifest, Usage
-from onoda.science.orca_local import _ORCA_LABELS
-from onoda.science.orca_local import _STAND_IN_LABELS as _SCHEDULER_STAND_IN_LABELS
+from onoda.science.orca_local import job_labels as scheduler_job_labels
 from onoda.store import Store, check_safe_id, record_ref
 
 ACTOR = "pi-ingest"
@@ -150,9 +149,6 @@ READ_TOOLS = frozenset(
     {TOOL_CASE_INPUT, TOOL_ORCA_RUN, TOOL_STRUCTURE, TOOL_ORCA_SUBMIT, "read", "obs_recall"}
 )
 CLAIM_TOOLS = {TOOL_REPORT: Claim, TOOL_REPORT_VTE: VteClaim}
-# The scheduler's own job labels; a stand-in's observations are also synthetic.
-_JOB_LABELS = _ORCA_LABELS
-_STAND_IN_LABELS = [*_SCHEDULER_STAND_IN_LABELS, "synthetic"]
 FUSED_TOOLS = frozenset({"edit", "write"})
 OBS_RECALL = "obs_recall"
 _OBS_ID = re.compile(r"^obs_[0-9a-f]{24}$")
@@ -1184,12 +1180,12 @@ class _Writer:
     def on_execute(self, line: TaskExecute) -> None:
         """A broker job: executed here, or an earlier job's bytes served from the cache."""
         stand_in = bool(getattr(self.broker[line.job_id], "stand_in", False))
-        if line.cache_hit:
-            job_labels = ["acquired", "cache-hit"]
-        else:
-            job_labels = [] if stand_in else list(_JOB_LABELS)
+        # The scheduler's own job labels; a cache hit of a real ORCA job adds none.
+        job_labels = ["acquired", "cache-hit"] if line.cache_hit else []
+        if stand_in or not line.cache_hit:
+            job_labels += scheduler_job_labels(stand_in)
         if stand_in:  # a stand-in's observations are synthetic, executed or cached
-            job_labels += _STAND_IN_LABELS
+            job_labels.append("synthetic")
         inp = self.obj(line.input, "text/plain", ["orca-input", *self.synthetic], encoding="utf-8")
         output = self.obj(line.output, "text/plain", ["job-output", *job_labels])
         spec = StepSpec.new(
