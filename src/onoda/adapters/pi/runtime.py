@@ -80,7 +80,7 @@ from onoda.adapters.pi.contract import (
     candidate_for,
     with_mechanisms,
 )
-from onoda.adapters.pi.sandbox import SANDBOX_KIND, Sandbox, write_settings
+from onoda.adapters.pi.sandbox import SANDBOX_KIND, Sandbox, SeatbeltSandbox, write_settings
 from onoda.errors import CapabilityError, OnodaError
 
 _MIN_NODE = (22, 19, 0)
@@ -282,18 +282,26 @@ class RlmStage:
         }
 
 
-def detect_sandbox() -> Sandbox:
+def detect_sandbox() -> Sandbox | SeatbeltSandbox:
     """This host's Pi sandbox (A50), or `CapabilityError` saying why there is none.
 
-    A CA bundle named by the live network variables is mounted read-only, so
-    Pi's TLS through a proxy still verifies inside the sandbox.
+    Linux gets the bwrap backend, macOS the Seatbelt one; any other platform
+    is refused. A CA bundle named by the live network variables is readable
+    inside, so Pi's TLS through a proxy still verifies inside the sandbox.
     """
     ca = tuple(
         Path(os.environ[k])
         for k in ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE")
         if k in os.environ and Path(os.environ[k]).is_file()
     )
-    return Sandbox.detect(runtime_dir=RUNTIME_DIR, kernel_dir=RLM_KERNEL.parent, extra_ro=ca)
+    kw = {"runtime_dir": RUNTIME_DIR, "kernel_dir": RLM_KERNEL.parent, "extra_ro": ca}
+    if sys.platform == "darwin":
+        return SeatbeltSandbox.detect(**kw)
+    if not sys.platform.startswith("linux"):
+        raise CapabilityError(
+            f"the Pi sandbox needs Linux (bwrap) or macOS (Seatbelt) (A50); this is {sys.platform}"
+        )
+    return Sandbox.detect(**kw)
 
 
 def _write_json(path: Path, data: Any) -> None:
