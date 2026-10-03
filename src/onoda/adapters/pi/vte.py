@@ -59,7 +59,7 @@ from onoda.errors import CapabilityError, IntegrityError, OnodaError
 from onoda.evaluation import _next_evaluation_id
 from onoda.records import Evaluation, Usage
 from onoda.science.contract import ExcitedState
-from onoda.science.orca_parser import PARSER_ID, parse_orca_output
+from onoda.science.orca_parser import PARSER_ID, OrcaObservation, parse_orca_output
 from onoda.science.vte import (
     LoadedVteCase,
     VteReferenceRow,
@@ -180,15 +180,27 @@ def _pt2_method(references: VteReferences) -> str:
 
 
 def _grade_value(
-    cs: ClaimedVte, jobs: Mapping[str, VteJob], method: str, synthetic: bool
+    cs: ClaimedVte,
+    jobs: Mapping[str, VteJob],
+    method: str,
+    synthetic: bool,
+    observations: dict[str, OrcaObservation] | None = None,
 ) -> tuple[str, dict[str, str]]:
-    """(claim verdict, detail metrics) for one claimed state's value."""
+    """(claim verdict, detail metrics) for one claimed state's value.
+
+    `observations` (job id -> parse) is filled as jobs are parsed, so an
+    evaluation parses each job's output once however many states cite it.
+    """
     job = jobs.get(cs.job_id)
     if job is None:
         return "unsupported", {"reason": "job_not_in_run"}
     if not (job.executed_here or job.cache_hit):
         return "unsupported", {"reason": "job_not_executed"}
-    obs = parse_orca_output(job.output, synthetic=synthetic)
+    if observations is None:
+        observations = {}
+    obs = observations.get(cs.job_id)
+    if obs is None:
+        obs = observations[cs.job_id] = parse_orca_output(job.output, synthetic=synthetic)
     if any(p.field in _BLOCKING_FIELDS for p in obs.problems):
         return "unsupported", {"reason": "job_problem"}
     irrep = normalize_irrep(cs.irrep)
@@ -274,8 +286,9 @@ def evaluate_vte_claims(
     states = claim.states if claim is not None else ()
     tags = [f"claim.{i:02d}" for i in range(1, len(states) + 1)]
     supported: list[tuple[str, ClaimedVte]] = []
+    observations: dict[str, OrcaObservation] = {}
     for tag, cs in zip(tags, states, strict=True):
-        verdict, detail = _grade_value(cs, run_jobs, method, synthetic)
+        verdict, detail = _grade_value(cs, run_jobs, method, synthetic, observations)
         assignments[tag] = verdict
         metrics[f"{tag}.job"] = cs.job_id
         metrics.update({f"{tag}.{k}": v for k, v in detail.items()})
