@@ -1,0 +1,219 @@
+{
+ "machine": "MacBook Pro, Apple M4 Max, 16 cores, 48 GB (macOS, arm64)",
+ "orca": "6.1.1 (macOS arm64), OpenMPI 4.1.8 built locally",
+ "method": "SA-CASSCF + SC-NEVPT2 / aug-cc-pVTZ / RIJCOSX / AutoAux, trafostep RI, no point-group symmetry, orbitals projected from an SA-CASSCF/cc-pVDZ job",
+ "wall_seconds_measured_with": "/usr/bin/time -p, one run each, jobs run one at a time",
+ "jobs": [
+  {
+   "job": "formaldehyde_guess",
+   "basis": "cc-pVDZ",
+   "active_space": "CAS(6,5)",
+   "roots": "3 singlets + 2 triplets",
+   "nprocs": 4,
+   "wall_seconds": "3.40",
+   "termination": "normal"
+  },
+  {
+   "job": "ethylene_guess",
+   "basis": "cc-pVDZ",
+   "active_space": "CAS(2,2)",
+   "roots": "3 singlets + 1 triplet",
+   "nprocs": 4,
+   "wall_seconds": "2.49",
+   "termination": "normal"
+  },
+  {
+   "job": "formaldehyde_nevpt2_np4",
+   "basis_functions": 138,
+   "active_space": "CAS(6,5)",
+   "roots": "3 singlets + 2 triplets",
+   "nprocs": 4,
+   "wall_seconds": "16.67",
+   "termination": "normal",
+   "earlier_run_wall_seconds": "16.74"
+  },
+  {
+   "job": "formaldehyde_nevpt2_np16",
+   "basis_functions": 138,
+   "active_space": "CAS(6,5)",
+   "roots": "3 singlets + 2 triplets",
+   "nprocs": 16,
+   "wall_seconds": "22.94",
+   "termination": "normal",
+   "earlier_run_wall_seconds": "22.95"
+  },
+  {
+   "job": "ethylene_nevpt2_np4",
+   "basis_functions": 184,
+   "active_space": "CAS(2,2)",
+   "roots": "3 singlets + 1 triplet",
+   "nprocs": 4,
+   "orbstep": "TRAH",
+   "wall_seconds": "14.69",
+   "termination": "normal"
+  },
+  {
+   "job": "ethylene_nevpt2_np16",
+   "basis_functions": 184,
+   "active_space": "CAS(2,2)",
+   "roots": "3 singlets + 1 triplet",
+   "nprocs": 16,
+   "orbstep": "TRAH",
+   "wall_seconds": "23.68",
+   "termination": "normal"
+  },
+  {
+   "job": "ethylene_nevpt2_np4 (default orbital step)",
+   "nprocs": 4,
+   "wall_seconds": "63.38",
+   "termination": "error: CASSCF convergence failure after 75 macro-iterations; ORCA exit code 0"
+  },
+  {
+   "job": "ethylene_nevpt2_np16 (default orbital step)",
+   "nprocs": 16,
+   "wall_seconds": "70.55",
+   "termination": "error: CASSCF convergence failure after 75 macro-iterations; ORCA exit code 0"
+  }
+ ],
+ "transition_energies_ev": {
+  "note": "As printed by ORCA, in root order. No symmetry was used, so states are NOT assigned to QUESTDB transitions here.",
+  "formaldehyde": [
+   {
+    "mult": 3,
+    "root": 0,
+    "sa_casscf": "3.390",
+    "sc_nevpt2": "3.713"
+   },
+   {
+    "mult": 1,
+    "root": 1,
+    "sa_casscf": "3.760",
+    "sc_nevpt2": "4.102"
+   },
+   {
+    "mult": 3,
+    "root": 1,
+    "sa_casscf": "5.185",
+    "sc_nevpt2": "6.259"
+   },
+   {
+    "mult": 1,
+    "root": 2,
+    "sa_casscf": "7.173",
+    "sc_nevpt2": "7.334"
+   }
+  ],
+  "ethylene": [
+   {
+    "mult": 3,
+    "root": 0,
+    "sa_casscf": "4.103",
+    "sc_nevpt2": "4.795"
+   },
+   {
+    "mult": 1,
+    "root": 1,
+    "sa_casscf": "9.600",
+    "sc_nevpt2": "7.412"
+   },
+   {
+    "mult": 1,
+    "root": 2,
+    "sa_casscf": "14.607",
+    "sc_nevpt2": "12.784"
+   }
+  ]
+ },
+ "phase_0c": {
+  "method": "SA-CASSCF + SC-NEVPT2 / aug-cc-pVTZ / RIJCOSX / AutoAux, UseSym (C2v), 4 processes, equal state weights, OpenMPI 4.1.8 rebuilt with Fortran support",
+  "jobs": [
+   {
+    "job": "ketene_b_valence_dz",
+    "what": "valence CASSCF(10,9)/cc-pVDZ",
+    "wall_seconds": "38.99",
+    "termination": "normal"
+   },
+   {
+    "job": "ketene_c_valence_avtz_nosym",
+    "what": "valence CASSCF(10,9)/aug-cc-pVTZ, no symmetry",
+    "wall_seconds": "20.12",
+    "termination": "normal"
+   },
+   {
+    "job": "ketene_d_valence_avtz_sym",
+    "what": "same with UseSym",
+    "wall_seconds": "8.62",
+    "termination": "normal"
+   },
+   {
+    "job": "ketene_f_target",
+    "what": "SA(A1:1,B1:1) CASSCF(10,10) + SC-NEVPT2, QUESTDB row 1B1(pi,3s)",
+    "basis_functions": 184,
+    "wall_seconds": "42.74",
+    "termination": "normal",
+    "sa_casscf_ev": "5.217",
+    "questdb_casscf_ev": "5.216",
+    "sc_nevpt2_ev": "6.069",
+    "questdb_sc_nevpt2_ev": "6.067"
+   },
+   {
+    "job": "acetone_b_valence_dz",
+    "what": "valence CASSCF(6,5)/cc-pVDZ",
+    "wall_seconds": "8.69",
+    "termination": "normal"
+   },
+   {
+    "job": "acetone_c_valence_avtz_nosym",
+    "what": "valence CASSCF(6,5)/aug-cc-pVTZ, no symmetry",
+    "wall_seconds": "53.30",
+    "termination": "normal"
+   },
+   {
+    "job": "acetone_f_target",
+    "what": "SA(A1:1,B2:2) CASSCF(6,7) + SC-NEVPT2, default orbital step",
+    "basis_functions": 322,
+    "wall_seconds": "282.45",
+    "termination": "error: CASSCF not converged in 75 macro-iterations"
+   },
+   {
+    "job": "acetone_g_trah",
+    "what": "same, orbstep TRAH",
+    "basis_functions": 322,
+    "wall_seconds": "86.68",
+    "termination": "normal",
+    "sa_casscf_ev": [
+     "6.622",
+     "9.350"
+    ],
+    "sc_nevpt2_ev_by_casscf_root": [
+     "6.914",
+     "4.614"
+    ],
+    "questdb_casscf_ev": [
+     "5.502",
+     "6.438"
+    ],
+    "questdb_sc_nevpt2_ev": [
+     "6.697",
+     "7.800"
+    ],
+    "note": "different CASSCF solution from QUESTDB; states not assigned"
+   },
+   {
+    "job": "acetone_g_shift",
+    "what": "same, SuperCI then DIIS with level shifts 1.0",
+    "wall_seconds": "355.70 (run concurrently with acetone_g_trah's first run)",
+    "termination": "normal",
+    "sa_casscf_ev": [
+     "8.440",
+     "8.445"
+    ],
+    "sc_nevpt2_ev_by_casscf_root": [
+     "7.771",
+     "5.093"
+    ],
+    "note": "different CASSCF solution again"
+   }
+  ]
+ }
+}
