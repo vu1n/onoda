@@ -30,7 +30,8 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, Protocol
 
 from onoda.adapters.pi.vte import VTE_EVALUATOR, _latest_vte_evaluation, _vte_jobs, mean_ev
-from onoda.canonical import sha256_digest
+from onoda.canonical import digest_of, sha256_digest
+from onoda.decision_tune import Example, apply_candidate
 from onoda.errors import OnodaError
 from onoda.evaluation import _next_evaluation_id
 from onoda.records import Evaluation, Usage
@@ -168,6 +169,25 @@ def _p(value: Any) -> str:
     return format(Decimal(str(value)).quantize(Decimal("0.000001"), ROUND_HALF_EVEN), "f")
 
 
+def _job_states(store: Store, run_id: str, case: LoadedVteCase):
+    """(job id, job, state) for every broker job of a VTE run, oldest first.
+
+    The state is what `shadow_run` shows a model; `shadow_examples` labels the
+    same states, so tuned wording is tuned on exactly what the model will see.
+    """
+    run = store.run_record(run_id)
+    if run.config.get("task_kind") != "vte":
+        raise OnodaError(f"run {run_id} is not a VTE run")
+    if run.config.get("case_id") != case.manifest.case_id:
+        raise OnodaError(f"run {run_id} was recorded from case {run.config.get('case_id')!r}")
+    earlier: list[tuple[str, Any]] = []
+    for job_id, job in sorted(_vte_jobs(store, run_id).items()):
+        facts = job_facts(job.output)
+        checks = job_checks(job_id, facts, earlier)
+        earlier.append((job_id, facts))
+        yield job_id, job, job_state(case, job_id, job.output, checks)
+
+
 def shadow_run(
     store: Store,
     evaluator_store: Store,
@@ -176,26 +196,23 @@ def shadow_run(
     model: DecisionModel,
     *,
     ladder: bytes,
+    instructions: Mapping[str, str] | None = None,
 ) -> Evaluation:
-    """Ask `model` about every job of `run_id` and record the answers (see the module doc)."""
+    """Ask `model` about every job of `run_id` and record the answers (see the module doc).
+
+    `instructions` replaces the questions' wording (A70: `onoda decide tune`'s
+    `best-instructions.json`); the rule options stay the ladder's.
+    """
     run = store.run_record(run_id)
-    if run.config.get("task_kind") != "vte":
-        raise OnodaError(f"run {run_id} is not a VTE run")
-    if run.config.get("case_id") != case.manifest.case_id:
-        raise OnodaError(f"run {run_id} was recorded from case {run.config.get('case_id')!r}")
-    qs = questions(ladder)
+    qs = apply_candidate(questions(ladder), instructions or {})
     assignments: dict[str, Any] = {}
     output_refs: dict[str, str] = {}
     costs: list[Decimal] = []
     cost_known = True
     synthetic = "synthetic" in run.labels
-    earlier: list[tuple[str, Any]] = []
-    jobs = _vte_jobs(store, run_id)
-    for job_id, job in sorted(jobs.items()):
-        facts = job_facts(job.output)
-        checks = job_checks(job_id, facts, earlier)
-        earlier.append((job_id, facts))
-        answer = model.ask(job_state(case, job_id, job.output, checks), qs)
+    states = list(_job_states(store, run_id, case))
+    for job_id, job, state in states:
+        answer = model.ask(state, qs)
         synthetic |= answer.synthetic or job.synthetic
         req = evaluator_store.put_bytes(
             answer.request, media_type="application/json", visibility="evaluator"
@@ -229,12 +246,13 @@ def shadow_run(
         metrics={
             "provider": model.provider,
             "model": model.model,
-            "jobs": str(len(jobs)),
+            "jobs": str(len(states)),
+            "instructions": digest_of(qs) if instructions else "ladder default",
             "synthetic": "true" if synthetic else "false",
             "note": "shadow decisions: never shown to the agent, never a grade",
         },
         usage=Usage(
-            units={"decision_calls": len(jobs)},
+            units={"decision_calls": len(states)},
             measured=not synthetic,
             simulated=synthetic,
             cost_usd=format(sum(costs, Decimal(0)), "f") if cost_known else None,
@@ -254,6 +272,41 @@ def _group(outcomes: list[str]) -> str:
         if g in outcomes:
             return g
     return "rejected" if outcomes else "uncited"
+
+
+def _cited(evaluator_store: Store, run_id: str) -> dict[str, list[str]]:
+    """Job id -> the grader's outcome for each claim of the run that cites it."""
+    grade = _latest_vte_evaluation(evaluator_store, run_id)
+    cited: dict[str, list[str]] = {}
+    for key, job_id in grade.metrics.items():
+        if key.startswith("claim.") and key.endswith(".job"):  # see evaluate_vte_claims
+            tag = key.removesuffix(".job")
+            verdict = grade.assignments.get(tag, "")
+            identity = grade.assignments.get(f"{tag}.identity")
+            cited.setdefault(job_id, []).append(identity or verdict)
+    return cited
+
+
+def shadow_examples(
+    store: Store, evaluator_store: Store, runs: Iterable[tuple[str, LoadedVteCase]]
+) -> list[Example]:
+    """Labelled examples for `onoda decide tune` (A70), from graded VTE runs.
+
+    One example per job a claim cites: `ready` is "yes" when the grader
+    identified a claim from it, "no" when every claim citing it was rejected.
+    Jobs nothing cites, or whose claims are only unidentified, carry no
+    grader verdict and are left out. The label is the grader's outcome
+    word, never a reference value.
+    """
+    out = []
+    for run_id, case in runs:
+        cited = _cited(evaluator_store, run_id)
+        for job_id, _job, state in _job_states(store, run_id, case):
+            group = _group(cited.get(job_id, []))
+            if group in ("identified", "rejected"):
+                label = "yes" if group == "identified" else "no"
+                out.append(Example(f"{run_id}/{job_id}", state, {"ready": label}))
+    return out
 
 
 def _latest_shadows(evaluator_store: Store, run_id: str) -> list[Evaluation]:
@@ -287,14 +340,7 @@ def shadow_report(store: Store, evaluator_store: Store, run_ids: Iterable[str]) 
     for run_id in run_ids:
         run = store.run_record(run_id)
         arm = run.config["variant"]
-        grade = _latest_vte_evaluation(evaluator_store, run_id)
-        cited: dict[str, list[str]] = {}  # job id -> outcome of each claim citing it
-        for key, job_id in grade.metrics.items():
-            if key.startswith("claim.") and key.endswith(".job"):  # see evaluate_vte_claims
-                tag = key.removesuffix(".job")
-                verdict = grade.assignments.get(tag, "")
-                identity = grade.assignments.get(f"{tag}.identity")
-                cited.setdefault(job_id, []).append(identity or verdict)
+        cited = _cited(evaluator_store, run_id)
         for ev in _latest_shadows(evaluator_store, run_id):
             synthetic |= ev.metrics.get("synthetic") == "true"
             a = arms.setdefault(arm, {}).setdefault(

@@ -465,3 +465,32 @@ def test_shadow_decisions_are_recorded_beside_the_grade_and_shown_in_the_report(
     assert s1["ready_p"]["identified"] == "0.800000"  # j0001: the claim cites it, identified
     assert s1["ready_p"]["uncited"] == "0.300000"  # j0002: the cache hit nothing cites
     assert report["synthetic"] is True and "not a model" in report["note"]
+
+
+def test_graded_jobs_become_tuning_examples_and_tuned_wording_is_used(recorded):
+    from onoda.adapters.pi.vte_shadow import shadow_examples, shadow_run
+    from onoda.systemone import ScriptedSystemOne
+
+    _, store, evaluator, _, _ = recorded
+    pi_vte.evaluate_vte_run(store, evaluator, "vte", case())
+    (ex,) = shadow_examples(store, evaluator, [("vte", case())])  # j0002: nothing cites it
+    assert ex.id == "vte/j0001" and ex.labels == {"ready": "yes"}  # its claim was identified
+    assert ex.state["job_id"] == "j0001" and "output_excerpt" in ex.state
+
+    seen = []
+
+    def answer(state, questions):
+        seen.append(questions["ready"]["instructions"])
+        return {"rule": {"choice": "H", "probabilities": {"H": 1}}, "ready": {"noul": 0.5}}
+
+    ladder = (Path(__file__).parents[1] / "experiments/questdb/ladder-from-paper.md").read_bytes()
+    ev = shadow_run(
+        store,
+        evaluator,
+        "vte",
+        case(),
+        ScriptedSystemOne(answer),
+        ladder=ladder,
+        instructions={"ready.instructions": "tuned wording"},
+    )
+    assert set(seen) == {"tuned wording"} and ev.metrics["instructions"].startswith("sha256:")

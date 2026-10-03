@@ -33,6 +33,8 @@ first agent adapter; Prime is an optional comparison arm).
   broker reply carries advisory ladder checks (`science/orca_checks.py`, A66, A68)
   that nothing grades; `onoda vte shadow` records what a System One model
   (Jev, Clef) would decide per job, beside the grade (A67);
+  `onoda decide tune` hill-climbs that question wording with GEPA against
+  labelled examples (`onoda vte shadow-dataset` labels jobs from the grader, A70);
   `experiments/questdb/run.sh` is the S0-vs-S1 experiment on the Mac. Cases
   are `cases-dev/questdb/*/*.vte.yaml`; their `references.json` is
   evaluator-only.
