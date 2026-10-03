@@ -15,6 +15,16 @@ journal event that cites them:
   `tool_call` hook) become `pi.tool-blocked` events, never receipts.
 - `task.acquire` is an acquisition `read` receipt citing the pinned output
   with `executed_here: false`, followed by a `job-collected` checkpoint.
+- `task.execute` (VTE tasks, A59) is an `execution` receipt labelled
+  `orca-local` (`executed_here: true`) or, for a broker cache hit, an
+  acquisition `read` receipt (`executed_here: false`, `cache_hit: true`);
+  both cite the submitted input and the job's log and are followed by a
+  `job-collected` checkpoint whose `visible` names the job (`job.<job id>`).
+  Every line must agree with the broker's journal (job id, status, input and
+  output sha256, `executed_here`, `cache_hit`); a spool with any
+  `task.execute` is refused without that journal. Broker jobs no line cites
+  (the extension stopped between the reply and its spool write) are listed
+  in a `pi.broker-unspooled` event, so no host execution goes unrecorded.
 - In a variant with Action Fusion, `edit`/`write` calls with `then_run` are
   decomposed with `context.decompose_fused_call` into `write_input` +
   `validate_input`; elsewhere Pi ignores `then_run` and the call is plain.
@@ -24,7 +34,9 @@ journal event that cites them:
   tool result, `obs_recall` calls as `context.page`.
 - a raw tool result that differs from the visible one is `context.reduced`.
 - `compaction` lines with phase `done` go through `context.record_compaction`.
-- the agent's claim is a `pi-claim` artifact cited by a `pi.claim` event.
+- the agent's claim is a `pi-claim` artifact cited by a `pi.claim` event; a
+  VTE claim (`report_vtes`) is a `pi-vte-claim` artifact, and its event
+  carries the claim schema.
 - RLM (M4): an `rlm.cell` joins its `ipython` call's tool receipt (the cell's
   `code` as an input, the kernel's reply as the `cell` output, both committed
   first). Each `rlm.state` value is an `rlm-state` artifact cited by an
@@ -57,11 +69,11 @@ import hmac
 import json
 import re
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import ValidationError
 
@@ -86,7 +98,10 @@ from onoda.adapters.pi.contract import (
     TOOL_CASE_INPUT,
     TOOL_IPYTHON,
     TOOL_ORCA_RUN,
+    TOOL_ORCA_SUBMIT,
     TOOL_REPORT,
+    TOOL_REPORT_VTE,
+    TOOL_STRUCTURE,
     UNFUSABLE_COMMAND_TOKENS,
     VARIANTS,
     Claim,
@@ -105,6 +120,7 @@ from onoda.adapters.pi.contract import (
     SpoolStart,
     TaskAcquire,
     TaskClaim,
+    TaskExecute,
     ToolCall,
     ToolResult,
     Variant,
@@ -113,6 +129,7 @@ from onoda.adapters.pi.contract import (
     parse_spool_line,
     with_mechanisms,
 )
+from onoda.adapters.pi.vte_contract import JOB_ID_RE, VTE_CLAIM_SCHEMA, VteClaim
 from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
 from onoda.context import decompose_fused_call, record_compaction
@@ -122,7 +139,17 @@ from onoda.store import Store, check_safe_id, record_ref
 
 ACTOR = "pi-ingest"
 ACQUIRE = "acquire:orca-output"  # same operation name as the M2 case runner's acquisition
-READ_TOOLS = frozenset({TOOL_CASE_INPUT, TOOL_ORCA_RUN, "read", "obs_recall"})
+EXECUTE = "execute:orca-job"  # a broker job ORCA ran for this submission
+ACQUIRE_CACHED = "acquire:orca-cache"  # a broker cache hit: an earlier job's bytes
+BROKER_CODE_REF = "onoda.science.orca_broker"
+# `orca_submit`'s tool receipt records what the agent saw; the ORCA job itself
+# is the receipt its `task.execute` line becomes, so the job is never counted twice.
+READ_TOOLS = frozenset(
+    {TOOL_CASE_INPUT, TOOL_ORCA_RUN, TOOL_STRUCTURE, TOOL_ORCA_SUBMIT, "read", "obs_recall"}
+)
+CLAIM_TOOLS = {TOOL_REPORT: Claim, TOOL_REPORT_VTE: VteClaim}
+_JOB_LABELS = ["orca-local"]
+_STAND_IN_LABELS = ["stand-in", "not-orca", "synthetic"]  # as orca_local labels a stand-in
 FUSED_TOOLS = frozenset({"edit", "write"})
 OBS_RECALL = "obs_recall"
 _OBS_ID = re.compile(r"^obs_[0-9a-f]{24}$")
@@ -147,6 +174,22 @@ class IngestResult:
     observation_pack: dict[str, str]  # obs id -> store digest
     children: tuple[str, ...] = ()  # child run ids, in child-index order (RLM)
     rlm_state: dict[str, str] = field(default_factory=dict)  # name -> digest, latest
+
+
+class BrokerJournalRecord(Protocol):
+    """One answered submission in the host broker's journal (A59).
+
+    `vte_contract.BrokerReply` satisfies it, as does the broker's own journal
+    entry. Entries without a job id (requests, refusals) are skipped; an
+    optional `stand_in` attribute marks a job a stand-in executable ran.
+    """
+
+    job_id: str | None
+    status: str
+    cache_hit: bool
+    executed_here: bool
+    input_sha256: str | None
+    output_sha256: str | None
 
 
 # ------------------------------------------------------------------ reading
@@ -204,6 +247,8 @@ def _cited(line: Any) -> list[str]:
             return [line.content] + ([line.details] if line.details else [])
         case TaskAcquire():
             return [line.output]
+        case TaskExecute():
+            return [line.input, line.output]
         case TaskClaim():
             return [line.claim]
         case Compaction():
@@ -381,6 +426,7 @@ class _Analysis:
     observation_of: dict[int, str]  # visible result seq -> archived obs id
     child_starts: dict[int, RlmChildStart] = field(default_factory=dict)
     child_ends: dict[int, RlmChildEnd] = field(default_factory=dict)
+    executions: list[TaskExecute] = field(default_factory=list)
 
 
 def _fused_steps(line: ToolCall, args: dict[str, Any], tokens: tuple[str, ...], fusion: bool):
@@ -434,6 +480,7 @@ def _analyze(
     cells: set[str] = set()
     child_starts: dict[int, RlmChildStart] = {}
     child_ends: dict[int, RlmChildEnd] = {}
+    executions: dict[str, TaskExecute] = {}  # job id -> its line
 
     calls: dict[str, _Call] = {}
     pending: dict[int, list[ProviderRequest]] = defaultdict(list)
@@ -503,18 +550,92 @@ def _analyze(
                     raise IntegrityError(f"acquired output at seq {line.seq} is not the pinned one")
                 if task.target.get("case_id", line.case_id) != line.case_id:
                     raise IntegrityError(f"acquisition at seq {line.seq} is for another case")
-            case TaskClaim():
-                call_for(line, TOOL_REPORT)
+            case TaskExecute():
+                call_for(line, TOOL_ORCA_SUBMIT)
+                if not JOB_ID_RE.match(line.job_id):
+                    raise IntegrityError(f"seq {line.seq} names job {line.job_id!r}, not a job id")
+                if line.job_id in executions:
+                    raise IntegrityError(f"job {line.job_id} spooled twice (seq {line.seq})")
+                if any(e.tool_call_id == line.tool_call_id for e in executions.values()):
+                    raise IntegrityError(f"second task.execute for {line.tool_call_id}")
                 try:
-                    Claim.model_validate_json(spool.objects[line.claim])
+                    spool.objects[line.input].decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise IntegrityError(f"submitted input at seq {line.seq} is not UTF-8") from exc
+                executions[line.job_id] = line
+            case TaskClaim():
+                tool = call_for(line).line.tool_name
+                model = CLAIM_TOOLS.get(tool)
+                if model is None:
+                    raise IntegrityError(f"seq {line.seq} is not from an allowed report call")
+                call_for(line, tool)
+                try:
+                    model.model_validate_json(spool.objects[line.claim])
                 except ValidationError as exc:
-                    raise IntegrityError(f"claim at seq {line.seq} is not a valid Claim") from exc
+                    raise IntegrityError(
+                        f"claim at seq {line.seq} is not a valid {model.__name__}"
+                    ) from exc
             case RlmCell() | RlmChildStart() | RlmChildEnd() | RlmChildRefused() | RlmState():
                 if not variant.rlm:
                     raise IntegrityError(f"{line.type} at seq {line.seq} in non-RLM {variant.id}")
                 _check_rlm_line(line, spool, call_for, cells, child_starts, child_ends, depth)
     unanswered = sorted((r for rs in pending.values() for r in rs), key=lambda r: r.seq)
-    return _Analysis(calls, request_of, unanswered, observation_of, child_starts, child_ends)
+    return _Analysis(
+        calls,
+        request_of,
+        unanswered,
+        observation_of,
+        child_starts,
+        child_ends,
+        list(executions.values()),
+    )
+
+
+def _bare(sha: str | None) -> str | None:
+    return sha.removeprefix("sha256:") if sha is not None else None
+
+
+def _broker_jobs(journal: Iterable[BrokerJournalRecord]) -> dict[str, BrokerJournalRecord]:
+    """The journal's answered submissions by job id; a job answered twice is refused."""
+    jobs: dict[str, BrokerJournalRecord] = {}
+    for entry in journal:
+        job_id = getattr(entry, "job_id", None)
+        if job_id is None or getattr(entry, "status", None) not in ("completed", "failed"):
+            continue
+        if job_id in jobs:
+            raise IntegrityError(f"the broker journal answers job {job_id} twice")
+        jobs[job_id] = entry
+    return jobs
+
+
+def _check_broker(
+    executions: list[TaskExecute], jobs: dict[str, BrokerJournalRecord]
+) -> dict[str, BrokerJournalRecord]:
+    """Each `task.execute` against the broker's journal (A59); returns the entries cited."""
+    cited = {}
+    for line in executions:
+        entry = jobs.get(line.job_id)
+        if entry is None:
+            raise IntegrityError(
+                f"task.execute at seq {line.seq} cites job {line.job_id}, which the broker "
+                "never ran or served; nothing was ingested"
+            )
+        spooled = (line.status, line.input, line.output, line.cache_hit, line.executed_here)
+        journaled = (
+            entry.status,
+            _bare(entry.input_sha256),
+            _bare(entry.output_sha256),
+            entry.cache_hit,
+            entry.executed_here,
+        )
+        fields = ("status", "input", "output", "cache_hit", "executed_here")
+        if differ := [f for f, s, j in zip(fields, spooled, journaled, strict=True) if s != j]:
+            raise IntegrityError(
+                f"task.execute at seq {line.seq} (job {line.job_id}) disagrees with the broker "
+                f"journal on {differ}; nothing was ingested"
+            )
+        cited[line.job_id] = entry
+    return cited
 
 
 def _check_rlm_line(
@@ -589,12 +710,16 @@ class _Writer:
         sol_pi_config: dict[str, Any] | None,
         children: dict[int, _Child] | None = None,
         ingest_child: Callable[[_Plan], None] | None = None,
+        broker: dict[str, BrokerJournalRecord] | None = None,
+        unspooled: tuple[str, ...] = (),
     ):
         self.store, self.run, self.task = store, run, task
         self.spool, self.archive, self.a = spool, archive, analysis
         self.sol_pi_config = sol_pi_config
         self.children = children or {}
         self.ingest_child = ingest_child
+        self.broker = broker or {}
+        self.unspooled = unspooled
         self.scripted = spool.start.scripted
         self.synthetic = ["synthetic"] if self.scripted else []
         self.runtime = {"pi": spool.start.pi_version, "sol_pi": spool.start.sol_pi_commit}
@@ -757,6 +882,7 @@ class _Writer:
             ToolCall: self.on_call,
             ToolResult: self.on_result,
             TaskAcquire: self.on_acquire,
+            TaskExecute: self.on_execute,
             TaskClaim: self.on_claim,
             Compaction: self.on_compaction,
             ReplayMismatchLine: self.on_mismatch,
@@ -769,6 +895,10 @@ class _Writer:
             if handler := handlers.get(type(line)):
                 handler(line)
         self.flush()
+        if self.unspooled:
+            self.emit(
+                "broker-unspooled", "pi.broker-unspooled", payload={"jobs": list(self.unspooled)}
+            )
         end = self.spool.end
         if end is not None:
             self.emit(
@@ -1047,6 +1177,48 @@ class _Writer:
         self.visible[f"acquired.{len(self.jobs)}"] = output
         self.checkpoint(f"checkpoint:job-collected:{line.seq}", "job-collected", "agent")
 
+    def on_execute(self, line: TaskExecute) -> None:
+        """A broker job: executed here, or an earlier job's bytes served from the cache."""
+        stand_in = bool(getattr(self.broker[line.job_id], "stand_in", False))
+        if line.cache_hit:
+            job_labels = ["acquired", "cache-hit"]
+        else:
+            job_labels = [] if stand_in else list(_JOB_LABELS)
+        if stand_in:  # a stand-in's observations are synthetic, executed or cached
+            job_labels += _STAND_IN_LABELS
+        inp = self.obj(line.input, "text/plain", ["orca-input", *self.synthetic], encoding="utf-8")
+        output = self.obj(line.output, "text/plain", ["job-output", *job_labels])
+        spec = StepSpec.new(
+            operation=ACQUIRE_CACHED if line.cache_hit else EXECUTE,
+            inputs={"input": inp},
+            code_ref=BROKER_CODE_REF,
+            determinism="external",
+        )
+        inv_id = self.invocation(
+            f"execute:{line.seq}",
+            spec,
+            "read" if line.cache_hit else "execution",
+            {"input": inp},
+            {"log": output},
+            status="succeeded" if line.status == "completed" else "failed",
+            metadata={
+                "executed_here": line.executed_here,
+                "cache_hit": line.cache_hit,
+                "job_id": line.job_id,
+                "tool_call_id": line.tool_call_id,
+                "stand_in": stand_in,
+                "broker_journal": "agrees",
+            },
+            labels=list(dict.fromkeys([*job_labels, *self.synthetic])),
+            usage=Usage(units={}, measured=False, simulated=self.scripted, cost_usd=None),
+        )
+        self.jobs.append(
+            {"tool_call_id": line.tool_call_id, "invocation_id": inv_id, "job_id": line.job_id}
+        )
+        self.visible[f"job.{line.job_id}"] = output
+        self.visible[f"job.{line.job_id}.input"] = inp
+        self.checkpoint(f"checkpoint:job-collected:{line.seq}", "job-collected", "agent")
+
     def _case_provenance(self) -> dict[str, Any] | None:
         """Provenance from the pinned M2 case manifest, when the task carries one."""
         case = self.task.inputs.get("case")
@@ -1057,15 +1229,15 @@ class _Writer:
         return prov if isinstance(prov, dict) else None
 
     def on_claim(self, line: TaskClaim) -> None:
-        claim = self.obj(line.claim, "application/json", ["pi-claim", *self.synthetic])
+        vte = self.a.calls[line.tool_call_id].line.tool_name == TOOL_REPORT_VTE
+        label = "pi-vte-claim" if vte else "pi-claim"
+        claim = self.obj(line.claim, "application/json", [label, *self.synthetic])
         self.claims += 1
         self.visible[f"claim.{self.claims}"] = claim
-        self.emit(
-            f"claim:{line.seq}",
-            "pi.claim",
-            payload={"tool_call_id": line.tool_call_id},
-            refs={"claim": claim},
-        )
+        payload: dict[str, Any] = {"tool_call_id": line.tool_call_id}
+        if vte:  # M3 claim events stay as they were
+            payload["schema"] = VTE_CLAIM_SCHEMA
+        self.emit(f"claim:{line.seq}", "pi.claim", payload=payload, refs={"claim": claim})
 
     def on_compaction(self, line: Compaction) -> None:
         details = (
@@ -1289,6 +1461,7 @@ class _Plan:
     analysis: _Analysis | None = None
     sol_pi_config: dict[str, Any] | None = None
     children: dict[int, _Child] = field(default_factory=dict)
+    broker: dict[str, BrokerJournalRecord] = field(default_factory=dict)  # job id -> entry cited
 
 
 @dataclass(frozen=True)
@@ -1327,6 +1500,7 @@ def _prepare(
     cfg: dict[str, Any],
     key: bytes | None,
     expected_session_dir: Path | None,
+    broker_jobs: dict[str, BrokerJournalRecord] | None = None,
 ) -> _Plan:
     """Read and check one spool and, recursively, its children's; raises before any write."""
     check_safe_id(run_id, "run id")
@@ -1344,6 +1518,14 @@ def _prepare(
             return _Plan(run_id, cfg, spool, run, noop=True)
     archive = _read_archive(spool.start, expected_session_dir)
     analysis = _analyze(spool, archive, task, cfg)
+    broker: dict[str, BrokerJournalRecord] = {}
+    if analysis.executions:
+        if broker_jobs is None:
+            raise OnodaError(
+                f"spool {spool_dir.name} records task.execute lines; ingest needs the broker "
+                "journal to check them"
+            )
+        broker = _check_broker(analysis.executions, broker_jobs)
     sol_pi_config = _sol_pi_config(cfg)
     named = {start.spool_subdir for start in analysis.child_starts.values()}
     children_dir = spool_dir / CHILDREN_DIR
@@ -1375,6 +1557,7 @@ def _prepare(
                 cfg=child_cfg,
                 key=derive_child_key(key, index) if key is not None else None,
                 expected_session_dir=expected_session_dir,
+                broker_jobs=broker_jobs,
             )
             child_end = plan.spool.end
             if end is not None and end.end_status != (child_end.status if child_end else None):
@@ -1390,10 +1573,25 @@ def _prepare(
                         f"{end.cost_usd} USD, its spool says {_charge(plan.spool)}"
                     )
         children[index] = _Child(start, end, child_run, plan)
-    return _Plan(run_id, cfg, spool, run, False, archive, analysis, sol_pi_config, children)
+    return _Plan(run_id, cfg, spool, run, False, archive, analysis, sol_pi_config, children, broker)
 
 
-def _write(store: Store, plan: _Plan, task: TaskManifest, labels: tuple[str, ...]) -> None:
+def _cited_jobs(plan: _Plan) -> set[str]:
+    """Broker job ids a spool tree's `task.execute` lines cite."""
+    jobs = set(plan.broker)
+    for child in plan.children.values():
+        if child.plan is not None:
+            jobs |= _cited_jobs(child.plan)
+    return jobs
+
+
+def _write(
+    store: Store,
+    plan: _Plan,
+    task: TaskManifest,
+    labels: tuple[str, ...],
+    unspooled: tuple[str, ...] = (),
+) -> None:
     """Ingest a prepared spool; children are written when the parent reaches them."""
     if plan.noop:
         return
@@ -1429,6 +1627,8 @@ def _write(store: Store, plan: _Plan, task: TaskManifest, labels: tuple[str, ...
         plan.sol_pi_config,
         plan.children,
         lambda child: _write(store, child, task, labels),
+        plan.broker,
+        unspooled,
     ).ingest()
 
 
@@ -1442,6 +1642,7 @@ def ingest_spool(
     labels: tuple[str, ...] | list[str] = (),
     key: bytes | None = None,
     expected_session_dir: str | Path | None = None,
+    broker_journal: Iterable[BrokerJournalRecord] | None = None,
 ) -> IngestResult:
     """Turn one Pi spool into a run record; see the module docstring for the mapping.
 
@@ -1455,11 +1656,15 @@ def ingest_spool(
     ObservationPack archives are read from. RLM child spools under
     `children/` are read, checked and ingested as runs of their own; every
     spool in the tree is validated before anything is written.
+    `broker_journal` (the host broker's journal, A59) is required when any
+    spool in the tree records `task.execute`; every such line must agree with
+    it, and broker jobs no line cites are recorded as unspooled.
     """
     check_safe_id(run_id, "run id")
     cfg = _run_config(config)
     if reserved := sorted(k for k in CHILD_CONFIG_KEYS if k in cfg):
         raise OnodaError(f"config keys {reserved} are set by ingest for RLM child runs")
+    broker_jobs = _broker_jobs(broker_journal) if broker_journal is not None else None
     plan = _prepare(
         store,
         Path(spool_dir),
@@ -1470,6 +1675,7 @@ def ingest_spool(
         expected_session_dir=(
             Path(expected_session_dir) if expected_session_dir is not None else None
         ),
+        broker_jobs=broker_jobs,
     )
     if plan.noop:
         return _result(store, run_id, noop=True)
@@ -1477,7 +1683,8 @@ def ingest_spool(
         if not store.has_object(digest):
             raise MissingObjectError(digest, f"task input {name!r} -> {digest} is not committed")
     store.put_record(task)
-    _write(store, plan, task, tuple(labels))
+    unspooled = tuple(sorted(set(broker_jobs or ()) - _cited_jobs(plan)))
+    _write(store, plan, task, tuple(labels), unspooled)
     return _result(store, run_id, noop=False)
 
 
@@ -1511,10 +1718,22 @@ def _result(store: Store, run_id: str, *, noop: bool) -> IngestResult:
 
 def run_claim(store: Store, run_id: str) -> Claim | None:
     """The agent's last claim in an ingested run, or None if it never reported."""
-    claims = [e for e in store.events(run_id) if e.type == "pi.claim"]
+    claims = [e for e in store.events(run_id) if e.type == "pi.claim" and "schema" not in e.payload]
     if not claims:
         return None
     return Claim.model_validate_json(store.get_bytes(claims[-1].payload_refs["claim"]))
+
+
+def run_vte_claim(store: Store, run_id: str) -> VteClaim | None:
+    """The agent's last VTE claim in an ingested run, or None if it never reported one."""
+    claims = [
+        e
+        for e in store.events(run_id)
+        if e.type == "pi.claim" and e.payload.get("schema") == VTE_CLAIM_SCHEMA
+    ]
+    if not claims:
+        return None
+    return VteClaim.model_validate_json(store.get_bytes(claims[-1].payload_refs["claim"]))
 
 
 def _turn(message: Any, replay_key: str | None, cost_usd: str | None) -> ScriptTurn:
