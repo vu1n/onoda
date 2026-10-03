@@ -16,6 +16,10 @@ hundreds of kilobytes:
    SC-NEVPT2 references (Molpro) weight every root equally, while ORCA splits
    weight by block first, so unequal weights are flagged (the paper's largest
    replication error, arXiv 2609.13357).
+4. Root order: SC-NEVPT2 lists each block's roots by corrected energy. If that
+   order differs from the SA-CASSCF root order, the perturbation reordered the
+   states, so they cannot be identified by position and the CASSCF reference
+   may describe them poorly (A68).
 
 These are advisory text for the agent. They are not observations, the grader
 never reads them, and they use no reference value. Values are compared as
@@ -46,6 +50,11 @@ _BLOCK = re.compile(r"^BLOCK\s+\d+ WEIGHT=")
 _BLOCK_MULT = re.compile(r"^\s*Multiplicity\s+\.+\s+(\d+)\s*$")
 _BLOCK_IRREP = re.compile(r"^\s*Irrep\s+\.+\s+\d+ \((\S+)\)\s*$")
 _ROOT_WEIGHT = re.compile(r"^\s*ROOT=(\d+) WEIGHT=\s*(\d+\.\d+)\s*$")
+_NEVPT2_LISTING = "NEVPT2 TRANSITION ENERGIES"
+# `STATE: ROOT MULT [IRREP] DE/a.u. DE/eV DE/cm**-1`; IRREP is printed only with symmetry.
+_TRANSITION = re.compile(
+    rf"^\s*\d+:\s+(\d+)\s+(\d+)\s+(?:(\S+)\s+)?({_NUMBER})\s+({_NUMBER})\s+({_NUMBER})\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,15 @@ class RootWeight:
 
 
 @dataclass(frozen=True)
+class Transition:
+    multiplicity: int
+    irrep: str | None
+    root: int
+    au: str  # excitation energy, Eh, decimal text as printed
+    ev: str  # the same in eV, as printed
+
+
+@dataclass(frozen=True)
 class JobFacts:
     """What the checks need from one job's log, read once when the job returns."""
 
@@ -65,6 +83,7 @@ class JobFacts:
     casscf_ground: str | None  # lowest SA-CASSCF root, Eh, converged CASSCF only
     active_irreps: tuple[tuple[str, int], ...]  # first listing, irreps with active orbitals
     root_weights: tuple[RootWeight, ...]  # first CI-step listing
+    nevpt2_transitions: tuple[Transition, ...] = ()  # SC-NEVPT2 listing, as printed
 
 
 def job_facts(log: bytes) -> JobFacts:
@@ -80,6 +99,7 @@ def job_facts(log: bytes) -> JobFacts:
         casscf_ground=_casscf_ground(lines, log, weights),
         active_irreps=_active_irreps(lines),
         root_weights=weights,
+        nevpt2_transitions=_nevpt2_transitions(lines),
     )
 
 
@@ -161,6 +181,21 @@ def _root_weights(lines: list[str]) -> tuple[RootWeight, ...]:
     return tuple(weights)
 
 
+def _nevpt2_transitions(lines: list[str]) -> tuple[Transition, ...]:
+    try:
+        start = next(i for i, ln in enumerate(lines) if ln.strip() == _NEVPT2_LISTING)
+    except StopIteration:
+        return ()
+    found: list[Transition] = []
+    for ln in lines[start + 1 :]:
+        if m := _TRANSITION.match(ln):
+            mult, irrep = int(m.group(2)), m.group(3)
+            found.append(Transition(mult, irrep, int(m.group(1)), m.group(4), m.group(5)))
+        elif found and not ln.strip():
+            break
+    return tuple(found)
+
+
 def job_checks(
     job_id: str, facts: JobFacts, earlier: Sequence[tuple[str, JobFacts]]
 ) -> tuple[str, ...]:
@@ -176,6 +211,7 @@ def job_checks(
             _check_hf(job_id, facts, earlier),
             _check_irreps(facts),
             _check_weights(facts),
+            _check_root_order(facts),
         )
         if line
     )
@@ -228,4 +264,25 @@ def _check_weights(facts: JobFacts) -> str | None:
         f"WARNING (state averaging): root weights are not equal ({listed}). QUESTDB's references "
         "weight every root equally; ORCA splits the weight between blocks first, so set each "
         "block's weight in proportion to its number of roots"
+    )
+
+
+def _check_root_order(facts: JobFacts) -> str | None:
+    if not facts.nevpt2_transitions:
+        return None
+    blocks: dict[tuple[int, str | None], list[Transition]] = {}
+    for t in facts.nevpt2_transitions:
+        blocks.setdefault((t.multiplicity, t.irrep), []).append(t)
+    swapped = []
+    for (mult, irrep), roots in blocks.items():
+        by_energy = sorted(roots, key=lambda t: Decimal(t.au))
+        if [t.root for t in by_energy] != sorted(t.root for t in roots):
+            listed = ", ".join(f"root {t.root} {t.ev} eV" for t in by_energy)
+            swapped.append(f"mult {mult}{f' {irrep}' if irrep else ''}: {listed}")
+    if not swapped:
+        return "ok (root order): SC-NEVPT2 keeps the SA-CASSCF root order in every block"
+    return (
+        f"WARNING (root order): SC-NEVPT2 reorders the SA-CASSCF roots ({'; '.join(swapped)}). "
+        "Identify each state by its CASSCF root's character, not by its position; the CASSCF "
+        "reference may describe these states poorly"
     )

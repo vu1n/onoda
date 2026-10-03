@@ -30,7 +30,7 @@ first agent adapter; Prime is an optional comparison arm).
   (`science/orca_broker.py`) over a socket in the Pi work dir, so keep
   `--work-dir` short (AF_UNIX, 104 bytes on macOS). `onoda pi evaluate-vte`
   grades by state identity, `onoda vte report` summarizes arms; each
-  broker reply carries advisory ladder checks (`science/orca_checks.py`, A66)
+  broker reply carries advisory ladder checks (`science/orca_checks.py`, A66, A68)
   that nothing grades; `onoda vte shadow` records what a System One model
   (Jev, Clef) would decide per job, beside the grade (A67);
   `experiments/questdb/run.sh` is the S0-vs-S1 experiment on the Mac. Cases

@@ -82,6 +82,18 @@ def test_without_symmetry_no_irreps_and_unconverged_casscf_is_not_compared():
     assert any(ln.startswith("WARNING (state averaging)") for ln in failed)
 
 
+def test_nevpt2_reordering_the_casscf_roots_is_flagged():
+    (lines,) = run("acetone_g_trah")
+    (order,) = [ln for ln in lines if "root order" in ln]
+    assert order.startswith("WARNING (root order)")
+    assert "mult 1 B2: root 1 4.614 eV, root 0 6.914 eV" in order
+    for name in ("ketene_f_target", "ethylene_nevpt2_np4"):  # with and without symmetry
+        (lines,) = run(name)
+        assert "ok (root order): SC-NEVPT2 keeps the SA-CASSCF root order in every block" in lines
+    (no_nevpt2,) = run("ketene_d_valence_avtz_sym")
+    assert not any("root order" in ln for ln in no_nevpt2)
+
+
 def test_the_input_echo_is_never_read():
     text = (FIXTURES / "ketene_a_rhf.out").read_bytes()
     echo = b"|  9> # LOWEST ROOT (ROOT 0, MULT 1) =   -999.000000000 Eh\n"

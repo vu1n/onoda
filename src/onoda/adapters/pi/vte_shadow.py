@@ -40,7 +40,7 @@ from onoda.science.vte import LoadedVteCase
 from onoda.store import Store
 from onoda.systemone import SystemOneAnswer
 
-SHADOW_VERSION = "1"
+SHADOW_VERSION = "2"  # 2: states say what an absent SCF means (A68)
 MAX_EXCERPT_CHARS = 12000  # Jev reads 32k tokens; leaves room for criteria and targets
 _RULE = re.compile(r"^\*\*([A-H])\. (.+?)\*\*\s*(.*)$")
 _INPUT_ECHO = re.compile(r"^\|\s*\d+>")
@@ -124,6 +124,21 @@ def excerpt(log: bytes) -> str:
     return "\n".join(out)
 
 
+def scf_note(scf: str, log: bytes) -> str | None:
+    """Plain words for an absent SCF, which decision models read as an SCF failure (A68)."""
+    if scf != "absent":
+        return None
+    echo = [
+        ln for ln in log.decode("utf-8", errors="replace").splitlines() if _INPUT_ECHO.match(ln)
+    ]
+    why = (
+        "its starting orbitals are read from a file with MORead"
+        if any("moread" in ln.lower() for ln in echo)
+        else "the output has no SCF section"
+    )
+    return f"no SCF ran in this job ({why}); an absent SCF is not an SCF convergence failure"
+
+
 def job_state(
     case: LoadedVteCase, job_id: str, log: bytes, checks: tuple[str, ...]
 ) -> dict[str, Any]:
@@ -139,6 +154,7 @@ def job_state(
         "parser": {
             "termination": obs.termination,
             "scf": obs.scf,
+            "scf_note": scf_note(obs.scf, log),
             "casscf_converged": obs.casscf_converged,
             "problems": [f"{p.field}: {p.state}: {p.detail}" for p in obs.problems][:10],
         },

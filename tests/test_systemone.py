@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from onoda import systemone
-from onoda.adapters.pi.vte_shadow import excerpt, ladder_rules, questions
+from onoda.adapters.pi.vte_shadow import excerpt, ladder_rules, questions, scf_note
 from onoda.errors import CapabilityError, OnodaError
 from onoda.systemone import LiveSystemOne, ScriptedSystemOne
 
@@ -36,6 +36,16 @@ def test_excerpt_keeps_the_input_and_the_casscf_results_verbatim():
     assert "CAS-SCF STATES FOR BLOCK  1 MULT= 1 IRREP= B1" in text
     assert "NEVPT2 TRANSITION ENERGIES" in text
     assert len(text) <= 12000 + 20 and len(text) < len(KETENE) / 10
+
+
+def test_an_absent_scf_is_said_in_plain_words():
+    # Jev read the parser's bare "absent" as rule B (SCF failure) on jobs that ran no SCF.
+    note = scf_note("absent", KETENE)
+    assert note.startswith("no SCF ran in this job (its starting orbitals are read from a file")
+    assert "not an SCF convergence failure" in note
+    guess = (ROOT / "tests/fixtures/orca611-nevpt2/formaldehyde_guess.out").read_bytes()
+    assert "(the output has no SCF section)" in scf_note("absent", guess)
+    assert scf_note("converged", KETENE) is None
 
 
 def test_live_decisions_are_off_unless_enabled_and_need_credentials(monkeypatch):
@@ -81,7 +91,7 @@ def test_jev_call_sends_the_body_without_credentials_and_reads_decimals(monkeypa
 
 
 def test_clef_unwraps_the_workers_ai_envelope(monkeypatch):
-    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "t")
+    monkeypatch.setenv("CLOUDFLARE_AI_TOKEN", "t")
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
     urls = []
 

@@ -40,7 +40,7 @@ PROVIDERS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "clef": (
         "clef-flash",
         "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{model}",
-        ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"),
+        ("CLOUDFLARE_AI_TOKEN", "CLOUDFLARE_ACCOUNT_ID"),
     ),
 }
 TIMEOUT_SECONDS = 60
@@ -107,7 +107,7 @@ class LiveSystemOne:
             url = self._endpoint.format(
                 account=os.environ["CLOUDFLARE_ACCOUNT_ID"], model=self.model
             )
-            token = os.environ["CLOUDFLARE_API_TOKEN"]
+            token = os.environ["CLOUDFLARE_AI_TOKEN"]
         req = urllib.request.Request(
             url,
             data=body,
