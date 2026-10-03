@@ -1,4 +1,4 @@
-"""Stage one Pi run inside a benchmark task container (exploratory, A54).
+"""Stage one Pi run inside a benchmark task container (exploratory, A69).
 
 `runtime.build_launch` stages a run on the host around an ORCA `TaskBundle`
 and, for a live run, requires the bubblewrap sandbox (Linux only). A

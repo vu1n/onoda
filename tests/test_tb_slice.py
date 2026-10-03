@@ -1,4 +1,4 @@
-"""Terminal-Bench slice adapter (A54): staging, the spend proxy, spool metrics.
+"""Terminal-Bench slice adapter (A69): staging, the spend proxy, spool metrics.
 
 Offline: no Harbor, no container, no provider. The proxy runs against a
 local fake upstream whose responses are synthetic.

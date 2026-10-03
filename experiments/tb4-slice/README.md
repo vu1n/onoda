@@ -1,6 +1,6 @@
 # Terminal-Bench 4 paired slice: Pi (S1) vs SoL-Pi (S3)
 
-Exploratory (docs/ASSUMPTIONS.md A54). The question is narrow: on tasks long
+Exploratory (docs/ASSUMPTIONS.md A69). The question is narrow: on tasks long
 enough to produce build and test logs, do SoL-Pi's reducer, compaction and
 Action Fusion fire at all, and what does a paired run cost with and without
 them? On the six short ORCA cases the reducer and compaction never fired.

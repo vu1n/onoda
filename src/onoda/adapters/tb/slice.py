@@ -12,7 +12,7 @@ that the slice cap still covers every arm of the round at the per-run proxy
 cap, and stops before the first round it does not. Every setting is explicit;
 nothing defaults to spending.
 
-Results are exploratory (A54): the tasks are an operator's pick, one attempt
+Results are exploratory (A69): the tasks are an operator's pick, one attempt
 each, and the numbers are sums over spooled records, not gate verdicts.
 """
 

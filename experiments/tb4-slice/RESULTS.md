@@ -6,7 +6,7 @@ $0.20 (Pi's estimate), 20 minutes wall clock. Task images are amd64 and ran
 under emulation on an arm64 Mac. All 20 spools verified against their HMAC keys.
 
 Not a reproduction of the SoL-Pi paper's Table 3 (63 tasks, GPT-5.6 Sol, 8-hour
-agent budget) and not a mechanism verdict (A54).
+agent budget) and not a mechanism verdict (A69).
 
 | | S1 (Pi) | S3 (SoL-Pi) | S3 vs S1 | Paper, SoL-Pi vs Pi |
 |---|---|---|---|---|
