@@ -28,6 +28,7 @@ from onoda.adapters.pi.sandbox import (
     SeatbeltSandbox,
 )
 from onoda.errors import CapabilityError
+from onoda.sandbox_util import resolved
 from onoda.sandbox_util import sb_str as _sb_str
 
 on_darwin = pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
@@ -225,7 +226,7 @@ def test_profiles_read_only_allowlisted_sysctls(tmp_path):
 
 def root_reads(profile: str) -> list[str]:
     """Every rule that names "/" itself or everything under it."""
-    return [ln for ln in profile.splitlines() if '"/"' in ln or "(subpath \"/\")" in ln]
+    return [ln for ln in profile.splitlines() if '"/"' in ln or '(subpath "/")' in ln]
 
 
 def test_profiles_list_the_root_directory_and_read_nothing_else_there(tmp_path):
@@ -360,3 +361,17 @@ def test_darwin_inner_shell_cannot_read_another_process_environment(mac):
     finally:
         host.kill()
         host.wait()
+
+
+def test_every_symlink_hop_is_named(tmp_path):
+    """uv's python: .venv/bin/python -> cpython-3.11-...-none (a link) -> cpython-3.11.15."""
+    real = tmp_path / "cpython-3.11.15"
+    (real / "bin").mkdir(parents=True)
+    (real / "bin" / "python3.11").write_text("")
+    (tmp_path / "cpython-3.11-none").symlink_to(real)
+    venv = tmp_path / "venv" / "bin"
+    venv.mkdir(parents=True)
+    (venv / "python").symlink_to(tmp_path / "cpython-3.11-none" / "bin" / "python3.11")
+    named = set(resolved([venv / "python"]))
+    assert tmp_path / "cpython-3.11-none" / "bin" / "python3.11" in named
+    assert real.resolve() / "bin" / "python3.11" in named

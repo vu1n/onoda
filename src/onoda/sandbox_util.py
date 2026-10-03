@@ -7,6 +7,7 @@ both build their bind lists and SBPL profiles from these.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -82,11 +83,32 @@ def sb_str(value: str | Path) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _symlink_hops(path: Path) -> list[Path]:
+    """`path` rewritten once per symlink met while resolving it, the last fully resolved.
+
+    Seatbelt checks every link it follows: uv's `.venv/bin/python` goes through
+    `cpython-3.11-macos-aarch64-none` (a link) to `cpython-3.11.15`, and exec
+    fails unless the intermediate link is named too.
+    """
+    hops, cur = [path], path
+    for _ in range(40):  # the kernel's own symlink-loop limit
+        for i in range(1, len(cur.parts) + 1):
+            prefix = Path(*cur.parts[:i])
+            if prefix.is_symlink():
+                target = prefix.parent / os.readlink(prefix)
+                cur = Path(os.path.normpath(target.joinpath(*cur.parts[i:])))
+                hops.append(cur)
+                break
+        else:
+            break
+    return [*hops, path.resolve()]
+
+
 def resolved(paths: Iterable[str | Path]) -> list[Path]:
-    """Each path and, if it is a symlink somewhere, its target too (both are named)."""
+    """Each path and every symlink hop on the way to its target (all are named)."""
     out: list[Path] = []
     for p in paths:
-        out += [Path(p), Path(p).resolve()]
+        out += _symlink_hops(Path(p).absolute())
     return covering(out)
 
 

@@ -20,6 +20,7 @@ import pytest
 from test_orca_broker import INPUT, broker, runs, sandbox_for, scheduler, stand_in, submit
 
 from onoda.errors import CapabilityError
+from onoda.sandbox_util import resolved
 from onoda.science import orca_sandbox
 from onoda.science.orca_broker import OrcaBroker, read_journal
 from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
@@ -101,7 +102,8 @@ def test_the_seatbelt_profile_confines_exec_files_and_network(tmp_path):
     named = {v for body in execs for v in re.findall(r'"([^"]*)"', body)}
     assert {str(orca), str(mpi), "/bin/sh"} <= named
     shells = ("/bin/sh", "/private/var/select/sh")
-    assert named - {str(orca), str(mpi)} <= {*shells, *(str(Path(p).resolve()) for p in shells)}
+    # Each shell and every symlink hop to it (e.g. /bin/sh -> /usr/bin/sh -> dash).
+    assert named - {str(orca), str(mpi)} <= {str(p) for p in resolved(shells)}
     assert "(allow process-exec process-fork)" not in profile
     # Writes only to the job dir (plus the /dev nodes).
     (rw,) = re.findall(r'\(allow file-write\*\n((?:  \(subpath "[^"]*"\)\n?)+)\)', profile)
