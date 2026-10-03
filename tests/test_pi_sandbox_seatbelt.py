@@ -391,3 +391,38 @@ def test_every_symlink_hop_is_named(tmp_path):
     named = set(resolved([venv / "python"]))
     assert tmp_path / "cpython-3.11-none" / "bin" / "python3.11" in named
     assert real.resolve() / "bin" / "python3.11" in named
+
+
+def test_both_profiles_stat_the_interpreters_linked_directory(tmp_path, monkeypatch):
+    """The link inside uv's chain is a directory: profiles must allow its metadata."""
+    from onoda.adapters.pi.sandbox import _host_paths
+    from onoda.science import orca_sandbox
+
+    real = tmp_path / "cpython-3.11.15"
+    (real / "bin").mkdir(parents=True)
+    (real / "bin" / "python3.11").write_text("")
+    alias = tmp_path / "cpython-3.11-none"
+    alias.symlink_to(real)
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(alias / "bin" / "python3.11")
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(sys, "base_prefix", str(real))
+    monkeypatch.setattr(sys, "executable", str(venv / "bin" / "python"))
+    link = f"(literal {_sb_str(alias)})"
+
+    (tmp_path / "node" / "bin").mkdir(parents=True)
+    monkeypatch.setattr("shutil.which", lambda _: str(tmp_path / "node" / "bin" / "node"))
+    paths = _host_paths(tmp_path / "runtime", tmp_path / "kernel", ())
+    sb = SeatbeltSandbox(sandbox_exec="/usr/bin/sandbox-exec", **paths)
+    _, work, workspace, bundle, _, _ = staged(tmp_path, sb)
+    pi = sb.inner_profile(pi_work_dir=work, workspace=workspace, bundle_dir=bundle, kernel=True)
+    job = orca_sandbox.SeatbeltJobSandbox(
+        sandbox_exec="/usr/bin/sandbox-exec",
+        orca_home=tmp_path / "orca",
+        extra_ro=orca_sandbox._python_dirs(),
+        extra_exec=(Path(sys.executable),),
+    ).profile(tmp_path / "job")
+    for profile in (pi, job):
+        metadata = profile.split("(allow file-read-metadata", 1)[1].split("))", 1)[0]
+        assert link in metadata

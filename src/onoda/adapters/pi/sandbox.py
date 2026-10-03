@@ -91,7 +91,13 @@ def _host_paths(runtime_dir: Path, kernel_dir: Path, extra_ro: tuple[Path, ...])
     return {
         "runtime_dirs": (runtime.resolve(), (runtime / "node_modules").resolve()),
         "node_prefix": Path(node).resolve().parent.parent,
-        "python_dirs": (Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()),
+        # The interpreter as invoked, unresolved: Seatbelt must name each link it
+        # passes (uv's .venv/bin/python goes through a symlinked directory).
+        "python_dirs": (
+            Path(sys.prefix).resolve(),
+            Path(sys.base_prefix).resolve(),
+            Path(sys.executable).absolute(),
+        ),
         "kernel_dir": Path(kernel_dir).resolve(),
         "extra_ro": tuple(Path(p).resolve() for p in extra_ro),
     }

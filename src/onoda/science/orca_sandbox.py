@@ -76,7 +76,9 @@ _DARWIN_JOB_SYSCTL_PREFIXES = ("net.route.0.",)
 
 
 def _python_dirs() -> tuple[Path, ...]:
-    return tuple(covering(resolved([sys.prefix, sys.base_prefix])))
+    # sys.executable as invoked: its link chain passes a symlinked directory
+    # (uv's cpython-3.11-...-none) that Seatbelt must be allowed to stat.
+    return tuple(covering(resolved([sys.prefix, sys.base_prefix, sys.executable])))
 
 
 @dataclass(frozen=True)
