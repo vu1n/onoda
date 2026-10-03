@@ -29,7 +29,7 @@ from onoda.adapters.pi.runtime import detect_sandbox
 from onoda.cli import main
 from onoda.clock import LogicalClock
 from onoda.errors import CapabilityError, OnodaError, ReplayMismatch
-from onoda.science.orca_broker import read_journal
+from onoda.science.orca_broker import OrcaBroker, read_journal
 from onoda.science.orca_local import OrcaSettings
 from onoda.science.vte import REFERENCES_SCHEMA, load_vte_case, vte_case_manifests
 from onoda.store import Store
@@ -235,6 +235,30 @@ def test_replay_of_cache_hits_matches_and_executes_nothing(recorded):
     assert runs(binary) == 1
     replayed = read_journal(root / "replay" / "broker" / "broker.jsonl")
     assert all(e.replay and not e.executed_here for e in replayed if e.event == "reply")
+
+
+def test_replay_of_a_run_with_an_unspooled_job_fails_closed(short, monkeypatch):
+    """A job the broker journaled but no `task.execute` cites has no output in the store."""
+    store, _ = stores(short)
+    binary = short / "orca_echo_stand_in.py"
+    binary.write_text(STAND_IN + "sys.stdout.write(open(sys.argv[1]).read())\n")
+    binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+    real_send = OrcaBroker._send
+
+    def drop_j0002(self, wfile, reply):  # the extension never gets this reply to spool
+        if reply.job_id == "j0002":
+            raise ConnectionError("reply lost (test)")
+        real_send(self, wfile, reply)
+
+    monkeypatch.setattr(OrcaBroker, "_send", drop_j0002)
+    pi = run(store, short, "lost", binary, script("test_lost", INPUT, INPUT + "# second\n"))
+    assert pi.ingest.complete, pi.stderr_tail
+    [event] = [e for e in store.events("lost") if e.type == "pi.broker-unspooled"]
+    assert event.payload["jobs"] == ["j0002"]
+    monkeypatch.undo()
+    with pytest.raises(ReplayMismatch):
+        pi_run.replay_run_pi(store, "lost", case(), work_dir=short / "replay")
+    assert runs(binary) == 2
 
 
 def test_replay_fails_closed_when_the_task_drifts(recorded, monkeypatch):

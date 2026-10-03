@@ -590,25 +590,37 @@ def _check_children(store: Store, run_id: str, spool_dir: Path, key: bytes) -> N
         _check_children(store, child, child_dir, child_key)
 
 
+def _cited_jobs(store: Store, run_id: str) -> set[str]:
+    """Broker job ids the run's receipts cite (one per ingested `task.execute`)."""
+    jobs = set()
+    for event in store.events(run_id):
+        if event.type == "invocation.committed":
+            job_id = store.receipt(event.payload["invocation_id"]).metadata.get("job_id")
+            if isinstance(job_id, str):
+                jobs.add(job_id)
+    return jobs
+
+
 def _replay_broker(
     store: Store, run_id: str, cfg: dict[str, Any], work_dir: Path
 ) -> tuple[OrcaBroker, tuple[BrokerJournalEntry, ...]]:
     """A replay-mode broker serving exactly the recorded outputs of a VTE run (A59).
 
+    Only jobs the run cites (a `task.execute` became a receipt) are served:
+    a `pi.broker-unspooled` job's output was never committed, so a replay
+    that asks for it gets a `replay_miss` and fails closed as a mismatch.
     Also returns the recorded journal, which the replay's served jobs are checked against.
     """
     digest = cfg.get("broker_journal")
     if not isinstance(digest, str):
         raise CapabilityError(f"run {run_id} recorded no broker journal")
     recorded = parse_journal(store.get_bytes(digest), f"broker journal {digest}")
-    outputs = {
-        e.output_sha256: store.get_bytes(e.output_sha256)
-        for e in recorded
-        if e.event == "reply" and e.output_sha256 is not None
-    }
+    cited = _cited_jobs(store, run_id)
+    servable = [e for e in recorded if e.event == "reply" and e.job_id in cited]
+    outputs = {e.output_sha256: store.get_bytes(e.output_sha256) for e in servable}
     broker = OrcaBroker(
         work_dir / "broker" / JOURNAL_NAME,
-        replay=BrokerReplay.from_journal(recorded, outputs),
+        replay=BrokerReplay.from_journal(servable, outputs),
         max_executions=cfg["max_executions"],
     )
     return broker, recorded
