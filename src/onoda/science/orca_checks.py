@@ -32,8 +32,6 @@ from decimal import Decimal
 
 from onoda.science.orca_parser import parse_orca_output
 
-CHECKS_ID = "job-checks@1"
-
 _NUMBER = r"-?\d+\.\d+"
 _INPUT_ECHO = re.compile(r"^\|\s*\d+>")
 _BASIS = re.compile(r"^Your calculation utilizes the basis: (.+?)\s*$")
@@ -44,7 +42,7 @@ _SCF_TOTAL = re.compile(rf"^Total Energy\s+:\s+({_NUMBER}) Eh\b")
 _LOWEST = re.compile(rf"^LOWEST ROOT \(.*\)\s+=\s+({_NUMBER}) Eh\b")
 _FINAL_CAS = re.compile(rf"^Final CASSCF energy\s+:\s+({_NUMBER}) Eh\b")
 _ACTIVE_IRREP = re.compile(r"^\s*Irrep\s+(\S+) has\s+\d+ SALCs .*#\(active\)=\s*(\d+)\s*$")
-_BLOCK = re.compile(r"^BLOCK\s+(\d+) WEIGHT=\s*(\d+\.\d+)\s*$")
+_BLOCK = re.compile(r"^BLOCK\s+\d+ WEIGHT=")
 _BLOCK_MULT = re.compile(r"^\s*Multiplicity\s+\.+\s+(\d+)\s*$")
 _BLOCK_IRREP = re.compile(r"^\s*Irrep\s+\.+\s+\d+ \((\S+)\)\s*$")
 _ROOT_WEIGHT = re.compile(r"^\s*ROOT=(\d+) WEIGHT=\s*(\d+\.\d+)\s*$")
@@ -75,12 +73,13 @@ def job_facts(log: bytes) -> JobFacts:
         for ln in log.decode("utf-8", errors="replace").splitlines()
         if not _INPUT_ECHO.match(ln)
     ]
+    weights = _root_weights(lines)
     return JobFacts(
         frame=_frame(lines),
         hf_energy=_hf_energy(lines),
-        casscf_ground=_casscf_ground(lines, log),
+        casscf_ground=_casscf_ground(lines, log, weights),
         active_irreps=_active_irreps(lines),
-        root_weights=_root_weights(lines),
+        root_weights=weights,
     )
 
 
@@ -118,13 +117,13 @@ def _hf_energy(lines: list[str]) -> str | None:
     return m.group(1) if m else None
 
 
-def _casscf_ground(lines: list[str], log: bytes) -> str | None:
+def _casscf_ground(lines: list[str], log: bytes, weights: tuple[RootWeight, ...]) -> str | None:
+    # The parser's convergence verdict, so a check never trusts a CASSCF the grader rejects.
     if parse_orca_output(log).casscf_converged is not True:
         return None
     if m := _first(_LOWEST, lines):
         return m.group(1)
     # A single-root CASSCF prints no transition listing; its final energy is that root's.
-    weights = _root_weights(lines)
     if len(weights) == 1 and (m := _first(_FINAL_CAS, lines)):
         return m.group(1)
     return None
