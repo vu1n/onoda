@@ -360,7 +360,7 @@ def test_replay_serves_recorded_outputs_and_never_executes(tmp_path):
     for got, want in zip(replies, recorded, strict=True):
         assert got.status == want.status and got.job_id == want.job_id
         assert got.output_b64 == want.output_b64 and got.files == want.files
-        assert not got.executed_here and got.cache_hit
+        assert not got.executed_here and got.cache_hit == want.cache_hit
     entries = [e for e in read_journal(b.journal_path) if e.event == "reply"]
     assert all(e.replay and not e.executed_here for e in entries)
     live_keys = [e.key for e in read_journal(live.journal_path) if e.event == "reply"]

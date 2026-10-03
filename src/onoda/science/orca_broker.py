@@ -22,6 +22,9 @@ reply is sent; that journal is the authoritative execution record ingest
 checks the spooled `task.execute` lines against. In replay mode
 (`BrokerReplay`) the broker has no scheduler and no cache: it serves only the
 outputs a journal recorded, in order per key, and refuses anything else.
+Each replayed reply repeats the recorded `cache_hit` and `reason`, so the
+agent is shown exactly what it was shown (a recorded execution replays with
+neither flag set); `executed_here` is always false.
 
 Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
 so a cached output is not a converged one; that is for the parser and grader.
@@ -175,6 +178,10 @@ class ReplayJob:
     output: bytes
     files: tuple[ProducedFile, ...] = ()
     stand_in: bool | None = None
+    # As recorded, so the agent is shown what it was shown: an executed job
+    # replays with neither flag set (replay never executes), a hit as a hit.
+    cache_hit: bool = True
+    reason: str | None = None
 
 
 @dataclass
@@ -204,7 +211,9 @@ class BrokerReplay:
                 raise OnodaError(f"replay: no bytes for output {e.output_sha256} of {e.job_id}")
             if e.binary_sha256 is not None:
                 binaries.add(e.binary_sha256)
-            jobs.setdefault(e.key, []).append(ReplayJob(e.status, data, e.files, e.stand_in))
+            jobs.setdefault(e.key, []).append(
+                ReplayJob(e.status, data, e.files, e.stand_in, e.cache_hit, e.reason)
+            )
         if len(binaries) > 1:
             raise OnodaError(f"replay: journal names {len(binaries)} ORCA binaries, need one")
         # A run that never got a job replays as one that serves nothing.
@@ -491,8 +500,9 @@ class OrcaBroker:
             log=rec.output,
             files={f.name: (f.sha256, None) for f in rec.files},
             executed_here=False,
-            cache_hit=True,
+            cache_hit=rec.cache_hit,
             stand_in=rec.stand_in,
+            reason=rec.reason,
         )
 
     def _serve_live(

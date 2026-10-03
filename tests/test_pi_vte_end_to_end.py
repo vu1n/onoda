@@ -209,20 +209,17 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert report["arms"]["S1"]["coverage"] == 1 and report["arms"]["S1"]["mae_ev"] == "0.002000"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ReplayMismatch,
-    reason=(
-        "escalated (VTE-009): a replay-mode broker reply is a cache hit, so orca_submit shows "
-        "'(cache hit ...)' where the recording showed '(executed)' and the next request's replay "
-        "key differs; needs BrokerReplay to replay the recorded cache_hit/reason"
-    ),
-)
 def test_replay_of_a_run_with_an_execution_matches_with_zero_executions(recorded):
     root, store, _, binary, _ = recorded
     out = pi_run.replay_run_pi(store, "vte", case(), work_dir=root / "replay")
     assert (out["status"], out["executions"], out["jobs"]) == ("match", 0, 2)
     assert runs(binary) == 1
+    replayed = [e for e in read_journal(root / "replay" / "broker" / "broker.jsonl") if e.job_id]
+    # The recorded execution replays with neither flag: shown as it was, never executed.
+    assert [(e.replay, e.executed_here, e.cache_hit) for e in replayed] == [
+        (True, False, False),
+        (True, False, True),
+    ]
 
 
 def test_replay_of_cache_hits_matches_and_executes_nothing(recorded):
