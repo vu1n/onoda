@@ -708,3 +708,33 @@ def test_a_cache_entry_naming_a_file_outside_its_entry_is_refused(tmp_path, name
     r = b.submit(submit(call="c2"))
     assert r.status == "refused" and r.reason == "cache_corrupt"
     assert runs(binary) == 1
+
+
+# --- output size cap -----------------------------------------------------------------
+
+LOUD = STAND_IN.replace(
+    'open("job.gbw", "w")', 'sys.stdout.write(("y" * 65535 + "\\\\n") * 48)\nopen("job.gbw", "w")'
+)
+
+
+def test_an_output_past_the_cap_is_a_failed_job_with_no_output(tmp_path):
+    binary = stand_in(tmp_path, LOUD)
+    cache = tmp_path / "cache"
+    limits = BrokerLimits(max_output_bytes=1 << 20)
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary), cache_dir=cache, limits=limits)
+    r = b.submit(submit())
+    assert (r.status, r.reason, r.job_id) == ("failed", "output_too_large", "j0001")
+    assert r.executed_here and not r.cache_hit
+    assert r.output_b64 == "" and r.output_sha256 == sha256_digest(b"") and r.files == ()
+    entry = read_journal(b.journal_path)[-1]
+    assert (entry.status, entry.reason, entry.output_sha256) == (
+        "failed",
+        "output_too_large",
+        r.output_sha256,
+    )
+    assert entry.files == () and entry.executed_here
+    r2 = b.submit(submit(call="c2"))  # never cached: runs (and fails) again
+    assert r2.executed_here and r2.reason == "output_too_large"
+    assert runs(binary) == 2
+    with pytest.raises(OnodaError, match="positive"):
+        BrokerLimits(max_output_bytes=0)

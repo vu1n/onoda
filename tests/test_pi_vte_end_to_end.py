@@ -371,7 +371,11 @@ def test_sandboxed_run_reaches_the_broker_and_bash_does_not(short):
     assert config["sandbox"] == "bwrap"
     # The stand-in's job ran in the ORCA job sandbox too (A65).
     assert config["orca"]["job_sandbox"] == "bwrap"
-    assert config["orca"]["limits"] == {"max_nprocs": 4, "max_maxcore_mb": 4000}
+    assert config["orca"]["limits"] == {
+        "max_nprocs": 4,
+        "max_maxcore_mb": 4000,
+        "max_output_bytes": 256 << 20,
+    }
     journal = read_journal(short / "sb" / "broker" / "broker.jsonl")
     assert [e.sandbox for e in journal if e.executed_here] == ["bwrap"]
     assert runs(binary) == 1  # Pi reached the broker from inside the outer layer

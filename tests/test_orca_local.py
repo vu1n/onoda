@@ -352,3 +352,43 @@ os.mkfifo("job_fifo.txt")
     for name in ("job_hard.txt", "job_sym.txt", "job_fifo.txt", "missing"):
         with pytest.raises(OnodaError):
             read_produced(job_dir / name)
+
+
+# --- output size cap -----------------------------------------------------------------
+
+MIB = 1 << 20
+
+
+def _writer(tmp_path: Path, target: str, mib: int) -> Path:
+    """A stand-in that writes `mib` MiB to `target` ("stdout" or a file name)."""
+    body = f"""#!/usr/bin/env {sys.executable}
+import sys
+out = sys.stdout if {target!r} == "stdout" else open({target!r}, "w")
+print("{STAND_IN_MARKER}", file=out)
+for _ in range({mib} * 16):
+    out.write("x" * 65535 + "\\n")
+out.flush()
+"""
+    return make_stand_in(tmp_path, name=f"orca_write_{target}.py", body=body)
+
+
+@pytest.mark.parametrize("target", ["stdout", "job.gbw"])
+def test_output_past_the_cap_fails_as_output_too_large(tmp_path, target):
+    sched = _enabled_scheduler(tmp_path, _writer(tmp_path, target, 3))
+    job = sched.submit("k", "orca", base_inputs(), {}, max_file_bytes=MIB)
+    assert sched.status(job) == "failed"
+    assert sched.job_metadata(job)["reason"] == "output_too_large"
+    for f in (sched.root / job).iterdir():
+        assert f.stat().st_size <= MIB, f.name
+    # Under the cap the same job completes.
+    ok = sched.submit("k2", "orca", base_inputs(), {}, max_file_bytes=8 * MIB)
+    assert sched.status(ok) == "completed"
+
+
+def test_a_job_killed_by_sigxfsz_fails_as_output_too_large(tmp_path):
+    body = "#!/bin/sh\nhead -c 3000000 /dev/zero > job.gbw\necho after\n"
+    sched = _enabled_scheduler(tmp_path, _write_executable(tmp_path / "orca_dd.sh", body))
+    job = sched.submit("k", "orca", base_inputs(), {}, max_file_bytes=MIB)
+    meta = sched.job_metadata(job)
+    assert (sched.status(job), meta["reason"]) == ("failed", "output_too_large")
+    assert (sched.root / job / "job.gbw").stat().st_size == MIB

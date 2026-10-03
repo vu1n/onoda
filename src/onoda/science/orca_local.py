@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import signal
 import stat
 import subprocess
@@ -130,6 +131,31 @@ def _plain_file(st: os.stat_result) -> bool:
     return stat.S_ISREG(st.st_mode) and st.st_nlink == 1
 
 
+def _file_size_limit(max_bytes: int | None):
+    """A preexec_fn setting `RLIMIT_FSIZE` in the child, or None for no cap."""
+    if max_bytes is None:
+        return None
+
+    def limit() -> None:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (max_bytes, max_bytes))
+
+    return limit
+
+
+def _hit_file_limit(returncode: int, job_dir: Path, max_bytes: int | None) -> bool:
+    """Whether the job ran into `RLIMIT_FSIZE`.
+
+    Killed by SIGXFSZ (directly, or as bwrap reports a signalled child), or,
+    since a program that ignores the signal (Python does) only sees a failed
+    write, a file in the job dir that reached the cap.
+    """
+    if max_bytes is None:
+        return False
+    if returncode in (-signal.SIGXFSZ, 128 + signal.SIGXFSZ):
+        return True
+    return any(p.lstat().st_size >= max_bytes for p in job_dir.iterdir())
+
+
 def _kill_group(pgid: int) -> None:
     try:
         os.killpg(pgid, signal.SIGKILL)
@@ -189,6 +215,7 @@ class OrcaLocalScheduler:
         config: dict[str, Any],
         *,
         wrapper: JobWrapper | None = None,
+        max_file_bytes: int | None = None,
     ) -> str:
         """Accept a job once per idempotency key; a repeated key never re-runs.
 
@@ -197,6 +224,8 @@ class OrcaLocalScheduler:
         driver files), so the input can read it, e.g. `%moinp "j0001.gbw"`.
         `wrapper` confines the job (the broker always passes its job sandbox,
         A65); without one the job runs as this user, for trusted input only.
+        `max_file_bytes` caps every file the job writes (`RLIMIT_FSIZE`); a job
+        that reaches it fails with reason `output_too_large`.
         """
         if program != "orca":
             raise OnodaError(f"unknown program {program!r}")
@@ -245,6 +274,7 @@ class OrcaLocalScheduler:
             "duration_ms": None,
             "extra_inputs": sorted(extra),
             "sandbox": wrapper.kind if wrapper is not None else None,
+            "max_file_bytes": max_file_bytes,
         }
         state["by_key"][key] = job_id
         self._save(state)
@@ -271,6 +301,7 @@ class OrcaLocalScheduler:
                     env=env,
                     shell=False,
                     start_new_session=True,
+                    preexec_fn=_file_size_limit(max_file_bytes),
                 )
                 try:
                     returncode = proc.wait(timeout=self._settings.max_wall_seconds)
@@ -283,9 +314,12 @@ class OrcaLocalScheduler:
                     # helper, a stray MPI rank) must not outlive it, nor touch
                     # the job directory while its products are read.
                     _kill_group(proc.pid)
+                    reason = None if returncode == 0 else "nonzero_exit"
+                    if _hit_file_limit(returncode, job_dir, max_file_bytes):
+                        reason = "output_too_large"
                     outcome = {
-                        "status": "completed" if returncode == 0 else "failed",
-                        "reason": None if returncode == 0 else "nonzero_exit",
+                        "status": "completed" if reason is None else "failed",
+                        "reason": reason,
                         "returncode": returncode,
                         "executed": True,
                     }

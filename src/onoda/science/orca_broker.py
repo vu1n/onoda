@@ -130,9 +130,12 @@ class BrokerLimits:
 
     max_nprocs: int = 4  # `%pal nprocs` / `! PALn`
     max_maxcore_mb: int = 4000  # `%maxcore`, MB per process
+    # Every file a job writes (RLIMIT_FSIZE), its log included; past it the job
+    # fails as `output_too_large` and its output is not returned or cached.
+    max_output_bytes: int = 256 << 20
 
     def __post_init__(self) -> None:
-        if self.max_nprocs < 1 or self.max_maxcore_mb < 1:
+        if min(self.max_nprocs, self.max_maxcore_mb, self.max_output_bytes) < 1:
             raise OnodaError("broker limits must be positive")
 
 
@@ -813,20 +816,30 @@ class OrcaBroker:
         sched = self._scheduler
         before = sched.executions
         # An exception up to here escapes and closes the broker: whether ORCA ran is unknown.
+        assert self.limits is not None  # a live broker always has them
         sid = sched.submit(
-            f"orca-broker:{self._run}:{job_id}", "orca", inputs, {}, wrapper=self.job_sandbox
+            f"orca-broker:{self._run}:{job_id}",
+            "orca",
+            inputs,
+            {},
+            wrapper=self.job_sandbox,
+            max_file_bytes=self.limits.max_output_bytes,
         )
         executed = sched.executions > before
         try:
             status = sched.status(sid)
             if status not in ("completed", "failed"):
                 raise OnodaError(f"scheduler job {sid} ended {status!r}")
-            log = sched.collect(sid)["log"]
             meta = sched.job_metadata(sid)
-            produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
-            files: dict[str, tuple[str, Path | None]] = {
-                n: (sha256_digest(read_produced(p)), p) for n, p in produced.items()
-            }
+            files: dict[str, tuple[str, Path | None]] = {}
+            if meta["reason"] == "output_too_large":
+                # Failed at the size cap: no output is shown and no file is
+                # attachable; the reply still pins the (empty) output it sent.
+                log, produced = b"", {}
+            else:
+                log = sched.collect(sid)["log"]
+                produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
+                files = {n: (sha256_digest(read_produced(p)), p) for n, p in produced.items()}
             if status == "completed" and self._cache is not None:
                 self._cache.put(
                     key, log, produced, binary=self.binary_sha256, stand_in=bool(meta["stand_in"])
