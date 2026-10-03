@@ -28,12 +28,17 @@ neither flag set); `executed_here` is always false.
 
 Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
 so a cached output is not a converged one; that is for the parser and grader.
+
+The wire protocol (`BrokerSubmit` -> `BrokerReply`, JSON Lines, one request
+per connection) is defined here and mirrored by `pi/extensions/lib/spool.ts`;
+`adapters.pi.vte_contract` re-exports it for the Pi side.
 """
 
 from __future__ import annotations
 
 import base64
 import os
+import re
 import socketserver
 import threading
 import uuid
@@ -42,26 +47,30 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Literal
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 
-from onoda.adapters.pi.vte_contract import (
-    DEFAULT_MAX_EXECUTIONS,
-    FILE_NAME_RE,
-    BrokerAttach,
-    BrokerReply,
-    BrokerSubmit,
-)
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import OnodaError
 from onoda.records import Frozen as _Frozen
-from onoda.science.orca_local import OrcaLocalScheduler, _sha256_file
+from onoda.science.orca_local import FILE_NAME_RE, OrcaLocalScheduler, _sha256_file
 
+BROKER_PROTOCOL = "onoda.orca-broker/1"
 JOURNAL_NAME = "broker.jsonl"
 JOURNAL_SCHEMA = "onoda.orca-broker-journal/1"
 CACHE_KEY_SCHEMA = "onoda.orca-broker-key/1"
 CACHE_ENTRY_SCHEMA = "onoda.orca-broker-cache/1"
 MAX_REQUEST_BYTES = 1 << 20  # one JSON line; a 64 KiB input escapes to well under this
 MAX_JOBS = 9999  # job ids are j0001..j9999
+
+# Submissions per run, cache hits included (A59). The paper caps attempts at 8
+# per target specification; a small molecule here has about three.
+DEFAULT_MAX_EXECUTIONS = 24
+
+# Broker job ids are per run (`j0001`, ...), never the scheduler's own ids.
+JOB_ID_RE = re.compile(r"^j\d{4}$")
+# `FILE_NAME_RE` (the scheduler's rule): a file an earlier job produced, named as
+# the job directory holds it (e.g. `job.gbw`).
+MAX_INPUT_CHARS = 65536
 
 RefusalReason = Literal[
     "max_executions",
@@ -72,6 +81,79 @@ RefusalReason = Literal[
     "cache_corrupt",
     "replay_miss",
 ]
+
+
+def _check_outcome(
+    status: str | None, job_id: str | None, executed_here: bool, cache_hit: bool
+) -> None:
+    """Shared by `BrokerReply` and `BrokerJournalEntry`: what a submission's outcome allows."""
+    if status == "refused" and (job_id is not None or executed_here or cache_hit):
+        raise ValueError("a refused submission has no job and ran nothing")
+    if cache_hit and executed_here:
+        raise ValueError("a cache hit is never an execution")
+
+
+class BrokerAttach(_Frozen):
+    """A file an earlier job of this run produced, copied next to the new input."""
+
+    job_id: str
+    name: str
+
+    @field_validator("job_id")
+    @classmethod
+    def _job(cls, v: str) -> str:
+        if not JOB_ID_RE.match(v):
+            raise ValueError(f"job id {v!r} is not a broker job id")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not FILE_NAME_RE.match(v):
+            raise ValueError(f"file name {v!r} is not a plain file name")
+        return v
+
+
+class BrokerSubmit(_Frozen):
+    """Extension -> broker. The input is the `.inp` text the agent wrote, unchanged."""
+
+    protocol: Literal["onoda.orca-broker/1"] = BROKER_PROTOCOL
+    op: Literal["submit"] = "submit"
+    tool_call_id: str
+    input: str = Field(min_length=1, max_length=MAX_INPUT_CHARS)
+    attach: tuple[BrokerAttach, ...] = ()
+
+
+class BrokerReply(_Frozen):
+    """Broker -> extension, written to the broker journal before it is sent.
+
+    `refused` (cap reached, unknown attachment, replay miss) runs nothing and
+    carries no job. A cache hit returns an earlier job's output under a new
+    job id with `cache_hit` true and `executed_here` false (A59).
+    `output_b64` carries the exact log bytes; the extension spools those
+    bytes and shows the agent their UTF-8 text.
+    """
+
+    protocol: Literal["onoda.orca-broker/1"] = BROKER_PROTOCOL
+    status: Literal["completed", "failed", "refused"]
+    job_id: str | None = None
+    cache_hit: bool = False
+    executed_here: bool = False
+    input_sha256: str | None = None
+    output_sha256: str | None = None
+    output_b64: str = ""
+    files: tuple[str, ...] = ()  # names this job produced that a later submit may attach
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> BrokerReply:
+        if self.status != "refused":
+            if self.job_id is None or not JOB_ID_RE.match(self.job_id):
+                raise ValueError("a completed or failed submission names its job id")
+            if self.output_sha256 is None or self.input_sha256 is None:
+                raise ValueError("a completed or failed submission pins input and output")
+        _check_outcome(self.status, self.job_id, self.executed_here, self.cache_hit)
+        return self
 
 
 class ProducedFile(_Frozen):
@@ -118,16 +200,13 @@ class BrokerJournalEntry(_Frozen):
         if self.event == "request":
             if self.request_sha256 is None or self.status is not None:
                 raise ValueError("a request entry pins its raw line and has no status")
-        else:
-            if self.status is None:
-                raise ValueError("a reply entry has a status")
-            if self.status == "refused":
-                if self.job_id is not None or self.executed_here or self.cache_hit:
-                    raise ValueError("a refused submission has no job and ran nothing")
-            elif self.job_id is None or self.key is None or self.output_sha256 is None:
-                raise ValueError("a completed or failed reply names its job, key and output")
-        if self.cache_hit and self.executed_here:
-            raise ValueError("a cache hit is never an execution")
+        elif self.status is None:
+            raise ValueError("a reply entry has a status")
+        elif self.status != "refused" and (
+            self.job_id is None or self.key is None or self.output_sha256 is None
+        ):
+            raise ValueError("a completed or failed reply names its job, key and output")
+        _check_outcome(self.status, self.job_id, self.executed_here, self.cache_hit)
         if self.replay and self.executed_here:
             raise ValueError("replay never executes")
         return self

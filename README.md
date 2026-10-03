@@ -257,9 +257,9 @@ credential, caps and ORCA execution are each set explicitly.
 | `adapters.pi.ingest` | Spool → run record: decision/tool/acquisition receipts, fused-call decomposition, ObservationPack handles as store digests, compactions, checkpoints |
 | `adapters.pi.task` | Task bundle staging and claim grading against the deterministic parser, in the evaluator store |
 | `adapters.pi.run` | One run end to end (case or VTE task), replay under recorded responses, VTE grading and the per-arm report |
-| `adapters.pi.vte_contract` | VTE task bundle, claim and the ORCA broker's wire protocol |
+| `adapters.pi.vte_contract` | VTE task bundle and claim; re-exports the broker wire protocol |
 | `adapters.pi.vte` | VTE bundle staging and identity grading against the deterministic parser, in the evaluator store |
-| `science.orca_broker` | Host-side ORCA broker for `orca_submit`: cache, attempt cap, journal, replay mode |
+| `science.orca_broker` | Host-side ORCA broker for `orca_submit`: wire protocol, cache, attempt cap, journal, replay mode |
 | `science.vte` | VTE case manifests and evaluator-only reference rows |
 | `pi/extensions/` | onoda's Pi extensions (TypeScript): task tools, scripted provider, recorder writing the fsynced spool |
 | `ablation.contract` | M3b contract: arms, spec, outcome vector, metric names and directions, tolerances, gate result |

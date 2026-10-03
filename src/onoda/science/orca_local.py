@@ -44,7 +44,7 @@ _ORCA_LABELS = ["orca-local"]
 
 # Extra input files (e.g. an earlier job's `.gbw`) are written next to `job.inp`
 # under plain names; the job's own driver files can never be supplied. The broker
-# protocol (`vte_contract`) uses the same rule for the file names it passes on.
+# protocol (`orca_broker`) uses the same rule for the file names it passes on.
 FILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _JOB_FILES = frozenset({"job.inp", "job.out", "job.err"})
 

@@ -53,8 +53,8 @@ export const TOOL_ORCA_SUBMIT = "orca_submit";
 export const TOOL_REPORT_VTE = "report_vtes";
 export const VTE_TASK_SCHEMA = "onoda.pi-vte-task/1";
 export const VTE_CLAIM_SCHEMA = "onoda.pi-vte-claim/1";
-export const BROKER_PROTOCOL = "onoda.orca-broker/1";
-/** Broker job ids are per run (`j0001`, ...). */
+export const BROKER_PROTOCOL = "onoda.orca-broker/1"; // orca_broker.py BROKER_PROTOCOL
+/** Broker job ids are per run (`j0001`, ...) (orca_broker.py JOB_ID_RE). */
 export const JOB_ID_RE = /^j\d{4}$/;
 /** A file an earlier job produced, named as the job directory holds it (orca_local.py FILE_NAME_RE). */
 export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

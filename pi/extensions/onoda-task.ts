@@ -77,7 +77,7 @@ interface VteTaskBundle {
 	max_executions: number;
 }
 
-/** vte_contract.py `BrokerReply`. */
+/** orca_broker.py `BrokerReply` (re-exported by vte_contract.py). */
 interface BrokerReply {
 	protocol: "onoda.orca-broker/1";
 	status: "completed" | "failed" | "refused";
@@ -304,7 +304,7 @@ const VteParams = Type.Object(
 	{ additionalProperties: false },
 );
 
-/** One request, one reply line, one connection (vte_contract.py broker protocol). */
+/** One request, one reply line, one connection (orca_broker.py broker protocol). */
 function brokerRequest(socketPath: string, request: Record<string, unknown>): Promise<unknown> {
 	return new Promise((resolve, reject) => {
 		const sock = createConnection(socketPath);
