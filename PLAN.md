@@ -403,3 +403,11 @@ flowchart TD
   consistent and the job's existence is kept on record. Ingest refuses a
   spool with `task.execute` lines when no journal is passed, so VTE-009 must
   pass `read_journal(...)` to `ingest_spool(broker_journal=...)`.
+- VTE-006: any `mr_states`/`casscf_converged` problem on the cited job makes
+  a claim `unsupported` (fail closed, whole job); the `scf missing` problem
+  every CASSCF job carries is ignored. A job neither executed nor a cache hit
+  is `unsupported`, so replay-mode broker replies must keep `cache_hit: true`
+  (they do, per VTE-002) and scripted runs pass `synthetic=True`. Four QUESTDB
+  labels carry a bare `p` (ketene 1A2(p,3p), 3A1(p,π*); diazomethane
+  1A1/3A1(p,π*)); left as printed, so they only matter where (spin, irrep)
+  is ambiguous. Question for the authors' feedback.
