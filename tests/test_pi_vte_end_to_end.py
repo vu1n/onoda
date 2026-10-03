@@ -426,3 +426,42 @@ def test_evaluate_refuses_a_run_that_is_not_vte(recorded):
     with pytest.raises(OnodaError, match="recorded from case"):
         other = load_vte_case(vte_case_manifests(pi_run.VTE_CASES_ROOT)["questdb-acetone"])
         pi_vte.evaluate_vte_run(store, evaluator, "vte", other)
+
+
+def test_shadow_decisions_are_recorded_beside_the_grade_and_shown_in_the_report(recorded):
+    from onoda.adapters.pi.vte_shadow import shadow_report, shadow_run
+    from onoda.systemone import ScriptedSystemOne
+
+    root, store, evaluator, binary, pi = recorded
+    pi_vte.evaluate_vte_run(store, evaluator, "vte", case())
+    states = []
+
+    def answer(state, questions):
+        states.append(state)
+        assert set(questions["rule"]["criteria"]) == set("ABCDEFGH")
+        return {
+            "rule": {"type": "choice", "choice": "H", "probabilities": {"H": 0.9, "D": 0.1}},
+            "ready": {"type": "noul", "noul": 0.8 if state["job_id"] == "j0001" else 0.3},
+        }
+
+    ladder = (Path(__file__).parents[1] / "experiments/questdb/ladder-from-paper.md").read_bytes()
+    ev = shadow_run(store, evaluator, "vte", case(), ScriptedSystemOne(answer), ladder=ladder)
+    assert ev.evaluator == "vte-shadow-scripted" and ev.metrics["synthetic"] == "true"
+    assert ev.assignments["job.j0001.rule"] == "H"
+    assert ev.assignments["job.j0001.rule.p"] == {"D": "0.100000", "H": "0.900000"}
+    assert not store.list_record_ids("evaluation")  # shadow answers stay in the evaluator store
+
+    # The model sees the targets, the job's own output and the host checks; no reference value.
+    first = states[0]
+    assert first["target_states"] and "SA-CASSCF TRANSITION ENERGIES" in first["output_excerpt"]
+    refs = (case().root / case().manifest.references.path).read_bytes()
+    for digest in (ev.output_refs["job.j0001.request"], ev.output_refs["job.j0002.request"]):
+        sent = evaluator.get_bytes(digest)
+        assert refs not in sent and REFERENCES_SCHEMA.encode() not in sent
+
+    report = shadow_report(store, evaluator, ["vte"])
+    s1 = report["arms"]["S1"]["scripted"]
+    assert s1["jobs"] == 2 and s1["rules"] == {"H": 2}
+    assert s1["ready_p"]["identified"] == "0.800000"  # j0001: the claim cites it, identified
+    assert s1["ready_p"]["uncited"] == "0.300000"  # j0002: the cache hit nothing cites
+    assert report["synthetic"] is True and "not a model" in report["note"]

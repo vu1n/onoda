@@ -494,12 +494,35 @@ def cmd_vte_report(a) -> Any:
 
     if a.arm and len(a.arm) != 2:
         raise OnodaError("--arm names exactly two arms, or none")
-    return vte_report(
-        _store(a.store),
+    from onoda.adapters.pi.vte_shadow import shadow_report
+
+    store, evaluator_store = _store(a.store), _store(a.evaluator_store, evaluator=True)
+    report = vte_report(store, evaluator_store, a.run_ids, arms=tuple(a.arm or ()))
+    shadow = shadow_report(store, evaluator_store, a.run_ids)
+    if shadow["runs"]:
+        report["shadow"] = shadow
+    return report
+
+
+def cmd_vte_shadow(a) -> Any:
+    from onoda.adapters.pi.contract import REPO_ROOT
+    from onoda.adapters.pi.vte_shadow import shadow_run
+    from onoda.systemone import LiveSystemOne
+
+    model = LiveSystemOne(a.provider, model=a.model, enabled=a.enable_live_decisions)
+    store = _store(a.store)
+    case_id = store.run_record(a.run_id).config.get("case_id")
+    ev = shadow_run(
+        store,
         _store(a.evaluator_store, evaluator=True),
-        a.run_ids,
-        arms=tuple(a.arm or ()),
+        a.run_id,
+        _vte_case(case_id, a.cases_root),
+        model,
+        ladder=Path(
+            a.ladder or REPO_ROOT / "experiments/questdb/ladder-from-paper.md"
+        ).read_bytes(),
     )
+    return {"evaluation": ev.evaluation_id, **ev.metrics, "cost_usd": ev.usage.cost_usd}
 
 
 def cmd_pi_replay(a) -> Any:
@@ -1105,6 +1128,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--arm", action="append", help="compare these two arms (repeat once); default: all"
     )
     vr.set_defaults(func=cmd_vte_report)
+    vs = vt.add_parser(
+        "shadow",
+        help="ask a System One model (Jev, Clef) which ladder rule each job of a run calls for; "
+        "recorded beside the grade, never shown to the agent (A67)",
+    )
+    vs.add_argument("run_id")
+    vs.add_argument("--store", required=True)
+    vs.add_argument("--evaluator-store", required=True)
+    vs.add_argument("--provider", required=True, choices=["jev", "clef"])
+    vs.add_argument("--model", help="default: typesafe/jev-1.13 (jev), clef-flash (clef)")
+    vs.add_argument(
+        "--ladder",
+        help="the ladder whose rules A-H are the choices (default: the reconstruction, A61)",
+    )
+    vs.add_argument("--cases-root")
+    vs.add_argument("--enable-live-decisions", action="store_true")
+    vs.set_defaults(func=cmd_vte_shadow)
 
     ab = sub.add_parser("ablation", help="SoL-Pi add-one ablation over Pi arms (M3b)")
     ab = ab.add_subparsers(dest="ablation_command", required=True)
