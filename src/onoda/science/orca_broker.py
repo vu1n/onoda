@@ -1,0 +1,624 @@
+"""Host-side ORCA broker for VTE tasks (A59).
+
+The Pi sandbox cannot run ORCA, so `orca_submit` sends a `BrokerSubmit` over
+a Unix socket in the Pi work directory to this broker, which owns the
+`OrcaLocalScheduler`. One server thread answers one JSON line per connection
+with one `BrokerReply` line. Per submission the broker:
+
+1. refuses once `max_executions` submissions got a job (cache hits count);
+2. resolves `attach` entries to files that earlier jobs *of this broker*
+   produced, and places each next to the new input as `<job_id><rest>`
+   (`j0001` + `job.gbw` -> `j0001.gbw`), so it never collides with the files
+   ORCA writes for `job.inp` and the input names it unambiguously;
+3. computes the cache key, sha256 of (input bytes, placed attachments by
+   name and sha256, ORCA binary sha256);
+4. serves a hit from the shared cache directory as acquired (`cache_hit`,
+   `executed_here: false`), or runs a new scheduler job under a fresh
+   scheduler key (a specification digest is never an execution id), and
+   caches it if it completed.
+
+Every request and reply is appended (fsynced) to `broker.jsonl` before the
+reply is sent; that journal is the authoritative execution record ingest
+checks the spooled `task.execute` lines against. In replay mode
+(`BrokerReplay`) the broker has no scheduler and no cache: it serves only the
+outputs a journal recorded, in order per key, and refuses anything else.
+
+Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
+so a cached output is not a converged one; that is for the parser and grader.
+"""
+
+from __future__ import annotations
+
+import base64
+import os
+import socketserver
+import threading
+import uuid
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import BinaryIO, Literal
+
+from pydantic import Field, ValidationError, model_validator
+
+from onoda.adapters.pi.vte_contract import (
+    DEFAULT_MAX_EXECUTIONS,
+    FILE_NAME_RE,
+    BrokerAttach,
+    BrokerReply,
+    BrokerSubmit,
+)
+from onoda.canonical import digest_of, sha256_digest
+from onoda.errors import OnodaError
+from onoda.records import Frozen as _Frozen
+from onoda.science.orca_local import OrcaLocalScheduler, _sha256_file
+
+JOURNAL_NAME = "broker.jsonl"
+JOURNAL_SCHEMA = "onoda.orca-broker-journal/1"
+CACHE_KEY_SCHEMA = "onoda.orca-broker-key/1"
+CACHE_ENTRY_SCHEMA = "onoda.orca-broker-cache/1"
+MAX_REQUEST_BYTES = 1 << 20  # one JSON line; a 64 KiB input escapes to well under this
+MAX_JOBS = 9999  # job ids are j0001..j9999
+
+RefusalReason = Literal[
+    "max_executions",
+    "invalid_request",
+    "unknown_attachment",
+    "duplicate_attachment",
+    "attachment_changed",
+    "cache_corrupt",
+    "replay_miss",
+]
+
+
+class ProducedFile(_Frozen):
+    """A file a job produced that a later submission may attach."""
+
+    name: str
+    sha256: str
+
+
+class BrokerJournalEntry(_Frozen):
+    """One line of `broker.jsonl`: a request as received or the reply sent for it.
+
+    A request entry pins the raw line (`request_sha256`) and, when it parsed,
+    the input and attachments. A reply entry carries what the agent was told
+    plus the host-side facts: cache key, scheduler job, ORCA binary, duration,
+    whether the binary is a labelled stand-in, and the files the job produced.
+    """
+
+    schema_: Literal["onoda.orca-broker-journal/1"] = Field(JOURNAL_SCHEMA, alias="schema")
+    seq: int = Field(ge=1)
+    event: Literal["request", "reply"]
+    tool_call_id: str | None = None
+    # request
+    request_sha256: str | None = None
+    input_sha256: str | None = None
+    attach: tuple[BrokerAttach, ...] = ()
+    # reply
+    status: Literal["completed", "failed", "refused"] | None = None
+    reason: str | None = None
+    key: str | None = None
+    job_id: str | None = None
+    executed_here: bool = False
+    cache_hit: bool = False
+    replay: bool = False
+    output_sha256: str | None = None
+    files: tuple[ProducedFile, ...] = ()
+    binary_sha256: str | None = None
+    stand_in: bool | None = None
+    scheduler_job_id: str | None = None
+    duration_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> BrokerJournalEntry:
+        if self.event == "request":
+            if self.request_sha256 is None or self.status is not None:
+                raise ValueError("a request entry pins its raw line and has no status")
+        else:
+            if self.status is None:
+                raise ValueError("a reply entry has a status")
+            if self.status == "refused":
+                if self.job_id is not None or self.executed_here or self.cache_hit:
+                    raise ValueError("a refused submission has no job and ran nothing")
+            elif self.job_id is None or self.key is None or self.output_sha256 is None:
+                raise ValueError("a completed or failed reply names its job, key and output")
+        if self.cache_hit and self.executed_here:
+            raise ValueError("a cache hit is never an execution")
+        if self.replay and self.executed_here:
+            raise ValueError("replay never executes")
+        return self
+
+
+def read_journal(path: str | os.PathLike[str]) -> tuple[BrokerJournalEntry, ...]:
+    """Parse a broker journal; refuses a malformed line or a gap in `seq`."""
+    entries = []
+    with open(path, "rb") as fh:
+        for n, line in enumerate(fh, start=1):
+            try:
+                entry = BrokerJournalEntry.model_validate_json(line)
+            except ValidationError as exc:
+                raise OnodaError(f"{path}: line {n} is not a broker journal entry: {exc}") from exc
+            if entry.seq != n:
+                raise OnodaError(f"{path}: line {n} has seq {entry.seq}")
+            entries.append(entry)
+    return tuple(entries)
+
+
+def attachable(name: str) -> bool:
+    """ORCA names its products after the input's basename (`job.gbw`, `job_property.txt`)."""
+    return bool(FILE_NAME_RE.match(name)) and name.startswith(("job.", "job_"))
+
+
+def placed_name(job_id: str, name: str) -> str:
+    """The name an attached file gets next to the new input: `j0001` + `.gbw`."""
+    return job_id + name[len("job") :]
+
+
+def cache_key(input_sha256: str, attached: Iterable[tuple[str, str]], binary_sha256: str) -> str:
+    """sha256 of (input bytes, attached files by placed name and sha256, ORCA binary)."""
+    return digest_of(
+        {
+            "schema": CACHE_KEY_SCHEMA,
+            "input": input_sha256,
+            "attach": [[name, sha] for name, sha in sorted(attached)],
+            "binary": binary_sha256,
+        }
+    )
+
+
+@dataclass(frozen=True)
+class ReplayJob:
+    """A recorded job outcome: its status, exact log bytes and produced files."""
+
+    status: Literal["completed", "failed"]
+    output: bytes
+    files: tuple[ProducedFile, ...] = ()
+    stand_in: bool | None = None
+
+
+@dataclass
+class BrokerReplay:
+    """What a replaying broker may serve: cache key -> recorded jobs, in order.
+
+    Each submission consumes the next recorded job for its key; a key with
+    none left is a `replay_miss` and nothing is served (fail closed, A59).
+    """
+
+    binary_sha256: str
+    jobs: dict[str, list[ReplayJob]] = field(default_factory=dict)
+
+    @classmethod
+    def from_journal(
+        cls, entries: Iterable[BrokerJournalEntry], outputs: Mapping[str, bytes]
+    ) -> BrokerReplay:
+        """Build from a recorded journal plus its output bytes by `sha256:` digest."""
+        binaries: set[str] = set()
+        jobs: dict[str, list[ReplayJob]] = {}
+        for e in entries:
+            if e.event != "reply" or e.status == "refused":
+                continue
+            assert e.key is not None and e.output_sha256 is not None
+            data = outputs.get(e.output_sha256)
+            if data is None or sha256_digest(data) != e.output_sha256:
+                raise OnodaError(f"replay: no bytes for output {e.output_sha256} of {e.job_id}")
+            if e.binary_sha256 is not None:
+                binaries.add(e.binary_sha256)
+            jobs.setdefault(e.key, []).append(ReplayJob(e.status, data, e.files, e.stand_in))
+        if len(binaries) > 1:
+            raise OnodaError(f"replay: journal names {len(binaries)} ORCA binaries, need one")
+        # A run that never got a job replays as one that serves nothing.
+        return cls(binary_sha256=binaries.pop() if binaries else "none", jobs=jobs)
+
+
+@dataclass(frozen=True)
+class _Job:
+    """A job of this broker: its produced files, with a host path unless replayed."""
+
+    files: dict[str, tuple[str, Path | None]]  # name -> (sha256, path)
+
+
+def _write_synced(path: Path, data: bytes) -> None:
+    with open(path, "xb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+class _Cache:
+    """Shared, append-only cache: `<root>/<key hex>/{entry.json,log,files/<name>}`.
+
+    An entry is staged in a temporary directory and renamed into place whole,
+    so a reader sees all of it or none; an existing entry is never replaced.
+    Every byte is checked against `entry.json` when served.
+    """
+
+    def __init__(self, root: Path):
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True)
+
+    def _dir(self, key: str) -> Path:
+        return self.root / key.removeprefix("sha256:")
+
+    def get(self, key: str) -> tuple[bytes, dict[str, tuple[str, Path]], bool] | None:
+        d = self._dir(key)
+        if not d.is_dir():
+            return None
+        try:
+            entry = _CacheEntry.model_validate_json((d / "entry.json").read_bytes())
+            log = (d / "log").read_bytes()
+        except (OSError, ValidationError) as exc:
+            raise _CacheCorrupt(f"cache entry {key}: {exc}") from exc
+        if entry.key != key or sha256_digest(log) != entry.output_sha256:
+            raise _CacheCorrupt(f"cache entry {key} does not match its log")
+        files: dict[str, tuple[str, Path]] = {}
+        for f in entry.files:
+            p = d / "files" / f.name
+            if not p.is_file() or _sha256_file(p) != f.sha256:
+                raise _CacheCorrupt(f"cache entry {key}: file {f.name} does not match")
+            files[f.name] = (f.sha256, p)
+        return log, files, entry.stand_in
+
+    def put(
+        self, key: str, log: bytes, files: Mapping[str, Path], *, binary: str, stand_in: bool
+    ) -> None:
+        final = self._dir(key)
+        if final.exists():
+            return
+        tmp = self.root / f".tmp-{uuid.uuid4().hex}"
+        (tmp / "files").mkdir(parents=True)
+        _write_synced(tmp / "log", log)
+        produced = []
+        for name, src in sorted(files.items()):
+            data = src.read_bytes()
+            _write_synced(tmp / "files" / name, data)
+            produced.append(ProducedFile(name=name, sha256=sha256_digest(data)))
+        entry = _CacheEntry(
+            key=key,
+            output_sha256=sha256_digest(log),
+            files=tuple(produced),
+            binary_sha256=binary,
+            stand_in=stand_in,
+        )
+        _write_synced(tmp / "entry.json", entry.model_dump_json(by_alias=True).encode())
+        try:
+            os.rename(tmp, final)
+        except OSError:
+            if not final.exists():
+                raise
+            # Another broker cached the same key first; keep its entry.
+
+
+class _CacheEntry(_Frozen):
+    schema_: Literal["onoda.orca-broker-cache/1"] = Field(CACHE_ENTRY_SCHEMA, alias="schema")
+    key: str
+    output_sha256: str
+    files: tuple[ProducedFile, ...]
+    binary_sha256: str
+    stand_in: bool
+
+
+class _CacheCorrupt(OnodaError):
+    pass
+
+
+class _Refused(Exception):
+    def __init__(self, reason: RefusalReason):
+        self.reason = reason
+
+
+class OrcaBroker:
+    """Answers `BrokerSubmit`s for one run; see the module docstring.
+
+    Live mode takes a `scheduler` (and optionally a shared `cache_dir`);
+    replay mode takes a `replay` and never executes. The journal is created
+    fresh at `journal_path` and refused if it already exists, so one broker
+    journal is exactly one run's submissions.
+    """
+
+    def __init__(
+        self,
+        journal_path: str | os.PathLike[str],
+        *,
+        scheduler: OrcaLocalScheduler | None = None,
+        cache_dir: str | os.PathLike[str] | None = None,
+        replay: BrokerReplay | None = None,
+        max_executions: int = DEFAULT_MAX_EXECUTIONS,
+    ):
+        if (scheduler is None) == (replay is None):
+            raise OnodaError("a broker runs either a scheduler or a replay, exactly one")
+        if replay is not None and cache_dir is not None:
+            raise OnodaError("a replaying broker serves recorded outputs only, no cache")
+        if not 0 < max_executions <= MAX_JOBS:
+            raise OnodaError(f"max_executions must be in 1..{MAX_JOBS}")
+        self.journal_path = Path(journal_path)
+        self._scheduler = scheduler
+        self._replay = replay
+        self._cache = _Cache(Path(cache_dir)) if cache_dir is not None else None
+        self.max_executions = max_executions
+        if scheduler is not None:
+            self.binary_sha256 = _sha256_file(scheduler.settings.binary)
+        else:
+            assert replay is not None
+            self.binary_sha256 = replay.binary_sha256
+            # Consumed as served; the caller's replay stays as given.
+            self._replay = BrokerReplay(
+                replay.binary_sha256, {k: list(v) for k, v in replay.jobs.items()}
+            )
+        self._run = uuid.uuid4().hex  # scheduler keys are per execution, never the cache key
+        self._jobs: dict[str, _Job] = {}
+        self._seq = 0
+        self._lock = threading.Lock()
+        self._server: socketserver.UnixStreamServer | None = None
+        self._thread: threading.Thread | None = None
+        self.socket_path: Path | None = None
+        # Refuse to continue someone else's journal.
+        self.journal_path.parent.mkdir(parents=True, exist_ok=True)
+        os.close(os.open(self.journal_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+
+    # --- journal ---------------------------------------------------------------------
+
+    def _append(self, **fields: object) -> BrokerJournalEntry:
+        self._seq += 1
+        entry = BrokerJournalEntry(seq=self._seq, **fields)  # type: ignore[arg-type]
+        line = entry.model_dump_json(by_alias=True).encode() + b"\n"
+        with open(self.journal_path, "ab") as fh:
+            fh.write(line)
+            fh.flush()
+            os.fsync(fh.fileno())
+        return entry
+
+    # --- submissions -----------------------------------------------------------------
+
+    def handle_line(self, line: bytes) -> BrokerReply:
+        """Parse one request line and answer it; a malformed line is refused and journaled."""
+        with self._lock:
+            try:
+                request = BrokerSubmit.model_validate_json(line)
+            except ValidationError:
+                self._append(event="request", request_sha256=sha256_digest(line))
+                return self._refuse(None, "invalid_request")
+            return self._submit(request, line)
+
+    def submit(self, request: BrokerSubmit) -> BrokerReply:
+        """Answer one submission; the reply is journaled before it is returned."""
+        with self._lock:
+            return self._submit(request, request.model_dump_json().encode())
+
+    def _refuse(self, tool_call_id: str | None, reason: RefusalReason) -> BrokerReply:
+        self._append(event="reply", tool_call_id=tool_call_id, status="refused", reason=reason)
+        return BrokerReply(status="refused", reason=reason)
+
+    def _submit(self, request: BrokerSubmit, raw: bytes) -> BrokerReply:
+        input_bytes = request.input.encode("utf-8")
+        input_sha = sha256_digest(input_bytes)
+        self._append(
+            event="request",
+            tool_call_id=request.tool_call_id,
+            request_sha256=sha256_digest(raw),
+            input_sha256=input_sha,
+            attach=request.attach,
+        )
+        try:
+            if len(self._jobs) >= self.max_executions:
+                raise _Refused("max_executions")
+            attached = self._resolve(request.attach)
+            key = cache_key(
+                input_sha, [(n, sha) for n, (sha, _) in attached.items()], self.binary_sha256
+            )
+            job_id = f"j{len(self._jobs) + 1:04d}"
+            if self._replay is not None:
+                return self._serve_replay(request, job_id, key, input_sha)
+            return self._serve_live(request, job_id, key, input_sha, input_bytes, attached)
+        except _Refused as r:
+            return self._refuse(request.tool_call_id, r.reason)
+
+    def _resolve(self, attach: tuple[BrokerAttach, ...]) -> dict[str, tuple[str, Path | None]]:
+        placed: dict[str, tuple[str, Path | None]] = {}
+        for a in attach:
+            job = self._jobs.get(a.job_id)
+            if job is None or a.name not in job.files:
+                raise _Refused("unknown_attachment")
+            name = placed_name(a.job_id, a.name)
+            if name in placed:
+                raise _Refused("duplicate_attachment")
+            placed[name] = job.files[a.name]
+        return placed
+
+    def _reply(
+        self,
+        request: BrokerSubmit,
+        *,
+        job_id: str,
+        key: str,
+        status: Literal["completed", "failed"],
+        input_sha: str,
+        log: bytes,
+        files: dict[str, tuple[str, Path | None]],
+        executed_here: bool,
+        cache_hit: bool,
+        stand_in: bool | None,
+        scheduler_job_id: str | None = None,
+        duration_ms: int | None = None,
+        reason: str | None = None,
+    ) -> BrokerReply:
+        self._jobs[job_id] = _Job(files=files)
+        output_sha = sha256_digest(log)
+        self._append(
+            event="reply",
+            tool_call_id=request.tool_call_id,
+            status=status,
+            reason=reason,
+            key=key,
+            job_id=job_id,
+            executed_here=executed_here,
+            cache_hit=cache_hit,
+            replay=self._replay is not None,
+            input_sha256=input_sha,
+            output_sha256=output_sha,
+            files=tuple(ProducedFile(name=n, sha256=sha) for n, (sha, _) in sorted(files.items())),
+            binary_sha256=self.binary_sha256,
+            stand_in=stand_in,
+            scheduler_job_id=scheduler_job_id,
+            duration_ms=duration_ms,
+        )
+        return BrokerReply(
+            status=status,
+            job_id=job_id,
+            cache_hit=cache_hit,
+            executed_here=executed_here,
+            input_sha256=input_sha,
+            output_sha256=output_sha,
+            output_b64=base64.b64encode(log).decode("ascii"),
+            files=tuple(sorted(files)),
+            reason=reason,
+        )
+
+    def _serve_replay(
+        self, request: BrokerSubmit, job_id: str, key: str, input_sha: str
+    ) -> BrokerReply:
+        assert self._replay is not None
+        queue = self._replay.jobs.get(key)
+        if not queue:
+            raise _Refused("replay_miss")
+        rec = queue.pop(0)
+        return self._reply(
+            request,
+            job_id=job_id,
+            key=key,
+            status=rec.status,
+            input_sha=input_sha,
+            log=rec.output,
+            files={f.name: (f.sha256, None) for f in rec.files},
+            executed_here=False,
+            cache_hit=True,
+            stand_in=rec.stand_in,
+        )
+
+    def _serve_live(
+        self,
+        request: BrokerSubmit,
+        job_id: str,
+        key: str,
+        input_sha: str,
+        input_bytes: bytes,
+        attached: dict[str, tuple[str, Path | None]],
+    ) -> BrokerReply:
+        assert self._scheduler is not None
+        if self._cache is not None:
+            try:
+                hit = self._cache.get(key)
+            except _CacheCorrupt as exc:
+                raise _Refused("cache_corrupt") from exc
+            if hit is not None:
+                log, files, stand_in = hit
+                return self._reply(
+                    request,
+                    job_id=job_id,
+                    key=key,
+                    status="completed",
+                    input_sha=input_sha,
+                    log=log,
+                    files=dict(files),
+                    executed_here=False,
+                    cache_hit=True,
+                    stand_in=stand_in,
+                )
+
+        inputs = {"input": input_bytes}
+        for name, (sha, path) in attached.items():
+            assert path is not None  # live jobs always hold host paths
+            data = path.read_bytes()
+            if sha256_digest(data) != sha:
+                raise _Refused("attachment_changed")
+            inputs[name] = data
+
+        sched = self._scheduler
+        before = sched.executions
+        sid = sched.submit(f"orca-broker:{self._run}:{job_id}", "orca", inputs, {})
+        executed = sched.executions > before
+        status = sched.status(sid)
+        if status not in ("completed", "failed"):
+            raise OnodaError(f"scheduler job {sid} ended {status!r}")
+        log = sched.collect(sid)["log"]
+        meta = sched.job_metadata(sid)
+        produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
+        files: dict[str, tuple[str, Path | None]] = {
+            n: (_sha256_file(p), p) for n, p in produced.items()
+        }
+        if status == "completed" and self._cache is not None:
+            self._cache.put(
+                key, log, produced, binary=self.binary_sha256, stand_in=bool(meta["stand_in"])
+            )
+        return self._reply(
+            request,
+            job_id=job_id,
+            key=key,
+            status=status,
+            input_sha=input_sha,
+            log=log,
+            files=files,
+            executed_here=executed,
+            cache_hit=False,
+            stand_in=bool(meta["stand_in"]),
+            scheduler_job_id=sid,
+            duration_ms=meta["duration_ms"],
+            reason=meta["reason"],
+        )
+
+    @property
+    def jobs(self) -> int:
+        """Submissions that got a job id (executed, failed or cache hit)."""
+        return len(self._jobs)
+
+    # --- socket server ---------------------------------------------------------------
+
+    def _send(self, wfile: BinaryIO, reply: BrokerReply) -> None:
+        wfile.write(reply.model_dump_json().encode() + b"\n")
+        wfile.flush()
+
+    def serve(self, socket_path: str | os.PathLike[str]) -> None:
+        """Listen on `socket_path` (mode 0600) in one background thread."""
+        if self._server is not None:
+            raise OnodaError("broker is already serving")
+        path = Path(socket_path)
+        if len(os.fsencode(path)) >= 104:  # sun_path: 104 bytes on macOS, 108 on Linux
+            raise OnodaError(f"broker socket path is too long for AF_UNIX: {path}")
+        broker = self
+
+        class Handler(socketserver.StreamRequestHandler):
+            def handle(self) -> None:
+                line = self.rfile.readline(MAX_REQUEST_BYTES + 1)
+                if not line:
+                    return
+                reply = broker.handle_line(line)
+                broker._send(self.wfile, reply)
+
+        old = os.umask(0o177)
+        try:
+            server = socketserver.UnixStreamServer(str(path), Handler)
+        finally:
+            os.umask(old)
+        self._server = server
+        self.socket_path = path
+        self._thread = threading.Thread(
+            target=server.serve_forever, name="onoda-orca-broker", daemon=True
+        )
+        self._thread.start()
+
+    def close(self) -> None:
+        if self._server is None:
+            return
+        self._server.shutdown()
+        self._server.server_close()
+        assert self._thread is not None and self.socket_path is not None
+        self._thread.join()
+        self.socket_path.unlink(missing_ok=True)
+        self._server = None
+        self._thread = None
+
+    def __enter__(self) -> OrcaBroker:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()

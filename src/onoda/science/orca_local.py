@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -40,6 +41,11 @@ from onoda.errors import CapabilityError, OnodaError, SubmissionUncertain
 
 _STAND_IN_LABELS = ["stand-in", "not-orca"]
 _ORCA_LABELS = ["orca-local"]
+
+# Extra input files (e.g. an earlier job's `.gbw`) are written next to `job.inp`
+# under plain names; the job's own driver files can never be supplied.
+_EXTRA_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_JOB_FILES = frozenset({"job.inp", "job.out", "job.err"})
 
 
 class OrcaSettings(BaseModel):
@@ -110,6 +116,10 @@ class OrcaLocalScheduler:
         self.root.mkdir(parents=True, exist_ok=True)
 
     @property
+    def settings(self) -> ResolvedOrcaSettings:
+        return self._settings
+
+    @property
     def _state_path(self) -> Path:
         return self.root / "scheduler.json"
 
@@ -126,11 +136,20 @@ class OrcaLocalScheduler:
     def submit(
         self, key: str, program: str, inputs: dict[str, bytes], config: dict[str, Any]
     ) -> str:
-        """Accept a job once per idempotency key; a repeated key never re-runs."""
+        """Accept a job once per idempotency key; a repeated key never re-runs.
+
+        `inputs["input"]` becomes `job.inp`; every other entry is written next
+        to it under its own name (a plain file name, never one of the job's
+        driver files), so the input can read it, e.g. `%moinp "j0001.gbw"`.
+        """
         if program != "orca":
             raise OnodaError(f"unknown program {program!r}")
         if "input" not in inputs:
             raise OnodaError("ORCA submission requires an 'input' entry (.inp bytes)")
+        extra = {name: data for name, data in inputs.items() if name != "input"}
+        for name in extra:
+            if not _EXTRA_FILE_RE.match(name) or name in _JOB_FILES:
+                raise OnodaError(f"extra input file name {name!r} is not allowed")
 
         state = self._load()
         if key in state["by_key"]:
@@ -147,6 +166,8 @@ class OrcaLocalScheduler:
         job_dir.mkdir(parents=True, exist_ok=True)
         inp_path = job_dir / "job.inp"
         inp_path.write_bytes(inputs["input"])
+        for name, data in extra.items():
+            (job_dir / name).write_bytes(data)
 
         binary = self._settings.binary
         command = [binary, "job.inp"]
@@ -166,6 +187,7 @@ class OrcaLocalScheduler:
             "returncode": None,
             "reason": None,
             "duration_ms": None,
+            "extra_inputs": sorted(extra),
         }
         state["by_key"][key] = job_id
         self._save(state)
@@ -248,6 +270,23 @@ class OrcaLocalScheduler:
         out = (job_dir / "job.out").read_bytes() if (job_dir / "job.out").exists() else b""
         err = (job_dir / "job.err").read_bytes() if (job_dir / "job.err").exists() else b""
         return {"log": out, "stderr": err}
+
+    def produced_files(self, job_id: str) -> dict[str, Path]:
+        """Files the job left in its directory, other than its inputs and logs.
+
+        Only regular files directly in the job directory count (ORCA names its
+        products after the input's basename: `job.gbw`, `job_property.txt`, ...).
+        """
+        job = self._load()["jobs"][job_id]
+        if job["status"] == "submitted":
+            raise SubmissionUncertain(f"job {job_id!r} has no terminal marker")
+        skip = _JOB_FILES | set(job.get("extra_inputs", ()))
+        job_dir = self.root / job_id
+        return {
+            p.name: p
+            for p in sorted(job_dir.iterdir())
+            if p.name not in skip and p.is_file() and not p.is_symlink()
+        }
 
     def cancel(self, job_id: str) -> None:
         # submit() runs synchronously to completion, so there is never a job
