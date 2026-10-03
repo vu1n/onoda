@@ -411,3 +411,7 @@ flowchart TD
   labels carry a bare `p` (ketene 1A2(p,3p), 3A1(p,π*); diazomethane
   1A1/3A1(p,π*)); left as printed, so they only matter where (spin, irrep)
   is ambiguous. Question for the authors' feedback.
+- VTE-004 follow-up: kept the `pi.broker-unspooled` event rather than
+  refusing the run (a crash between ORCA finishing and the spool write would
+  otherwise make the run un-ingestable). Comparing the journal's
+  `tool_call_id` with the spool line is a tighten item.
