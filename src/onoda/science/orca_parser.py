@@ -48,7 +48,8 @@ an unexpected column header, or (for NEVPT2) without a PT2 method line is
 dropped with an `error` Problem. When CASSCF did not converge (including
 when ORCA still printed normal termination) or its convergence is not
 printed, no state is reported and `mr_states` carries an `unresolved` Problem.
-`casscf_converged` is read from ORCA's own convergence lines.
+`casscf_converged` and the PT2 method are read from ORCA's own lines, never
+from its echo of the input (`|  12> ...`), which is text the agent wrote.
 """
 
 from __future__ import annotations
@@ -94,6 +95,9 @@ _CASSCF_FAIL = re.compile(
 )
 _CASSCF_OK = re.compile(r"\bCAS-SCF\b.*\bHAS CONVERGED\b|\bCASSCF CONVERGED AFTER\s+\d+\s+CYCLES\b")
 _PT2 = re.compile(r"\(PT2 = (\S+?)\)")
+# ORCA echoes the input as `|  12> ...`; the agent writes that text, so a
+# comment there must never read as a convergence verdict or a PT2 label.
+_INPUT_ECHO = re.compile(r"^\|\s*\d+>")
 _MR_HEADERS = {"SA-CASSCF TRANSITION ENERGIES": "CASSCF", "NEVPT2 TRANSITION ENERGIES": None}
 _MR_LOWEST = re.compile(
     r"^LOWEST ROOT \(ROOT\s+(\d+)\s*,\s*MULT\s+(\d+)(?:\s*,\s*IRREP\s+(\S+))?\)\s+="
@@ -235,12 +239,13 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
             continue
         if stripped == _CASSCF_BANNER:
             casscf_ran = True
-        if _CASSCF_FAIL.search(line):
-            casscf_fail.append(n)
-        elif _CASSCF_OK.search(line):
-            casscf_ok.append(n)
-        if m := _PT2.search(line):
-            pt2 = m.group(1)
+        if not _INPUT_ECHO.match(line):
+            if _CASSCF_FAIL.search(line):
+                casscf_fail.append(n)
+            elif _CASSCF_OK.search(line):
+                casscf_ok.append(n)
+            if m := _PT2.search(line):
+                pt2 = m.group(1)
         if line.startswith("WARNING"):
             warnings.append(r.ev(n))
         if m := _VERSION.match(line):

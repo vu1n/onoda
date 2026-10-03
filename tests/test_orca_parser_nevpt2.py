@@ -317,3 +317,34 @@ def test_parser_at_2_records_still_load():
         del obs[name]
     old = OrcaObservation.model_validate({**obs, "parser": "orca-parser@2"})
     assert old.casscf_converged is None and old.mr_states == []
+
+
+# ------------------------------------------------------------------ input echo
+
+
+def echo_comment(data: bytes, text: str) -> bytes:
+    """Add `text` to ORCA's input echo as a comment line, as an agent's input could."""
+    return mutate(data, "| 21> *\n", f"| 21> *\n| 22> # {text}\n")
+
+
+def test_an_echoed_convergence_comment_is_not_a_convergence_line():
+    data = drop_lines(output("ketene_f_target"), CONVERGED_LINE)
+    data = echo_comment(data, CONVERGED_LINE)
+    obs = parse_orca_output(data, synthetic=True)
+    assert obs.casscf_converged is None and obs.mr_states == []
+    assert [s for s, _ in problems(obs, "casscf_converged")] == ["missing"]
+
+
+def test_an_echoed_failure_comment_does_not_fail_a_converged_casscf():
+    data = echo_comment(output("ketene_f_target"), "CASSCF NOT CONVERGED")
+    obs = parse_orca_output(data, synthetic=True)
+    assert obs.casscf_converged is True
+    assert problems(obs, "casscf_converged") == []
+
+
+def test_an_echoed_pt2_label_is_not_the_pt2_method():
+    data = drop_lines(output("ketene_f_target"), "(PT2 = ")
+    data = echo_comment(data, "(PT2 = FIC-NEVPT2)")
+    obs = parse_orca_output(data, synthetic=True)
+    assert set(table(obs)) == {("CASSCF", 1, "B1", 0)}
+    assert problems(obs, "mr_states") == [("error", "NEVPT2 listing but no '(PT2 = ...)' line")]
