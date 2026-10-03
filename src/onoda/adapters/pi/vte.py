@@ -21,7 +21,9 @@ can reach the bundle.
    the job's listing of the reference method (`SC-NEVPT2`); anything else is
    `contradicted`. Values come from the deterministic parser over the job's
    exact output bytes, never from anything the agent or a reducer wrote.
-2. Identity. A `supported` claim is identified with a reference row when its
+2. Identity. A `supported` claim is identified only when its cited job printed
+   irreps (A71): without them the irrep is the agent's own label, which the
+   output cannot confirm. It is then identified with a reference row when its
    (spin, irrep) picks exactly one row, or `normalize_character` of its
    character picks exactly one among several. Rows two claims land on are
    identified by neither. Nothing is ever paired by energy or energy order,
@@ -71,7 +73,7 @@ from onoda.science.vte import (
 from onoda.store import Store
 
 VTE_EVALUATOR = "vte-claims"
-VTE_EVALUATOR_VERSION = "1"
+VTE_EVALUATOR_VERSION = "2"  # 2: identity needs printed irreps (A71)
 CLAIM_VERDICTS = ("supported", "contradicted", "unsupported")
 IDENTITY_VERDICTS = ("identified", "unidentified")
 REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
@@ -299,6 +301,8 @@ def evaluate_vte_claims(
     landed: dict[str, list[str]] = {}
     for tag, cs in supported:
         picked, why = _candidates(cs, rows)
+        if metrics.get(f"{tag}.irrep_printed") != "true":
+            picked, why = [], "irrep_not_printed"
         if why is not None:
             assignments[f"{tag}.identity"] = "unidentified"
             metrics[f"{tag}.identity_reason"] = why

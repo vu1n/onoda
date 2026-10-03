@@ -10,6 +10,7 @@ fixture README) exercises character disambiguation and the energy-order rule.
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -302,6 +303,28 @@ def test_two_claims_on_one_row_identify_neither(evaluator_store):
     assert e.assignments["claim.01.identity"] == "unidentified"
     assert e.metrics["claim.02.identity_reason"] == "conflict"
     assert e.assignments["ref.1B1(pi,3s)"] == "unidentified"
+
+
+def _without_irreps(out: bytes) -> bytes:
+    """The same output as ORCA prints it without symmetry: no IRREP column or label."""
+    text = out.decode()
+    text = text.replace("MULT IRREP", "MULT")
+    text = re.sub(r"(MULT \d+), IRREP\s+\S+\)", r"\1)", text)
+    text = re.sub(r"(?m)^(\s*\d+:\s+\d+\s+\d+)\s+[A-Z][a-z0-9]*'{0,2}(?=\s)", r"\1", text)
+    return text.encode()
+
+
+def test_a_job_without_printed_irreps_supports_but_never_identifies(evaluator_store):
+    """A71: the irrep is the agent's own label when the output prints none."""
+    case = _case("ketene")
+    jobs = {"j0001": VteJob(_without_irreps(_out("ketene_f_target")), True, False)}
+    e = _grade(evaluator_store, case, _claim(case, _state(1, "B1", "6.069", "j0001")), jobs)
+    assert e.assignments["claim.01"] == "supported"
+    assert e.metrics["claim.01.irrep_printed"] == "false"
+    assert e.assignments["claim.01.identity"] == "unidentified"
+    assert e.metrics["claim.01.identity_reason"] == "irrep_not_printed"
+    assert e.assignments["ref.1B1(pi,3s)"] == "unidentified"
+    assert e.metrics["coverage"] == "0" and e.metrics["false_success_claims"] == "0"
 
 
 def test_supported_state_with_no_reference_row_is_unidentified(evaluator_store):
