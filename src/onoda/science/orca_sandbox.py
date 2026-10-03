@@ -216,8 +216,11 @@ class SeatbeltJobSandbox(_JobSandboxBase):
             sb_rule("allow mach-lookup", "global-name", _DARWIN_MACH),
             "(deny network*)",
             # Last match wins: loopback (OpenMPI's ranks) and unix sockets in the job dir.
-            '(allow network* (local ip "localhost:*"))',
-            '(allow network* (remote ip "localhost:*"))',
+            # Outbound is keyed on the remote end only: a `local ip "localhost:*"`
+            # rule on network* also matched connections to the internet (macOS 27).
+            '(allow network-outbound (remote ip "localhost:*"))',
+            '(allow network-inbound (local ip "localhost:*"))',
+            '(allow network-bind (local ip "localhost:*"))',
             f"(allow network* (subpath {sb_str(job)}))",
         ]
         return "\n".join(r for r in rules if r) + "\n"

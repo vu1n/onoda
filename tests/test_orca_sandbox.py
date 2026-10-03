@@ -111,7 +111,10 @@ def test_the_seatbelt_profile_confines_exec_files_and_network(tmp_path):
     assert f'(subpath "{tmp_path / "jobs"}")' not in profile
     # Network: denied, then loopback and unix sockets in the job dir (last match wins).
     deny = profile.index("(deny network*)")
-    assert profile.index('(allow network* (local ip "localhost:*"))') > deny
+    assert profile.index('(allow network-outbound (remote ip "localhost:*"))') > deny
+    # A local-address rule on outbound traffic let a job reach 1.1.1.1 on macOS 27.
+    assert "(allow network* (local ip" not in profile
+    assert "(allow network-outbound (local ip" not in profile
     assert profile.index(f'(allow network* (subpath "{job}"))') > deny
     assert "(allow network*)" not in profile and "(allow sysctl-read)" not in profile
     assert "kern.procargs" not in profile and '"kern."' not in profile
