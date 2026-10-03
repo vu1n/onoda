@@ -17,6 +17,13 @@ with one `BrokerReply` line. Per submission the broker:
    scheduler key (a specification digest is never an execution id), and
    caches it if it completed.
 
+Job ids come from a counter that advances when an id is assigned, so no id
+(and no scheduler key) is ever reused. If anything fails after the scheduler
+answered, the job is journaled as `failed` with reason `broker_error`, its
+real `executed_here`, and no output or files. If an exception escapes before
+that is known (the scheduler itself raised), the broker refuses every later
+submission (`broker_failed`): fail closed.
+
 Every request and reply is appended (fsynced) to `broker.jsonl` before the
 reply is sent; that journal is the authoritative execution record ingest
 checks the spooled `task.execute` lines against. In replay mode
@@ -98,6 +105,7 @@ RefusalReason = Literal[
     "attachment_changed",
     "cache_corrupt",
     "replay_miss",
+    "broker_failed",
 ]
 
 
@@ -447,6 +455,12 @@ class OrcaBroker:
             )
         self._run = uuid.uuid4().hex  # scheduler keys are per execution, never the cache key
         self._jobs: dict[str, _Job] = {}
+        # Job ids come from this counter, advanced the moment an id is assigned, so an
+        # id (and with it the scheduler key `orca-broker:<run>:<job id>`) is never reused.
+        self._next_job = 0
+        # Set when an exception escaped a submission: what ran is then not on record,
+        # so every later submission is refused (fail closed).
+        self._broken = False
         self._seq = 0
         self._lock = threading.Lock()
         self._server: socketserver.UnixStreamServer | None = None
@@ -500,18 +514,27 @@ class OrcaBroker:
             attach=request.attach,
         )
         try:
-            if len(self._jobs) >= self.max_executions:
+            if self._broken:
+                raise _Refused("broker_failed")
+            if self._next_job >= self.max_executions:
                 raise _Refused("max_executions")
             attached = self._resolve(request.attach)
             key = cache_key(
                 input_sha, [(n, sha) for n, (sha, _) in attached.items()], self.binary_sha256
             )
-            job_id = f"j{len(self._jobs) + 1:04d}"
             if self._replay is not None:
-                return self._serve_replay(request, job_id, key, input_sha)
-            return self._serve_live(request, job_id, key, input_sha, input_bytes, attached)
+                return self._serve_replay(request, key, input_sha)
+            return self._serve_live(request, key, input_sha, input_bytes, attached)
         except _Refused as r:
             return self._refuse(request.tool_call_id, r.reason)
+        except BaseException:
+            self._broken = True
+            raise
+
+    def _allocate(self) -> str:
+        """The next job id; called once a submission is sure to get a job."""
+        self._next_job += 1
+        return f"j{self._next_job:04d}"
 
     def _resolve(self, attach: tuple[BrokerAttach, ...]) -> dict[str, tuple[str, Path | None]]:
         placed: dict[str, tuple[str, Path | None]] = {}
@@ -574,9 +597,7 @@ class OrcaBroker:
             reason=reason,
         )
 
-    def _serve_replay(
-        self, request: BrokerSubmit, job_id: str, key: str, input_sha: str
-    ) -> BrokerReply:
+    def _serve_replay(self, request: BrokerSubmit, key: str, input_sha: str) -> BrokerReply:
         assert self._replay is not None
         queue = self._replay.jobs.get(key)
         if not queue:
@@ -584,7 +605,7 @@ class OrcaBroker:
         rec = queue.pop(0)
         return self._reply(
             request,
-            job_id=job_id,
+            job_id=self._allocate(),
             key=key,
             status=rec.status,
             input_sha=input_sha,
@@ -599,7 +620,6 @@ class OrcaBroker:
     def _serve_live(
         self,
         request: BrokerSubmit,
-        job_id: str,
         key: str,
         input_sha: str,
         input_bytes: bytes,
@@ -615,7 +635,7 @@ class OrcaBroker:
                 log, files, stand_in = hit
                 return self._reply(
                     request,
-                    job_id=job_id,
+                    job_id=self._allocate(),
                     key=key,
                     status="completed",
                     input_sha=input_sha,
@@ -634,22 +654,43 @@ class OrcaBroker:
                 raise _Refused("attachment_changed")
             inputs[name] = data
 
+        job_id = self._allocate()
         sched = self._scheduler
         before = sched.executions
+        # An exception up to here escapes and closes the broker: whether ORCA ran is unknown.
         sid = sched.submit(f"orca-broker:{self._run}:{job_id}", "orca", inputs, {})
         executed = sched.executions > before
-        status = sched.status(sid)
-        if status not in ("completed", "failed"):
-            raise OnodaError(f"scheduler job {sid} ended {status!r}")
-        log = sched.collect(sid)["log"]
-        meta = sched.job_metadata(sid)
-        produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
-        files: dict[str, tuple[str, Path | None]] = {
-            n: (sha256_file(p), p) for n, p in produced.items()
-        }
-        if status == "completed" and self._cache is not None:
-            self._cache.put(
-                key, log, produced, binary=self.binary_sha256, stand_in=bool(meta["stand_in"])
+        try:
+            status = sched.status(sid)
+            if status not in ("completed", "failed"):
+                raise OnodaError(f"scheduler job {sid} ended {status!r}")
+            log = sched.collect(sid)["log"]
+            meta = sched.job_metadata(sid)
+            produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
+            files: dict[str, tuple[str, Path | None]] = {
+                n: (sha256_file(p), p) for n, p in produced.items()
+            }
+            if status == "completed" and self._cache is not None:
+                self._cache.put(
+                    key, log, produced, binary=self.binary_sha256, stand_in=bool(meta["stand_in"])
+                )
+        except Exception:
+            # The scheduler answered, so whether ORCA ran is known: the job is
+            # journaled as failed with no output and no files, never retried
+            # under its id, and nothing it produced is cached or attachable.
+            return self._reply(
+                request,
+                job_id=job_id,
+                key=key,
+                status="failed",
+                input_sha=input_sha,
+                log=b"",
+                files={},
+                executed_here=executed,
+                cache_hit=False,
+                stand_in=sched.settings.stand_in,
+                scheduler_job_id=sid,
+                reason="broker_error",
             )
         return self._reply(
             request,
@@ -670,7 +711,7 @@ class OrcaBroker:
     @property
     def jobs(self) -> int:
         """Submissions that got a job id (executed, failed or cache hit)."""
-        return len(self._jobs)
+        return self._next_job
 
     # --- socket server ---------------------------------------------------------------
 

@@ -10,6 +10,7 @@ can prove that nothing executed.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import socket
 import stat
@@ -21,6 +22,7 @@ import pytest
 from onoda.adapters.pi.vte_contract import BrokerAttach, BrokerReply, BrokerSubmit
 from onoda.canonical import sha256_digest
 from onoda.errors import OnodaError
+from onoda.science import orca_broker
 from onoda.science.orca_broker import (
     JOURNAL_NAME,
     BrokerReplay,
@@ -439,3 +441,62 @@ def test_read_journal_refuses_gaps_and_malformed_lines(tmp_path):
     bad.write_bytes(lines[0] + json.dumps(reply).encode() + b"\n")
     with pytest.raises(OnodaError, match="line 2"):
         read_journal(bad)
+
+
+# --- broker errors -------------------------------------------------------------------
+
+
+def _put_fails_once(monkeypatch):
+    real = orca_broker._Cache.put
+    calls = []
+
+    def put(self, *args, **kw):
+        calls.append(args[0])
+        if len(calls) == 1:
+            raise RuntimeError("disk full (test)")
+        return real(self, *args, **kw)
+
+    monkeypatch.setattr(orca_broker._Cache, "put", put)
+
+
+def test_a_job_id_is_never_reused_after_a_broker_error(tmp_path, monkeypatch):
+    binary = stand_in(tmp_path)
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary), cache_dir=tmp_path / "cache")
+    _put_fails_once(monkeypatch)
+    with contextlib.suppress(RuntimeError):  # the unfixed broker raised here
+        b.submit(submit("! first\n"))
+    r2 = b.submit(submit("! second\n", call="c2"))
+    assert r2.job_id != "j0001"
+    assert "input: ! second" in log(r2)  # its own output, never the first job's
+    assert runs(binary) == 2
+
+
+def test_a_broker_error_after_the_scheduler_ran_is_a_journaled_failed_job(tmp_path, monkeypatch):
+    binary = stand_in(tmp_path)
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary), cache_dir=tmp_path / "cache")
+    _put_fails_once(monkeypatch)
+    r1 = b.submit(submit("! first\n"))
+    assert (r1.status, r1.reason, r1.job_id) == ("failed", "broker_error", "j0001")
+    assert r1.executed_here and not r1.cache_hit and r1.files == ()
+    entry = read_journal(b.journal_path)[-1]
+    assert (entry.status, entry.reason, entry.job_id) == ("failed", "broker_error", "j0001")
+    assert entry.executed_here and entry.output_sha256 == r1.output_sha256
+    r2 = b.submit(submit("! second\n", call="c2"))
+    assert r2.job_id == "j0002" and r2.status == "completed" and b.jobs == 2
+
+
+def test_an_uncertain_scheduler_failure_closes_the_broker(tmp_path, monkeypatch):
+    binary = stand_in(tmp_path)
+    sched = scheduler(tmp_path, binary)
+    b = broker(tmp_path, scheduler=sched)
+
+    def boom(*args, **kw):
+        raise OSError("state file unwritable (test)")
+
+    monkeypatch.setattr(sched, "submit", boom)
+    with pytest.raises(OSError):
+        b.submit(submit("! first\n"))
+    monkeypatch.undo()
+    r2 = b.submit(submit("! second\n", call="c2"))
+    assert r2.status == "refused" and r2.reason == "broker_failed"
+    assert runs(binary) == 0
