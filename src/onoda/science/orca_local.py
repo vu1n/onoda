@@ -30,6 +30,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -111,6 +112,36 @@ def sha256_file(path: str | os.PathLike[str]) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             digest.update(chunk)
     return f"sha256:{digest.hexdigest()}"
+
+
+def _plain_file(st: os.stat_result) -> bool:
+    """A regular file with one link: not a device, FIFO, directory or hard link to elsewhere."""
+    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1
+
+
+def _kill_group(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass  # the group is already empty
+
+
+def read_produced(path: str | os.PathLike[str]) -> bytes:
+    """The bytes of a file a job produced, refusing anything but a plain file.
+
+    A job could leave a symlink or a hard link to a host file, or a FIFO that
+    blocks the reader; `O_NOFOLLOW`, `O_NONBLOCK` and a check of the open
+    file's own `fstat` refuse each (`OnodaError`), without a gap between the
+    check and the read.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise OnodaError(f"{path}: not readable as a produced file: {exc}") from exc
+    with os.fdopen(fd, "rb") as fh:
+        if not _plain_file(os.fstat(fd)):
+            raise OnodaError(f"{path}: not a regular file with a single link")
+        return fh.read()
 
 
 class OrcaLocalScheduler:
@@ -220,10 +251,14 @@ class OrcaLocalScheduler:
                 try:
                     returncode = proc.wait(timeout=self._settings.max_wall_seconds)
                 except subprocess.TimeoutExpired:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    _kill_group(proc.pid)
                     proc.wait()
                     outcome = {"status": "failed", "reason": "timeout", "executed": True}
                 else:
+                    # Whatever the job left running in its group (a backgrounded
+                    # helper, a stray MPI rank) must not outlive it, nor touch
+                    # the job directory while its products are read.
+                    _kill_group(proc.pid)
                     outcome = {
                         "status": "completed" if returncode == 0 else "failed",
                         "reason": None if returncode == 0 else "nonzero_exit",
@@ -280,8 +315,9 @@ class OrcaLocalScheduler:
     def produced_files(self, job_id: str) -> dict[str, Path]:
         """Files the job left in its directory, other than its inputs and logs.
 
-        Only regular files directly in the job directory count (ORCA names its
-        products after the input's basename: `job.gbw`, `job_property.txt`, ...).
+        Only regular files with a single link directly in the job directory
+        count (ORCA names its products after the input's basename: `job.gbw`,
+        `job_property.txt`, ...); read them with `read_produced`.
         """
         job = self._load()["jobs"][job_id]
         if job["status"] == "submitted":
@@ -291,7 +327,7 @@ class OrcaLocalScheduler:
         return {
             p.name: p
             for p in sorted(job_dir.iterdir())
-            if p.name not in skip and p.is_file() and not p.is_symlink()
+            if p.name not in skip and _plain_file(p.lstat())
         }
 
     def cancel(self, job_id: str) -> None:

@@ -523,3 +523,42 @@ def test_stand_in_and_orca_jobs_never_share_a_cache_entry(tmp_path):
     assert not r.cache_hit and r.executed_here and runs(binary) == 2
     keys = [e.key for b in (first, second) for e in read_journal(b.journal_path) if e.key]
     assert len(set(keys)) == 2
+
+
+# --- produced files are read as plain files only ---------------------------------------
+
+
+def _relink(path: Path, *, hard: bool) -> None:
+    """Replace `path` with a link to a copy of its own bytes held elsewhere."""
+    elsewhere = path.parent.parent / f"elsewhere-{path.name}"
+    elsewhere.write_bytes(path.read_bytes())
+    path.unlink()
+    if hard:
+        path.hardlink_to(elsewhere)
+    else:
+        path.symlink_to(elsewhere)
+
+
+@pytest.mark.parametrize("hard", [True, False])
+def test_an_attachment_that_became_a_link_is_refused(tmp_path, hard):
+    binary = stand_in(tmp_path)
+    sched = scheduler(tmp_path, binary)
+    b = broker(tmp_path, scheduler=sched)
+    b.submit(submit())
+    _relink(sched.root / "job-00001" / "job.gbw", hard=hard)
+    follow = '%moinp "j0001.gbw"\n' + INPUT
+    r = b.submit(submit(follow, "c2", (BrokerAttach(job_id="j0001", name="job.gbw"),)))
+    assert r.status == "refused" and r.reason == "attachment_changed"
+    assert runs(binary) == 1
+
+
+@pytest.mark.parametrize("hard", [True, False])
+def test_a_cached_file_that_became_a_link_is_refused(tmp_path, hard):
+    binary = stand_in(tmp_path)
+    cache = tmp_path / "cache"
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary), cache_dir=cache)
+    b.submit(submit())
+    (entry,) = [p for p in cache.iterdir() if not p.name.startswith(".")]
+    _relink(entry / "files" / "job.gbw", hard=hard)
+    r = b.submit(submit(call="c2"))
+    assert r.status == "refused" and r.reason == "cache_corrupt"

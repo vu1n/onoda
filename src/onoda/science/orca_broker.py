@@ -61,7 +61,12 @@ from pydantic import AfterValidator, Field, ValidationError, model_validator
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import IntegrityError, OnodaError
 from onoda.records import Frozen as _Frozen
-from onoda.science.orca_local import FILE_NAME_RE, OrcaLocalScheduler, sha256_file
+from onoda.science.orca_local import (
+    FILE_NAME_RE,
+    OrcaLocalScheduler,
+    read_produced,
+    sha256_file,
+)
 
 BROKER_PROTOCOL = "onoda.orca-broker/1"
 JOURNAL_NAME = "broker.jsonl"
@@ -379,7 +384,11 @@ class _Cache:
         files: dict[str, tuple[str, Path]] = {}
         for f in entry.files:
             p = d / "files" / f.name
-            if not p.is_file() or sha256_file(p) != f.sha256:
+            try:
+                data = read_produced(p)
+            except OnodaError as exc:
+                raise _CacheCorrupt(f"cache entry {key}: file {f.name}: {exc}") from exc
+            if sha256_digest(data) != f.sha256:
                 raise _CacheCorrupt(f"cache entry {key}: file {f.name} does not match")
             files[f.name] = (f.sha256, p)
         return log, files, entry.stand_in
@@ -395,7 +404,7 @@ class _Cache:
         _write_synced(tmp / "log", log)
         produced = []
         for name, src in sorted(files.items()):
-            data = src.read_bytes()
+            data = read_produced(src)
             _write_synced(tmp / "files" / name, data)
             produced.append(ProducedFile(name=name, sha256=sha256_digest(data)))
         entry = _CacheEntry(
@@ -675,7 +684,10 @@ class OrcaBroker:
         inputs = {"input": input_bytes}
         for name, (sha, path) in attached.items():
             assert path is not None  # live jobs always hold host paths
-            data = path.read_bytes()
+            try:
+                data = read_produced(path)
+            except OnodaError as exc:
+                raise _Refused("attachment_changed") from exc
             if sha256_digest(data) != sha:
                 raise _Refused("attachment_changed")
             inputs[name] = data
@@ -694,7 +706,7 @@ class OrcaBroker:
             meta = sched.job_metadata(sid)
             produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
             files: dict[str, tuple[str, Path | None]] = {
-                n: (sha256_file(p), p) for n, p in produced.items()
+                n: (sha256_digest(read_produced(p)), p) for n, p in produced.items()
             }
             if status == "completed" and self._cache is not None:
                 self._cache.put(

@@ -8,14 +8,18 @@ stand-in and never presented as ORCA, that mimics ORCA's calling convention
 from __future__ import annotations
 
 import json
+import os
+import signal
 import stat
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from onoda.errors import CapabilityError, OnodaError, SubmissionUncertain
-from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
+from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings, read_produced
 
 STAND_IN_MARKER = "STAND-IN EXECUTABLE - NOT ORCA"
 
@@ -298,3 +302,53 @@ def test_unlaunchable_binary_fails_instead_of_sticking_at_submitted(tmp_path):
     assert sched.job_metadata(job)["reason"].startswith("launch_error")
     assert sched.executions == 0
     assert sched.lookup("k") == job
+
+
+# --- nothing a job started outlives it; produced files are plain files --------------
+
+
+def _alive(pid: int) -> bool:
+    """True while `pid` runs; a zombie (killed, not yet reaped) counts as gone."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    state = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+    ).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def test_a_background_process_does_not_outlive_its_job(tmp_path):
+    body = "#!/bin/sh\nsleep 60 >/dev/null 2>&1 &\necho $! > bg.pid\nexit 0\n"
+    sched = _enabled_scheduler(tmp_path, _write_executable(tmp_path / "orca_bg.sh", body))
+    job = sched.submit("k", "orca", base_inputs(), {})
+    assert sched.status(job) == "completed"
+    pid = int((sched.root / job / "bg.pid").read_text())
+    deadline = time.monotonic() + 5
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    alive = _alive(pid)
+    if alive:
+        os.kill(pid, signal.SIGKILL)
+    assert not alive
+
+
+def test_produced_files_are_regular_files_with_one_link(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("host secret\n")
+    body = f"""#!/usr/bin/env {sys.executable}
+import os
+open("job.gbw", "w").write("orbitals")
+os.link({str(secret)!r}, "job_hard.txt")
+os.symlink({str(secret)!r}, "job_sym.txt")
+os.mkfifo("job_fifo.txt")
+"""
+    sched = _enabled_scheduler(tmp_path, make_stand_in(tmp_path, body=body))
+    job = sched.submit("k", "orca", base_inputs(), {})
+    assert set(sched.produced_files(job)) == {"job.gbw"}
+    job_dir = sched.root / job
+    assert read_produced(job_dir / "job.gbw") == b"orbitals"
+    for name in ("job_hard.txt", "job_sym.txt", "job_fifo.txt", "missing"):
+        with pytest.raises(OnodaError):
+            read_produced(job_dir / name)
