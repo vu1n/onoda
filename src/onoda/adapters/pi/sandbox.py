@@ -1,9 +1,10 @@
 """The Pi sandbox (A38, A50): a bubblewrap backend and a macOS Seatbelt one.
 
-`Sandbox` is the bubblewrap backend (Linux); `SeatbeltSandbox` (below) gives
-the same two layers on macOS and says where its guarantees differ.
+`Sandbox` is the bubblewrap backend (Linux); `SeatbeltSandbox` (below) is
+the macOS one, which keeps only the inner layer (macOS 27 refuses to nest
+Seatbelt sandboxes, A60) and says where its guarantees differ.
 
-Two layers, both built from allowlisted bind mounts (nothing of the host is
+With bwrap, two layers, both built from allowlisted bind mounts (nothing of the host is
 visible unless it is named here):
 
 - **Outer**: the whole Pi process tree (Pi, SoL-Pi, the RLM extension and its
@@ -242,7 +243,7 @@ def write_settings(agent_dir: Path, settings: dict[str, str]) -> None:
 
 SEATBELT_KIND = "seatbelt"
 
-# Read-only paths both Seatbelt layers need besides `DARWIN_SYSTEM`.
+# Read-only paths the Seatbelt profiles need besides `DARWIN_SYSTEM`.
 _DARWIN_ETC = (
     "/etc/ssl",
     "/etc/hosts",
@@ -254,57 +255,56 @@ _DARWIN_ETC = (
     "/etc/localtime",
     "/private/var/db/timezone",
 )
-# Only the outer layer looks anything up over Mach: user and DNS lookups,
-# notifications and logging that node needs to start and reach its provider.
-# The inner layer gets none, so no system service can carry its traffic out.
-_OUTER_MACH = (
-    "com.apple.system.opendirectoryd.libinfo",
-    "com.apple.system.notification_center",
-    "com.apple.system.logger",
-    "com.apple.logd",
-    "com.apple.diagnosticd",
-    "com.apple.dnssd.service",
-    "com.apple.SystemConfiguration.configd",
-)
 _DARWIN_LANG = "en_US.UTF-8"  # macOS has no C.UTF-8 locale on every release
 
 
 @dataclass(frozen=True)
 class SeatbeltSandbox:
-    """The macOS backend: the same two layers as `Sandbox`, as Seatbelt profiles.
+    """The macOS backend: `Sandbox`'s inner layer as Seatbelt profiles; no outer layer.
 
-    Each layer runs under `sandbox-exec` with a profile generated for the run
-    that starts from `(deny default)` and allows only what is named here:
+    macOS has one layer, not two. A process under a deny-default Seatbelt
+    profile cannot apply a second one: on macOS 27, `sandbox-exec` inside it
+    fails with `sandbox_apply: Operation not permitted`, e.g.
+    `sandbox-exec -p '(version 1)(deny default)(allow process-exec process-fork)
+    (allow file-read*)' sandbox-exec -p '(version 1)(allow default)' /bin/echo x`.
+    Pi has to start the inner wrappers, so the Pi process runs unconfined
+    (`outer_argv` only sets its TMPDIR and HOME) and the inner layer stays:
 
-    - **Outer** (the whole Pi process tree): reads of the system directories
-      (`/usr`, `/bin`, `/sbin`, `/System`, selected `/etc` files), the pinned
-      runtime, node, the Python environment, the RLM kernel dir, CA files and
-      the task bundle; writes only to the run's Pi work dir, whose `tmp` is the
-      private TMPDIR and HOME; the wrappers and profiles under `sandbox/` stay
-      read-only. The network is open, because Pi has to reach its provider.
-      The agent store, the evaluator store, the optimizer's run dir, other
-      runs' work dirs and the repository are not readable.
-    - **Inner** (Pi's `bash` tool, so `then_run`, and the RLM kernel): every
-      network operation denied, an environment cleared by `env -i` before
-      `sandbox-exec` (no credential, no proxy), the workspace and a private
-      `inner-tmp` read-write, the bundle read-only, and nothing of Pi's spool,
-      session, agent, sandbox or RLM directories, nor any broker socket in the
-      work dir (none is named in the profile, and the default is deny). The
-      kernel additionally reaches the outer `tmp`, where the extension's
-      socket lives, as with bwrap's shared `/tmp`; it may connect to unix
-      sockets there and nowhere else. No Mach service is reachable from it.
-    - **File tools** and the `settings.json` wiring are exactly `Sandbox`'s.
+    - **Inner** (Pi's `bash` tool, so `then_run`, and the RLM kernel): runs
+      under `sandbox-exec` with a profile generated for the run that starts
+      from `(deny default)`: every network operation denied, an environment
+      cleared by `env -i` before `sandbox-exec` (no credential, no proxy),
+      reads of the system directories, the Python environment, the kernel dir
+      and the bundle, the workspace and a private `inner-tmp` read-write, and
+      nothing of Pi's spool, session, agent, sandbox or RLM directories, nor
+      any broker socket in the work dir (none is named in the profile, and the
+      default is deny). The kernel additionally reaches the Pi process's `tmp`,
+      where the extension's socket lives, as with bwrap's shared `/tmp`; it may
+      connect to unix sockets there and nowhere else. No Mach service is
+      reachable from it.
+    - **File tools** and the `settings.json` wiring are exactly `Sandbox`'s:
+      the recorder's gateway keeps Pi's `read`/`edit`/`write` inside the
+      workspace (and, for `read`, the bundle), so they cannot rewrite the
+      wrappers and profiles under `sandbox/`, which are also staged read-only.
 
-    What Seatbelt cannot give that bwrap does: there is no PID, IPC or UTS
-    namespace, so both layers see the host's process list (`ps`), though
-    signals reach only processes of the same sandbox; macOS has no `/proc`, so
-    there is no `/proc` to empty, and a process's environment is readable only
-    through `sysctl` (`kern.procargs2`, which shows it for same-uid processes),
-    so both layers read only an allowlist of sysctls without it; nothing is hidden
-    by mounts, so a path's *existence* is visible on its ancestors' metadata
-    (the profile allows metadata reads of each allowed path's ancestors only).
-    `sandbox-exec` is deprecated by Apple but still functional; if a macOS
-    release removes it, `detect` refuses rather than running unsandboxed.
+    What the missing outer layer gives up: Pi's node process itself (with
+    SoL-Pi, the extensions and RLM child Pi processes) is not confined on
+    macOS; it can reach any host and read and write the host filesystem as
+    the user, and sees the stores and the repository. That code is pinned
+    (`pi/package-lock.json`); the agent reaches files only through the
+    gateway-checked tools and runs commands only in the inner layer.
+
+    What Seatbelt cannot give the inner layer that bwrap does: there is no
+    PID, IPC or UTS namespace, so it sees the host's process list (`ps`),
+    though signals reach only processes of the same sandbox; macOS has no
+    `/proc`, so there is no `/proc` to empty, and a process's environment is
+    readable only through `sysctl` (`kern.procargs2`, which shows it for
+    same-uid processes), so the profiles read only an allowlist of sysctls
+    without it; nothing is hidden by mounts, so a path's *existence* is
+    visible on its ancestors' metadata (the profile allows metadata reads of
+    each allowed path's ancestors only). `sandbox-exec` is deprecated by Apple
+    but still functional; if a macOS release removes it, `detect` refuses
+    rather than running unsandboxed.
     """
 
     kind: ClassVar[str] = SEATBELT_KIND
@@ -331,7 +331,7 @@ class SeatbeltSandbox:
 
     @staticmethod
     def tmp_dir(pi_work_dir: Path) -> Path:
-        """The outer layer's private TMPDIR and HOME (macOS has no tmpfs)."""
+        """The Pi process's private TMPDIR and HOME (macOS has no tmpfs)."""
         return Path(pi_work_dir).resolve() / "tmp"
 
     @staticmethod
@@ -364,47 +364,30 @@ class SeatbeltSandbox:
         ]
         return "\n".join(r for r in rules if r) + "\n"
 
-    def outer_profile(self, *, pi_work_dir: Path, bundle_dir: Path) -> str:
-        """The outer layer's profile: system, runtime and bundle read, work dir written."""
-        pi_work_dir, bundle_dir = Path(pi_work_dir).resolve(), Path(bundle_dir).resolve()
-        read = [
-            *self.runtime_dirs,
-            self.node_prefix,
-            *self.python_dirs,
-            self.kernel_dir,
-            *self.extra_ro,
-            bundle_dir,
-        ]
-        tail = [
-            # The wrappers and profiles are the inner boundary: Pi must not rewrite them.
-            f"(deny file-write* (subpath {sb_str(pi_work_dir / 'sandbox')}))",
-            "(allow network*)",
-            "(allow system-socket)",
-            sb_rule("allow mach-lookup", "global-name", _OUTER_MACH),
-        ]
-        return self._profile(layer="outer", read=read, write=[pi_work_dir], tail=tail)
-
     def inner_profile(
         self, *, pi_work_dir: Path, workspace: Path, bundle_dir: Path, kernel: bool
     ) -> str:
-        """An inner layer's profile; `kernel` adds the outer tmp and its unix sockets."""
+        """An inner layer's profile; `kernel` adds Pi's tmp and its unix sockets."""
         workspace, bundle_dir = Path(workspace).resolve(), Path(bundle_dir).resolve()
         write = [workspace, self.inner_tmp_dir(pi_work_dir)]
         tail = ["(deny network*)"]
         if kernel:
             outer_tmp = self.tmp_dir(pi_work_dir)
             write.append(outer_tmp)
-            # Last match wins: after the deny, only unix sockets under the outer tmp.
+            # Last match wins: after the deny, only unix sockets under Pi's tmp.
             tail.append(f"(allow network-outbound (subpath {sb_str(outer_tmp)}))")
         read = [*self.python_dirs, self.kernel_dir, bundle_dir]
         return self._profile(layer="inner", read=read, write=write, tail=tail)
 
     def outer_argv(self, *, pi_work_dir: Path, bundle_dir: Path) -> list[str]:
-        """The `sandbox-exec` prefix for the Pi process; the Pi argv follows it."""
+        """The Pi process's prefix: only its TMPDIR and HOME, no Seatbelt (A60).
+
+        macOS 27 refuses a second sandbox inside a deny-default one, and Pi must
+        start the inner wrappers, so Pi itself runs unconfined; see the class.
+        """
         tmp = self.tmp_dir(pi_work_dir)
         tmp.mkdir(parents=True, exist_ok=True)
-        profile = self.outer_profile(pi_work_dir=pi_work_dir, bundle_dir=bundle_dir)
-        return [self.env, f"TMPDIR={tmp}", f"HOME={tmp}", self.sandbox_exec, "-p", profile]
+        return [self.env, f"TMPDIR={tmp}", f"HOME={tmp}"]
 
     def _inner(self, *, profile_path: Path, pi_work_dir: Path) -> list[str]:
         home = self.inner_tmp_dir(pi_work_dir)

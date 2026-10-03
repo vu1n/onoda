@@ -21,6 +21,7 @@ import pytest
 from test_pi_runtime import SCRIPT, make_bundle
 
 from onoda.adapters.pi import runtime
+from onoda.adapters.pi.contract import GatewayPolicy
 from onoda.adapters.pi.runtime import build_launch, detect_sandbox
 from onoda.adapters.pi.sandbox import (
     SANDBOX_KIND,
@@ -97,20 +98,26 @@ def test_detect_sandbox_picks_the_backend_by_platform(monkeypatch):
         detect_sandbox()
 
 
-def test_the_outer_profile_denies_by_default_and_writes_only_the_work_dir(tmp_path):
+def test_the_outer_argv_sets_tmp_and_home_and_applies_no_seatbelt(tmp_path):
+    """macOS 27 cannot nest Seatbelt (A60): Pi runs with only its TMPDIR and HOME set."""
     sb, work, _, bundle, _, _ = staged(tmp_path)
-    profile = sb.outer_profile(pi_work_dir=work, bundle_dir=bundle)
-    assert balanced(profile)
-    assert profile.splitlines()[1:3] == ["(version 1)", "(deny default)"]
-    writes = re.findall(r'\(allow file-write\*\n((?:  \(subpath "[^"]*"\)\n?)+)\)', profile)
-    assert re.findall(r'"([^"]*)"', writes[-1]) == [str(work)]
-    # The wrappers are read-only to Pi: the deny follows the allow, and the last match wins.
-    deny = f'(deny file-write* (subpath "{work / "sandbox"}"))'
-    assert profile.index(deny) > profile.index(f'(subpath "{work}")')
-    assert "(allow network*)" in profile
-    for p in (bundle, tmp_path / "runtime", tmp_path / "node", tmp_path / "kernel"):
-        assert f'(subpath "{p}")' in profile
-    assert str(tmp_path / "evaluator") not in profile
+    outer = sb.outer_argv(pi_work_dir=work, bundle_dir=bundle)
+    tmp = work / "tmp"
+    assert outer == ["/usr/bin/env", f"TMPDIR={tmp}", f"HOME={tmp}"]
+    assert not any("sandbox-exec" in w for w in outer) and "-p" not in outer
+    assert tmp.is_dir()
+    assert not hasattr(sb, "outer_profile")
+
+
+def test_the_wrappers_and_profiles_are_staged_read_only(tmp_path):
+    """With no outer layer, nothing but the gateway and these modes guards `sandbox/`."""
+    sb, work, workspace, bundle, _, _ = staged(tmp_path)
+    modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in (work / "sandbox").iterdir()}
+    assert modes == {"shell": 0o555, "python": 0o555, "shell.sb": 0o444, "python.sb": 0o444}
+    # Restaging over the read-only files still works and leaves them read-only.
+    sb.stage(pi_work_dir=work, workspace=workspace, bundle_dir=bundle)
+    again = {p.name: stat.S_IMODE(p.stat().st_mode) for p in (work / "sandbox").iterdir()}
+    assert again == modes
 
 
 def test_the_inner_profiles_have_no_network_and_only_the_workspace(tmp_path):
@@ -155,8 +162,9 @@ def test_profile_strings_are_escaped_and_control_characters_refused(tmp_path):
     with pytest.raises(CapabilityError, match="control character"):
         _sb_str("/a\nb")
     odd = tmp_path / 'we"ird\\dir'
-    sb, work, _, bundle, _, _ = staged(odd)
-    profile = sb.outer_profile(pi_work_dir=work, bundle_dir=bundle)
+    sb, work, workspace, bundle, _, _ = staged(odd)
+    profile = sb.inner_profile(pi_work_dir=work, workspace=workspace, bundle_dir=bundle,
+                               kernel=True)  # fmt: skip
     assert balanced(profile)
     assert _sb_str(work) in profile and str(work) not in profile.replace(_sb_str(work), "")
 
@@ -173,15 +181,22 @@ def test_a_seatbelt_launch_routes_tools_into_the_inner_layer(tmp_path):
     )
     work = (tmp_path / "work").resolve()
     tmp = work / "tmp"
-    assert list(launch_obj.argv[:5]) == ["/usr/bin/env", f"TMPDIR={tmp}", f"HOME={tmp}",
-                                   "/usr/bin/sandbox-exec", "-p"]  # fmt: skip
-    assert launch_obj.argv[5].splitlines()[2] == "(deny default)"
-    assert launch_obj.argv[6].endswith("/node_modules/.bin/pi")
+    assert list(launch_obj.argv[:3]) == ["/usr/bin/env", f"TMPDIR={tmp}", f"HOME={tmp}"]
+    assert launch_obj.argv[3].endswith("/node_modules/.bin/pi")
+    assert "/usr/bin/sandbox-exec" not in launch_obj.argv
     settings = json.loads((launch_obj.agent_dir / "settings.json").read_text())
     assert settings == {
         "shellPath": str(work / "sandbox" / "shell"),
         "defaultProjectTrust": "never",
     }
+    # Pi is unconfined on macOS, so its file tools must not reach the wrappers:
+    # the gateway writes only under the workspace, a sibling of `sandbox/`.
+    policy = GatewayPolicy.model_validate_json(launch_obj.policy_path.read_text())
+    assert policy.write_roots == (str(work / "workspace"),)
+    assert policy.read_roots == (str(work / "workspace"), str((tmp_path / "bundle").resolve()))
+    for root in (*policy.write_roots, *policy.read_roots):
+        assert not (work / "sandbox").is_relative_to(root)
+        assert not Path(root).is_relative_to(work / "sandbox")
 
 
 SECRET_SYSCTLS = ("kern.procargs2", "kern.procargs", "kern.proc.pid.1", "kern.proc.all")
@@ -197,9 +212,8 @@ def sysctl_filters(profile: str) -> list[tuple[str, str]]:
 
 def test_profiles_read_only_allowlisted_sysctls(tmp_path):
     """No blanket sysctl-read: KERN_PROCARGS2 shows another process's environment."""
-    sb, work, workspace, bundle, _, _ = staged(tmp_path)
+    _, work, _, _, _, _ = staged(tmp_path)
     profiles = [
-        sb.outer_profile(pi_work_dir=work, bundle_dir=bundle),
         (work / "sandbox" / "shell.sb").read_text(),
         (work / "sandbox" / "python.sb").read_text(),
     ]
@@ -231,9 +245,8 @@ def root_reads(profile: str) -> list[str]:
 
 def test_profiles_list_the_root_directory_and_read_nothing_else_there(tmp_path):
     """macOS 27's bash aborts without listing "/"; that is all "/" itself grants."""
-    sb, work, workspace, bundle, _, _ = staged(tmp_path)
+    _, work, _, _, _, _ = staged(tmp_path)
     profiles = [
-        sb.outer_profile(pi_work_dir=work, bundle_dir=bundle),
         (work / "sandbox" / "shell.sb").read_text(),
         (work / "sandbox" / "python.sb").read_text(),
     ]
@@ -333,20 +346,23 @@ def test_darwin_kernel_reaches_only_its_unix_socket(mac):
 
 
 @on_darwin
-def test_darwin_outer_layer_runs_the_inner_wrapper_and_hides_the_host(mac, tmp_path):
-    """Pi runs the inner wrapper from inside the outer layer: Seatbelt must nest."""
+def test_darwin_inner_wrapper_runs_under_outer_argv_and_hides_the_host(mac, tmp_path):
+    """Pi starts the inner wrapper with `outer_argv`'s prefix: Seatbelt applies once, there."""
     sb, work, workspace, bundle, shell, _ = mac
     outside = tmp_path / "outside.txt"
     outside.write_text("host secret\n")
     outer = sb.outer_argv(pi_work_dir=work, bundle_dir=bundle)
-    hidden = subprocess.run([*outer, "/bin/cat", str(outside)], capture_output=True)
-    assert hidden.returncode != 0
-    nested = subprocess.run(
-        [*outer, str(shell), "-c", "echo nested > n.txt"], cwd=workspace, capture_output=True,
+    ran = subprocess.run(
+        [*outer, str(shell), "-c", "echo inner > n.txt"], cwd=workspace, capture_output=True,
         text=True, timeout=60,
     )  # fmt: skip
-    assert nested.returncode == 0, nested.stderr
-    assert (workspace / "n.txt").read_text() == "nested\n"
+    assert ran.returncode == 0, ran.stderr
+    assert (workspace / "n.txt").read_text() == "inner\n"
+    hidden = subprocess.run(
+        [*outer, str(shell), "-c", f"cat {outside}"], cwd=workspace, capture_output=True,
+        text=True, timeout=60,
+    )  # fmt: skip
+    assert hidden.returncode != 0 and "host secret" not in hidden.stdout
 
 
 @on_darwin
