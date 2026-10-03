@@ -27,6 +27,7 @@ export const ENV_TASK = "ONODA_PI_TASK";
 export const ENV_POLICY = "ONODA_PI_POLICY";
 export const ENV_RUN_INFO = "ONODA_PI_RUN_INFO";
 export const ENV_SPOOL_KEY = "ONODA_PI_SPOOL_KEY";
+export const ENV_BROKER = "ONODA_PI_BROKER"; // vte_contract.py: path of the broker's Unix socket
 export const ENV_PREFIX = "ONODA_PI_";
 
 export const SPOOL_SCHEMA = "onoda.pi-spool/1";
@@ -46,11 +47,26 @@ export const TOOL_CASE_INPUT = "case_input";
 export const TOOL_ORCA_RUN = "orca_run";
 export const TOOL_REPORT = "report_states";
 
+// VTE tasks (vte_contract.py, A57-A59): the agent runs its own jobs through the host broker.
+export const TOOL_STRUCTURE = "structure";
+export const TOOL_ORCA_SUBMIT = "orca_submit";
+export const TOOL_REPORT_VTE = "report_vtes";
+export const VTE_TASK_SCHEMA = "onoda.pi-vte-task/1";
+export const VTE_CLAIM_SCHEMA = "onoda.pi-vte-claim/1";
+export const BROKER_PROTOCOL = "onoda.orca-broker/1";
+/** Broker job ids are per run (`j0001`, ...). */
+export const JOB_ID_RE = /^j\d{4}$/;
+/** A file an earlier job produced, named as the job directory holds it. */
+export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+export const MAX_INPUT_CHARS = 65536;
+
 export interface GatewayPolicy {
 	schema: "onoda.pi-policy/1";
 	allowed_tools: string[];
 	max_requests: number;
 	max_acquisitions: number;
+	/** VTE tasks: `orca_submit` calls, cache hits included (A59). Absent means 0. */
+	max_executions?: number;
 	max_cost_usd?: string | null;
 	unfusable_command_tokens: string[];
 	path_aliases: Record<string, string>;
@@ -226,13 +242,15 @@ export function readJsonEnv<T>(name: string): T | undefined {
 	return path ? (JSON.parse(readFileSync(path, "utf8")) as T) : undefined;
 }
 
-/** Shared mutable run counters (request index, acquisitions) across onoda extensions. */
+/** Shared mutable run counters (request index, acquisitions, executions) across onoda extensions. */
 export interface RunCounters {
 	/** This process's own provider requests (the next request_index). */
 	requests: number;
 	/** Requests spent by RLM child processes, charged to this run's budget. */
 	childRequests: number;
 	acquisitions: number;
+	/** `orca_submit` calls let through the gateway (VTE tasks). */
+	executions: number;
 	/** Sum of every spooled response's cost (Pi's estimate, or a script's synthetic usage_cost). */
 	costUsd: number;
 	/** A response with no cost figure arrived (a cost cap then fails closed). */
@@ -244,7 +262,7 @@ const COUNTERS = Symbol.for("onoda.pi.counters");
 
 export function counters(): RunCounters {
 	const g = globalThis as Record<symbol, RunCounters | undefined>;
-	g[COUNTERS] ??= { requests: 0, childRequests: 0, acquisitions: 0, costUsd: 0, costUnknown: false, ended: false };
+	g[COUNTERS] ??= { requests: 0, childRequests: 0, acquisitions: 0, executions: 0, costUsd: 0, costUnknown: false, ended: false };
 	return g[COUNTERS];
 }
 

@@ -1,28 +1,48 @@
 /**
  * onoda task extension: loaded first.
  *
- * Registers the task tools over a staged `TaskBundle` (verified against its
- * sha256 pins at load), appends the bundle's allowed documentation and
- * advisory ladder to the system prompt, and taps every raw `tool_result`
+ * Registers the task tools over a staged bundle (verified against its sha256
+ * pins at load), appends the bundle's allowed documentation and advisory
+ * ladder to the system prompt, and taps every raw `tool_result`
  * (`stage: raw`) before any later extension (SoL-Pi's reducer) rewrites it.
  *
- * `orca_run` never executes a solver: it hands the agent the pinned,
- * previously produced output and spools `task.acquire` with
+ * A case bundle (`onoda.pi-task/1`) gets `case_input`, `orca_run` and
+ * `report_states`. `orca_run` never executes a solver: it hands the agent the
+ * pinned, previously produced output and spools `task.acquire` with
  * `executed_here: false` before the agent sees a byte of it.
+ *
+ * A VTE bundle (`onoda.pi-vte-task/1`, A57) gets `structure`, `orca_submit`
+ * and `report_vtes`. `orca_submit` sends the agent's input to the host broker
+ * over its Unix socket (ORCA never runs in this process) and spools
+ * `task.execute` with the broker's own word on `executed_here`/`cache_hit`,
+ * input and output objects written first, before the agent sees the output.
+ * The output text is returned whole; shortening it is ObservationPack's job.
  */
 
 import { readFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
+	BROKER_PROTOCOL,
 	counters,
+	ENV_BROKER,
 	ENV_TASK,
+	FILE_NAME_RE,
+	JOB_ID_RE,
+	MAX_INPUT_CHARS,
+	type SpoolWriter,
 	sha256Hex,
 	spool,
 	TOOL_CASE_INPUT,
 	TOOL_ORCA_RUN,
+	TOOL_ORCA_SUBMIT,
 	TOOL_REPORT,
+	TOOL_REPORT_VTE,
+	TOOL_STRUCTURE,
+	VTE_CLAIM_SCHEMA,
+	VTE_TASK_SCHEMA,
 } from "./lib/spool.ts";
 
 interface TaskBundle {
@@ -40,25 +60,58 @@ interface TaskBundle {
 	synthetic_ladder?: boolean;
 }
 
+/** vte_contract.py `VteTaskBundle`. */
+interface VteTaskBundle {
+	schema: "onoda.pi-vte-task/1";
+	case_id: string;
+	instruction: string;
+	molecule: string;
+	point_group: string;
+	structure_name: string;
+	structure_sha256: string;
+	targets: { spin: 1 | 3; irrep: string; count: number }[];
+	review_status: string;
+	docs?: string[];
+	ladder_sha256?: string | null;
+	synthetic_ladder?: boolean;
+	max_executions: number;
+}
+
+/** vte_contract.py `BrokerReply`. */
+interface BrokerReply {
+	protocol: "onoda.orca-broker/1";
+	status: "completed" | "failed" | "refused";
+	job_id: string | null;
+	cache_hit: boolean;
+	executed_here: boolean;
+	input_sha256: string | null;
+	output_sha256: string | null;
+	output_b64: string;
+	files: string[];
+	reason: string | null;
+}
+
 const DECIMAL_RE = /^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$/;
 const DOC_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/; // contract.py DOC_NAME_RE
+const SPIN_NAMES: Record<number, string> = { 1: "singlet", 3: "triplet" };
+
+/** `pin` (`<hex>` or `sha256:<hex>`) as bare hex. */
+function bareHex(pin: string): string {
+	return pin.replace(/^sha256:/, "");
+}
 
 /** Read a bundle file and check it against a pin given as `<hex>` or `sha256:<hex>`. */
 function readPinned(dir: string, name: string, pin: string): Buffer {
 	const bytes = readFileSync(join(dir, name));
 	const actual = sha256Hex(bytes);
-	if (pin.replace(/^sha256:/, "") !== actual) {
+	if (bareHex(pin) !== actual) {
 		throw new Error(`onoda-task: ${name} does not match its pinned sha256 (${pin}; actual ${actual})`);
 	}
 	return bytes;
 }
 
-function loadBundle(dir: string) {
-	const task = JSON.parse(readFileSync(join(dir, "task.json"), "utf8")) as TaskBundle;
-	if (task.schema !== "onoda.pi-task/1") throw new Error(`onoda-task: ${dir}/task.json is not onoda.pi-task/1`);
-	if (task.output_provenance !== "acquired") throw new Error("onoda-task: only acquired outputs are supported");
-	const input = readPinned(join(dir, "input"), task.input_name, task.input_sha256);
-	const output = readPinned(join(dir, "output"), task.output_name, task.output_sha256);
+/** The bundle's allowed docs and advisory ladder, as system-prompt sections. */
+function promptSections(dir: string, task: TaskBundle | VteTaskBundle): string {
 	const sections: string[] = [];
 	for (const name of [...(task.docs ?? [])].sort()) {
 		if (!DOC_NAME_RE.test(name)) throw new Error(`onoda-task: doc name ${JSON.stringify(name)} is not a plain *.md name`);
@@ -68,7 +121,30 @@ function loadBundle(dir: string) {
 		const ladder = readPinned(dir, "ladder.md", task.ladder_sha256).toString("utf8");
 		sections.push(`## Advisory ladder${task.synthetic_ladder ? " (synthetic test fixture)" : ""}\n\n${ladder}`);
 	}
-	return { task, input, output, prompt: sections.join("\n\n") };
+	return sections.join("\n\n");
+}
+
+function loadBundle(dir: string, task: TaskBundle) {
+	if (task.output_provenance !== "acquired") throw new Error("onoda-task: only acquired outputs are supported");
+	const input = readPinned(join(dir, "input"), task.input_name, task.input_sha256);
+	const output = readPinned(join(dir, "output"), task.output_name, task.output_sha256);
+	return { task, input, output, prompt: promptSections(dir, task) };
+}
+
+function loadVteBundle(dir: string, task: VteTaskBundle) {
+	if (!FILE_NAME_RE.test(task.structure_name)) {
+		throw new Error(`onoda-task: structure name ${JSON.stringify(task.structure_name)} is not a plain file name`);
+	}
+	if (!Number.isInteger(task.max_executions) || task.max_executions < 1) {
+		throw new Error("onoda-task: max_executions must be a positive integer");
+	}
+	for (const t of task.targets) {
+		if (!SPIN_NAMES[t.spin] || typeof t.irrep !== "string" || !Number.isInteger(t.count) || t.count < 1) {
+			throw new Error(`onoda-task: malformed target ${JSON.stringify(t)}`);
+		}
+	}
+	const structure = readPinned(join(dir, "structure"), task.structure_name, task.structure_sha256);
+	return { task, structure, prompt: promptSections(dir, task) };
 }
 
 const Quantity = Type.Object(
@@ -99,12 +175,8 @@ const ReportParams = Type.Object(
 	{ additionalProperties: false },
 );
 
-export default function onodaTask(pi: ExtensionAPI): void {
-	const w = spool();
-	if (!w) throw new Error("onoda-task: ONODA_PI_SPOOL is not set");
-	const dir = process.env[ENV_TASK];
-	if (!dir) throw new Error("onoda-task: ONODA_PI_TASK is not set");
-	const { task, input, output, prompt } = loadBundle(dir);
+function registerCaseTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: TaskBundle): string {
+	const { task, input, output, prompt } = loadBundle(dir, raw);
 	const outputHex = sha256Hex(output);
 
 	pi.registerTool({
@@ -174,6 +246,288 @@ export default function onodaTask(pi: ExtensionAPI): void {
 			return { content: [{ type: "text", text: "Claim recorded." }], details: claim };
 		},
 	});
+
+	return prompt;
+}
+
+const SubmitParams = Type.Object(
+	{
+		input: Type.String({
+			description: "The complete ORCA input file (.inp text), submitted exactly as written",
+			minLength: 1,
+			maxLength: MAX_INPUT_CHARS,
+		}),
+		attach: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						job_id: Type.String({ description: "An earlier job of this run, e.g. j0001" }),
+						name: Type.String({ description: "A file that job produced, e.g. job.gbw" }),
+					},
+					{ additionalProperties: false },
+				),
+				{ description: "Files of earlier jobs to place next to the input (e.g. orbitals for MOREAD)" },
+			),
+		),
+	},
+	{ additionalProperties: false },
+);
+
+const VteParams = Type.Object(
+	{
+		states: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						spin: Type.Union([Type.Literal(1), Type.Literal(3)], { description: "1 singlet, 3 triplet" }),
+						irrep: Type.String({ description: "Irreducible representation, e.g. B1 or A''" }),
+						character: Type.Optional(
+							Type.String({ description: "Dominant excitation, e.g. n,pi* or pi,3s", maxLength: 64 }),
+						),
+						energy: Type.Object(
+							{
+								text: Type.String({ description: "Excitation energy exactly as printed, e.g. 3.912" }),
+								unit: Type.String({ description: "eV" }),
+							},
+							{ additionalProperties: false },
+						),
+						job_id: Type.String({ description: "The orca_submit job whose output prints this energy" }),
+					},
+					{ additionalProperties: false },
+				),
+			),
+		),
+		notes: Type.Optional(Type.String()),
+	},
+	{ additionalProperties: false },
+);
+
+/** One request, one reply line, one connection (vte_contract.py broker protocol). */
+function brokerRequest(socketPath: string, request: Record<string, unknown>): Promise<unknown> {
+	return new Promise((resolve, reject) => {
+		const sock = createConnection(socketPath);
+		let buf = "";
+		let done = false;
+		const finish = (fn: () => void) => {
+			if (done) return;
+			done = true;
+			sock.destroy();
+			fn();
+		};
+		const parse = (line: string) => {
+			try {
+				resolve(JSON.parse(line));
+			} catch {
+				reject(new Error("orca_submit: the broker's reply is not JSON"));
+			}
+		};
+		sock.setEncoding("utf8");
+		sock.on("connect", () => sock.end(`${JSON.stringify(request)}\n`));
+		sock.on("data", (chunk: string) => {
+			buf += chunk;
+			const nl = buf.indexOf("\n");
+			if (nl >= 0) finish(() => parse(buf.slice(0, nl)));
+		});
+		sock.on("end", () => finish(() => (buf ? parse(buf) : reject(new Error("orca_submit: the broker closed without a reply")))));
+		sock.on("error", (err) => finish(() => reject(new Error(`orca_submit: broker unreachable: ${err.message}`))));
+	});
+}
+
+/**
+ * Check a broker reply against the contract and against what was sent; the
+ * output bytes must hash to the pin the broker journaled. Anything else
+ * throws, so the agent never sees an output that is not what was recorded.
+ */
+function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; output: Buffer } {
+	const r = raw as Partial<BrokerReply>;
+	if (!r || typeof r !== "object" || r.protocol !== BROKER_PROTOCOL) {
+		throw new Error(`orca_submit: the broker's reply is not ${BROKER_PROTOCOL}`);
+	}
+	const reply: BrokerReply = {
+		protocol: BROKER_PROTOCOL,
+		status: r.status as BrokerReply["status"],
+		job_id: r.job_id ?? null,
+		cache_hit: r.cache_hit === true,
+		executed_here: r.executed_here === true,
+		input_sha256: r.input_sha256 ?? null,
+		output_sha256: r.output_sha256 ?? null,
+		output_b64: r.output_b64 ?? "",
+		files: r.files ?? [],
+		reason: r.reason ?? null,
+	};
+	if (reply.cache_hit && reply.executed_here) throw new Error("orca_submit: broker reply is a cache hit and an execution");
+	if (reply.status === "refused") {
+		if (reply.job_id !== null || reply.executed_here || reply.cache_hit) {
+			throw new Error("orca_submit: a refused broker reply names a job");
+		}
+		return { reply, output: Buffer.alloc(0) };
+	}
+	if (reply.status !== "completed" && reply.status !== "failed") {
+		throw new Error(`orca_submit: unknown broker status ${JSON.stringify(r.status)}`);
+	}
+	if (typeof reply.job_id !== "string" || !JOB_ID_RE.test(reply.job_id)) {
+		throw new Error(`orca_submit: broker job id ${JSON.stringify(reply.job_id)} is not j0001, ...`);
+	}
+	if (typeof reply.input_sha256 !== "string" || bareHex(reply.input_sha256) !== inputHex) {
+		throw new Error("orca_submit: the broker pinned a different input than was sent");
+	}
+	if (!Array.isArray(reply.files) || !reply.files.every((f) => typeof f === "string" && FILE_NAME_RE.test(f))) {
+		throw new Error("orca_submit: the broker's file list is malformed");
+	}
+	const output = Buffer.from(reply.output_b64, "base64");
+	if (typeof reply.output_sha256 !== "string" || bareHex(reply.output_sha256) !== sha256Hex(output)) {
+		throw new Error("orca_submit: the broker's output bytes do not match its output_sha256");
+	}
+	return { reply, output };
+}
+
+function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: VteTaskBundle): string {
+	const { task, structure, prompt } = loadVteBundle(dir, raw);
+	const socketPath = process.env[ENV_BROKER];
+	if (!socketPath) throw new Error("onoda-task: ONODA_PI_BROKER is not set");
+
+	const targets = task.targets.map((t) => `- ${t.count} ${SPIN_NAMES[t.spin]} ${t.irrep} state${t.count > 1 ? "s" : ""}`);
+	const structureText = [
+		`Molecule: ${task.molecule}`,
+		`Point group: ${task.point_group}`,
+		`Structure file: ${task.structure_name} (xyz, angstrom)`,
+		"",
+		structure.toString("utf8").trimEnd(),
+		"",
+		"Target excited states (vertical, from the ground state):",
+		...targets,
+		"",
+		`At most ${task.max_executions} orca_submit calls in this run (repeats of an identical job count).`,
+	].join("\n");
+
+	pi.registerTool({
+		name: TOOL_STRUCTURE,
+		label: "Structure",
+		description: `Read the molecular structure (xyz), point group and target states for case ${task.case_id} (read-only).`,
+		promptSnippet: "Read the molecule's structure and the excited states to compute",
+		parameters: Type.Object({}, { additionalProperties: false }),
+		async execute() {
+			return {
+				content: [{ type: "text", text: structureText }],
+				details: { case_id: task.case_id, name: task.structure_name, sha256: sha256Hex(structure), targets: task.targets },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: TOOL_ORCA_SUBMIT,
+		label: "ORCA submit",
+		description:
+			"Run one ORCA job on the host and return its complete output. Pass the full input file text; to reuse files " +
+			"an earlier job produced (e.g. orbitals), list them in attach by job id and file name. An input identical to " +
+			"an earlier one (with the same attachments) returns that job's output from the cache under a new job id. " +
+			"Every call counts against the run's job limit. Cite the job id when you report a value from its output.",
+		promptSnippet: "Run an ORCA input on the host and read its output",
+		parameters: SubmitParams,
+		executionMode: "sequential",
+		async execute(toolCallId, params) {
+			const input = Buffer.from(params.input, "utf8");
+			const attach = params.attach ?? [];
+			for (const a of attach) {
+				if (!JOB_ID_RE.test(a.job_id)) throw new Error(`attach: ${JSON.stringify(a.job_id)} is not a job id (j0001, ...)`);
+				if (!FILE_NAME_RE.test(a.name)) throw new Error(`attach: ${JSON.stringify(a.name)} is not a plain file name`);
+			}
+			// Counted once it reaches the broker, which keeps its own count (A59).
+			counters().executions++;
+			const inputHex = sha256Hex(input);
+			const { reply, output } = checkReply(
+				await brokerRequest(socketPath, {
+					protocol: BROKER_PROTOCOL,
+					op: "submit",
+					tool_call_id: toolCallId,
+					input: params.input,
+					attach,
+				}),
+				inputHex,
+			);
+			if (reply.status === "refused") throw new Error(`orca_submit refused: ${reply.reason ?? "no reason given"}`);
+			w.line({
+				type: "task.execute",
+				tool_call_id: toolCallId,
+				job_id: reply.job_id,
+				status: reply.status,
+				input: w.putObject(input),
+				output: w.putObject(output),
+				cache_hit: reply.cache_hit,
+				executed_here: reply.executed_here,
+			});
+			const how = reply.cache_hit ? "cache hit: an identical earlier job's output, not run again" : "executed";
+			const header = [
+				`ORCA job ${reply.job_id}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`,
+				`Files for attach: ${reply.files.length ? reply.files.join(", ") : "none"}`,
+			].join("\n");
+			return {
+				content: [
+					{ type: "text", text: header },
+					{ type: "text", text: output.toString("utf8") },
+				],
+				details: {
+					job_id: reply.job_id,
+					status: reply.status,
+					cache_hit: reply.cache_hit,
+					executed_here: reply.executed_here,
+					input_sha256: inputHex,
+					output_sha256: sha256Hex(output),
+					files: reply.files,
+				},
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: TOOL_REPORT_VTE,
+		label: "Report VTEs",
+		description:
+			"Report your final answer: each target state's vertical excitation energy in eV exactly as printed in the " +
+			"output of the job you cite, with its spin, irrep and dominant character. Report only states you identified.",
+		promptSnippet: "Report the excited states' vertical transition energies as your answer",
+		parameters: VteParams,
+		async execute(toolCallId, params) {
+			const states = params.states ?? [];
+			for (const s of states) {
+				if (!DECIMAL_RE.test(s.energy.text)) throw new Error(`not a decimal: ${JSON.stringify(s.energy.text)}`);
+				if (s.energy.unit !== "eV") throw new Error(`excitation energies are reported in eV, not ${JSON.stringify(s.energy.unit)}`);
+				if (!JOB_ID_RE.test(s.job_id)) throw new Error(`job id ${JSON.stringify(s.job_id)} is not a job id (j0001, ...)`);
+			}
+			const claim = {
+				schema: VTE_CLAIM_SCHEMA,
+				case_id: task.case_id,
+				states: states.map((s) => ({
+					spin: s.spin,
+					irrep: s.irrep,
+					character: s.character ?? "",
+					energy: s.energy,
+					job_id: s.job_id,
+				})),
+				notes: params.notes ?? "",
+			};
+			w.line({ type: "task.claim", tool_call_id: toolCallId, claim: w.putJson(claim) });
+			return { content: [{ type: "text", text: "Claim recorded." }], details: claim };
+		},
+	});
+
+	return prompt;
+}
+
+export default function onodaTask(pi: ExtensionAPI): void {
+	const w = spool();
+	if (!w) throw new Error("onoda-task: ONODA_PI_SPOOL is not set");
+	const dir = process.env[ENV_TASK];
+	if (!dir) throw new Error("onoda-task: ONODA_PI_TASK is not set");
+	const raw = JSON.parse(readFileSync(join(dir, "task.json"), "utf8")) as TaskBundle | VteTaskBundle;
+	let prompt: string;
+	if (raw.schema === VTE_TASK_SCHEMA) {
+		prompt = registerVteTools(pi, w, dir, raw);
+	} else if (raw.schema === "onoda.pi-task/1") {
+		prompt = registerCaseTools(pi, w, dir, raw);
+	} else {
+		throw new Error(`onoda-task: ${dir}/task.json is neither onoda.pi-task/1 nor ${VTE_TASK_SCHEMA}`);
+	}
 
 	if (prompt) {
 		pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\n${prompt}` }));

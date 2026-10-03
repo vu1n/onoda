@@ -46,6 +46,7 @@ import {
 	scrubOnodaEnv,
 	spool,
 	TOOL_ORCA_RUN,
+	TOOL_ORCA_SUBMIT,
 } from "./lib/spool.ts";
 
 type AssistantMessage = Extract<MessageEndEvent["message"], { role: "assistant" }>;
@@ -151,6 +152,11 @@ function gatewayDecision(policy: GatewayPolicy, toolName: string, input: Record<
 	}
 	if (toolName === TOOL_ORCA_RUN && c.acquisitions >= policy.max_acquisitions) {
 		return `acquisition budget exhausted (${policy.max_acquisitions})`;
+	}
+	// Cache hits count: the cap is on submissions, not on ORCA time (A59).
+	const maxExecutions = policy.max_executions ?? 0;
+	if (toolName === TOOL_ORCA_SUBMIT && c.executions >= maxExecutions) {
+		return `execution budget exhausted (${maxExecutions})`;
 	}
 	return undefined;
 }
