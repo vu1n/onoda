@@ -16,7 +16,7 @@ and matches states to QUESTDB's SC-NEVPT2 references by identity, never by
 energy order. Out of scope here: running the experiment itself, the ablation
 and optimizer integration (GEPA over the ladder), which come after this lands.
 
-Decisions taken (recorded as assumptions A57–A63 by VTE-001):
+Decisions taken (recorded as assumptions A57–A62 by VTE-001):
 
 - **Execution broker.** ORCA cannot run inside the Pi sandbox, so a host-side
   Python broker owns `OrcaLocalScheduler`; the Pi extension talks to it over a
@@ -72,7 +72,7 @@ mirror is VTE-003's). Pins the wire shapes so lanes stay disjoint.
   `load_vte_references` (evaluator-side only), `vte_case_manifests(root)`,
   `normalize_character()` (QUESTDB's Symbol-font glyphs → ascii, e.g.
   `` → `pi`).
-- `docs/ASSUMPTIONS.md`: rows A57–A63 for the decisions above.
+- `docs/ASSUMPTIONS.md`: rows A57–A62 for the decisions above.
 
 ```yaml
 id: VTE-001
@@ -105,7 +105,7 @@ produces:
   - "src/onoda/science/vte.py::load_vte_case"
   - "src/onoda/science/vte.py::load_vte_references"
   - "src/onoda/science/vte.py::normalize_character"
-gate: "uv run pytest tests/test_vte_contract.py tests/test_pi_contract.py -q passes; uv run ruff check . and ruff format --check . pass"
+gate: "uv run pytest tests/test_vte_contract.py -q passes; uv run ruff check . and ruff format --check . pass"
 assumptions:
   - "existing tests that build GatewayPolicy or call Variant.tools() keep passing unchanged (new args default to today's behaviour)"
 ```
@@ -262,7 +262,7 @@ gate: "uv run pytest tests/test_pi_vte_grading.py -q passes: supported/contradic
 ## VTE-007 — Eight QUESTDB cases and the reconstructed ladder
 
 `scripts/questdb_cases.py` builds `cases-dev/questdb/<molecule>/` from a
-QUESTDB checkout (pfloos/QUESTDB @ 460482b): `case.yaml` (`VteCaseManifest`),
+QUESTDB checkout (pfloos/QUESTDB @ 460482b): `<id>.vte.yaml` (`VteCaseManifest`),
 the CC3/aug-cc-pVTZ `.xyz`, and `references.json` (evaluator-only rows from
 `data/cas/json/*_mrpt.json`, SC-NEVPT2 values, with active space and state
 average). Molecules: acetaldehyde, formamide, ketene, diazomethane, acetone,
@@ -285,7 +285,7 @@ footprint:
 produces:
   - "cases-dev/questdb/**"
   - "experiments/questdb/ladder-from-paper.md"
-gate: "uv run pytest tests/test_questdb_cases.py -q passes: all 8 cases load with load_vte_case, sha256 pins verify, reference rows match the QUESTDB JSON, total transitions 53, and no references.json content appears in any case.yaml"
+gate: "uv run pytest tests/test_questdb_cases.py -q passes: all 8 cases load with load_vte_case, sha256 pins verify, reference rows match the QUESTDB JSON, total transitions 53, and no references.json content appears in any .vte.yaml"
 ```
 
 ## VTE-008 — macOS Seatbelt sandbox backend
@@ -369,3 +369,10 @@ flowchart TD
     VTE_006 --> VTE_009
     VTE_007 --> VTE_009
 ```
+
+## Deviations
+
+- VTE-001: the decisions became six assumption rows (A57–A62), not seven; the
+  gate's `tests/test_pi_contract.py` does not exist and was dropped. VTE
+  manifests are named `<id>.vte.yaml` (`VTE_MANIFEST_SUFFIX`) so `case list`
+  and the optimizer splits, which glob `*.case.yaml`, never pick them up.
