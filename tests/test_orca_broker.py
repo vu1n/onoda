@@ -152,7 +152,7 @@ def test_real_execution_over_socket_is_journaled_as_stand_in(tmp_path):
     assert answer.executed_here and not answer.cache_hit and not answer.replay
     assert answer.stand_in is True  # synthetic, never presented as ORCA
     assert answer.binary_sha256 == sha256_digest(binary.read_bytes())
-    assert answer.key == cache_key(reply.input_sha256, [], answer.binary_sha256)
+    assert answer.key == cache_key(reply.input_sha256, [], answer.binary_sha256, True)
     assert answer.scheduler_job_id == "job-00001"
     assert isinstance(answer.duration_ms, int)
     assert answer.output_sha256 == reply.output_sha256
@@ -274,7 +274,8 @@ def test_attach_an_earlier_jobs_file(tmp_path):
 
     gbw_sha = sha256_digest(("orbitals for " + INPUT).encode())
     reply = read_journal(b.journal_path)[-1]
-    assert reply.key == cache_key(r2.input_sha256, [("j0001.gbw", gbw_sha)], reply.binary_sha256)
+    attached = [("j0001.gbw", gbw_sha)]
+    assert reply.key == cache_key(r2.input_sha256, attached, reply.binary_sha256, True)
     assert r1.files == ("job.gbw",)
 
     # A cache hit's files can be attached too (served from the cache directory).
@@ -501,3 +502,24 @@ def test_an_uncertain_scheduler_failure_closes_the_broker(tmp_path, monkeypatch)
     r2 = b.submit(submit("! second\n", call="c2"))
     assert r2.status == "refused" and r2.reason == "broker_failed"
     assert runs(binary) == 0
+
+
+def test_stand_in_and_orca_jobs_never_share_a_cache_entry(tmp_path):
+    binary = stand_in(tmp_path)
+    cache = tmp_path / "cache"
+    first = broker(tmp_path, "run1", scheduler=scheduler(tmp_path, binary), cache_dir=cache)
+    assert first.submit(submit()).executed_here
+    not_stand_in = OrcaLocalScheduler(
+        OrcaSettings(
+            enabled=True,
+            binary=str(binary),
+            work_root=str(tmp_path / "work2"),
+            max_wall_seconds=10,
+            stand_in=False,
+        )
+    )
+    second = broker(tmp_path, "run2", scheduler=not_stand_in, cache_dir=cache)
+    r = second.submit(submit())
+    assert not r.cache_hit and r.executed_here and runs(binary) == 2
+    keys = [e.key for b in (first, second) for e in read_journal(b.journal_path) if e.key]
+    assert len(set(keys)) == 2

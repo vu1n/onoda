@@ -11,7 +11,8 @@ with one `BrokerReply` line. Per submission the broker:
    (`j0001` + `job.gbw` -> `j0001.gbw`), so it never collides with the files
    ORCA writes for `job.inp` and the input names it unambiguously;
 3. computes the cache key, sha256 of (input bytes, placed attachments by
-   name and sha256, ORCA binary sha256);
+   name and sha256, ORCA binary sha256, stand-in flag), so a stand-in's
+   outputs and real ORCA outputs never share a cache entry;
 4. serves a hit from the shared cache directory as acquired (`cache_hit`,
    `executed_here: false`), or runs a new scheduler job under a fresh
    scheduler key (a specification digest is never an execution id), and
@@ -65,7 +66,7 @@ from onoda.science.orca_local import FILE_NAME_RE, OrcaLocalScheduler, sha256_fi
 BROKER_PROTOCOL = "onoda.orca-broker/1"
 JOURNAL_NAME = "broker.jsonl"
 JOURNAL_SCHEMA = "onoda.orca-broker-journal/1"
-CACHE_KEY_SCHEMA = "onoda.orca-broker-key/1"
+CACHE_KEY_SCHEMA = "onoda.orca-broker-key/2"  # /2 adds the stand-in flag
 CACHE_ENTRY_SCHEMA = "onoda.orca-broker-cache/1"
 MAX_REQUEST_BYTES = 1 << 20  # one JSON line; a 64 KiB input escapes to well under this
 MAX_JOBS = 9999  # job ids are j0001..j9999
@@ -257,14 +258,21 @@ def placed_name(job_id: str, name: str) -> str:
     return job_id + name[len("job") :]
 
 
-def cache_key(input_sha256: str, attached: Iterable[tuple[str, str]], binary_sha256: str) -> str:
-    """sha256 of (input bytes, attached files by placed name and sha256, ORCA binary)."""
+def cache_key(
+    input_sha256: str, attached: Iterable[tuple[str, str]], binary_sha256: str, stand_in: bool
+) -> str:
+    """sha256 of (input bytes, attached files by placed name and sha256, ORCA binary, stand-in).
+
+    The binary's sha256 already differs between a stand-in and ORCA in practice;
+    the flag makes it explicit that their outputs never share an entry.
+    """
     return digest_of(
         {
             "schema": CACHE_KEY_SCHEMA,
             "input": input_sha256,
             "attach": [[name, sha] for name, sha in sorted(attached)],
             "binary": binary_sha256,
+            "stand_in": stand_in,
         }
     )
 
@@ -293,6 +301,7 @@ class BrokerReplay:
 
     binary_sha256: str
     jobs: dict[str, list[ReplayJob]] = field(default_factory=dict)
+    stand_in: bool = False  # as recorded; part of every cache key
 
     @classmethod
     def from_journal(
@@ -300,6 +309,7 @@ class BrokerReplay:
     ) -> BrokerReplay:
         """Build from a recorded journal plus its output bytes by `sha256:` digest."""
         binaries: set[str] = set()
+        stand_ins: set[bool] = set()
         jobs: dict[str, list[ReplayJob]] = {}
         for e in entries:
             if e.event != "reply" or e.status == "refused":
@@ -310,13 +320,20 @@ class BrokerReplay:
                 raise OnodaError(f"replay: no bytes for output {e.output_sha256} of {e.job_id}")
             if e.binary_sha256 is not None:
                 binaries.add(e.binary_sha256)
+            stand_ins.add(bool(e.stand_in))
             jobs.setdefault(e.key, []).append(
                 ReplayJob(e.status, data, e.files, e.stand_in, e.cache_hit, e.reason)
             )
         if len(binaries) > 1:
             raise OnodaError(f"replay: journal names {len(binaries)} ORCA binaries, need one")
+        if len(stand_ins) > 1:
+            raise OnodaError("replay: journal mixes stand-in and ORCA jobs")
         # A run that never got a job replays as one that serves nothing.
-        return cls(binary_sha256=binaries.pop() if binaries else "none", jobs=jobs)
+        return cls(
+            binary_sha256=binaries.pop() if binaries else "none",
+            jobs=jobs,
+            stand_in=stand_ins.pop() if stand_ins else False,
+        )
 
 
 @dataclass(frozen=True)
@@ -446,12 +463,16 @@ class OrcaBroker:
         self.max_executions = max_executions
         if scheduler is not None:
             self.binary_sha256 = sha256_file(scheduler.settings.binary)
+            self.stand_in = scheduler.settings.stand_in
         else:
             assert replay is not None
             self.binary_sha256 = replay.binary_sha256
+            self.stand_in = replay.stand_in
             # Consumed as served; the caller's replay stays as given.
             self._replay = BrokerReplay(
-                replay.binary_sha256, {k: list(v) for k, v in replay.jobs.items()}
+                replay.binary_sha256,
+                {k: list(v) for k, v in replay.jobs.items()},
+                replay.stand_in,
             )
         self._run = uuid.uuid4().hex  # scheduler keys are per execution, never the cache key
         self._jobs: dict[str, _Job] = {}
@@ -520,7 +541,10 @@ class OrcaBroker:
                 raise _Refused("max_executions")
             attached = self._resolve(request.attach)
             key = cache_key(
-                input_sha, [(n, sha) for n, (sha, _) in attached.items()], self.binary_sha256
+                input_sha,
+                [(n, sha) for n, (sha, _) in attached.items()],
+                self.binary_sha256,
+                self.stand_in,
             )
             if self._replay is not None:
                 return self._serve_replay(request, key, input_sha)
@@ -633,6 +657,8 @@ class OrcaBroker:
                 raise _Refused("cache_corrupt") from exc
             if hit is not None:
                 log, files, stand_in = hit
+                if stand_in != self.stand_in:  # the key says otherwise
+                    raise _Refused("cache_corrupt")
                 return self._reply(
                     request,
                     job_id=self._allocate(),

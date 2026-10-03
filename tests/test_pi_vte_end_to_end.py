@@ -210,6 +210,25 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert report["arms"]["S1"]["coverage"] == 1 and report["arms"]["S1"]["mae_ev"] == "0.002000"
 
 
+def test_a_run_citing_a_stand_in_job_is_graded_synthetic(recorded, monkeypatch):
+    """However the run itself is labelled: e.g. a real-ORCA run served a stand-in's cache entry."""
+    _, store, evaluator, _, _ = recorded
+    run_record = store.run_record("vte")
+    unlabelled = run_record.model_copy(
+        update={
+            "labels": [x for x in run_record.labels if x != "synthetic"],
+            "config": {
+                **run_record.config,
+                "orca": {**run_record.config["orca"], "stand_in": False},
+            },
+        }
+    )
+    monkeypatch.setattr(store, "run_record", lambda run_id: unlabelled)
+    assert jobs(store, "vte")["j0002"].metadata["stand_in"] is True  # the cache hit
+    ev = pi_vte.evaluate_vte_run(store, evaluator, "vte", case())
+    assert ev.metrics["synthetic"] == "true"
+
+
 def test_replay_of_a_run_with_an_execution_matches_with_zero_executions(recorded):
     root, store, _, binary, _ = recorded
     out = pi_run.replay_run_pi(store, "vte", case(), work_dir=root / "replay")

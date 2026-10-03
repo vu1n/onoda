@@ -76,6 +76,8 @@ CLAIM_VERDICTS = ("supported", "contradicted", "unsupported")
 IDENTITY_VERDICTS = ("identified", "unidentified")
 REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
 
+# Receipt labels that mark a job's bytes as not ORCA's (`ingest._Writer.on_execute`).
+_SYNTHETIC_JOB_LABELS = frozenset({"stand-in", "not-orca", "synthetic"})
 # Parser fields whose Problems make a job's transition energies untrustworthy.
 _BLOCKING_FIELDS = frozenset({"mr_states", "casscf_converged"})
 # Mean places: the inputs print 3; the mean of n of them is rounded, not truncated.
@@ -88,6 +90,7 @@ class VteJob(NamedTuple):
     output: bytes
     executed_here: bool
     cache_hit: bool
+    synthetic: bool = False  # a stand-in produced the bytes (labels or metadata say so)
 
 
 def mean_ev(values: list[Decimal]) -> str:
@@ -242,9 +245,10 @@ def evaluate_vte_claims(
     """Grade `claim` against the run's own job outputs and `references`; see the module doc.
 
     `jobs` maps every broker job id of the run to (output bytes,
-    executed_here, cache_hit) from the run record. `claim=None` (no
-    `report_vtes`) leaves every reference row `missing`. `synthetic` marks
-    scripted runs whose outputs are synthetic text. Writes one new
+    executed_here, cache_hit[, synthetic]) from the run record. `claim=None`
+    (no `report_vtes`) leaves every reference row `missing`. `synthetic` marks
+    scripted runs whose outputs are synthetic text; any synthetic job (a
+    stand-in's bytes, executed or served from the cache) makes it true too. Writes one new
     `Evaluation` to `evaluator_store`, which must refuse agent-visible objects.
     """
     if "agent" in evaluator_store.allowed_visibility:
@@ -255,6 +259,7 @@ def evaluate_vte_claims(
     if claim is not None and claim.case_id != m.case_id:
         raise IntegrityError(f"claim is for {claim.case_id!r}, case is {m.case_id!r}")
     run_jobs = {job_id: VteJob(*job) for job_id, job in jobs.items()}
+    synthetic = synthetic or any(job.synthetic for job in run_jobs.values())
     for job_id, job in run_jobs.items():
         if job.executed_here and job.cache_hit:
             raise IntegrityError(f"job {job_id}: a cache hit is never an execution")
@@ -374,6 +379,8 @@ def _vte_jobs(store: Store, run_id: str) -> dict[str, VteJob]:
             store.get_bytes(receipt.outputs["log"]),
             receipt.metadata["executed_here"] is True,
             receipt.metadata["cache_hit"] is True,
+            receipt.metadata.get("stand_in") is True
+            or bool(_SYNTHETIC_JOB_LABELS & set(receipt.labels)),
         )
     return jobs
 
@@ -384,8 +391,9 @@ def evaluate_vte_run(
     """Grade a VTE run's last claim against its own jobs and the case's references (A58).
 
     The references are read here, on the evaluator side, and the evaluation
-    goes to `evaluator_store` only. A scripted run, or one whose jobs a
-    stand-in ran, is graded as synthetic.
+    goes to `evaluator_store` only. A scripted run, a run configured with a
+    stand-in, or one citing any job a stand-in produced (including a cache
+    hit of a stand-in's entry) is graded as synthetic.
     """
     run = store.run_record(run_id)
     if run.config.get("task_kind") != "vte":
