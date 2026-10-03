@@ -1,321 +1,371 @@
-# Plan: M4 — onoda's RLM extension and GEPA as the harness optimizer
+# Plan: QUESTDB agent slice — an agent runs its own CASSCF/SC-NEVPT2 jobs
 
-Vu decided on 2026-09-27 (thread "RLM and SoL-Pi reuse") to build our own RLM
-as a stock-Pi extension, and to use GEPA (MIT, `gepa==0.1.4`, core has no
-dependencies) as the one optimizer. GEPA serves two jobs: it makes the RLM
-self-improving, and it becomes the reconstructed SoL-Pi auto-research loop.
-Third-party Pi RLM packages are ruled out. DSPy RLM is used as a design
-reference only. Background: `docs/handoff/SOL_PI_DELTA.md` §0/§3/§5 and
-`/mnt/project-files/scientific-harness/reuse-evaluation.md`.
+Scope and phase-0 evidence: `/mnt/project-files/scientific-harness/questdb-slice/SCOPE.md`
+(project files). Built on branch `questdb-data` (on top of `orca-exec`, PR #15,
+orca-parser@2), which carries the phase-0 data and real ORCA 6.1.1 NEVPT2
+fixtures from the Mac.
 
-What M4 builds:
+What this slice delivers: everything needed to run Lee & Rondinelli's
+Baseline-vs-Decision comparison in miniature on Vu's Mac. An agent (Pi, S0 =
+no ladder, S1 = ladder) gets a molecule's QUESTDB geometry and its target
+states (counts per spin and irrep, no energies), writes ORCA inputs, submits
+them through a new `orca_submit` tool that really executes ORCA on the host,
+and reports vertical transition energies with their identity. A grader checks
+every claimed value against the parser's reading of the job the agent cites,
+and matches states to QUESTDB's SC-NEVPT2 references by identity, never by
+energy order. Out of scope here: running the experiment itself, the ablation
+and optimizer integration (GEPA over the ladder), which come after this lands.
 
-- **RLM (arm S1r).** A persistent `ipython` tool, backed by a stdlib-only
-  Python kernel. Inside the kernel, `rlm(prompt, context=None)` spawns a
-  child Pi process and returns the child's answer as a string. The child
-  loads the same onoda extensions (task tools, scripted provider, recorder).
-  It spools into its own directory under the parent's spool, and it draws
-  from the parent's request budget.
-- **Kernel state (SOL_PI_DELTA §3).** Kernel state is never a checkpoint
-  dependency. Anything a later step relies on goes through
-  `commit_state(name, value)`. Committed values must be JSON, never pickle,
-  and they are spooled before the kernel acknowledges the commit.
-- **Self-improvement.** Everything that shapes RLM behavior is a named text
-  component of a `HarnessCandidate`: the system prompt, the tool doc, the
-  child prompt, a preloaded helper library, the limits, the advisory ladder,
-  and the SoL-Pi mechanism set. Improvement happens between runs, never
-  inside one. GEPA proposes candidates from recorded runs, and SoL-Pi's two
-  gates decide promotion as a GEPA `AcceptanceCriterion`. The gates are
-  every capability metric within a predeclared tolerance, zero increase in
-  false-success claims, and at least one efficiency metric improved.
-- **Out of scope for the optimizer.** The evaluator, parsers, gateway,
-  budget authority, and the untouched final split are never reachable from
-  it. Prime's in-run `/refine` style of self-rewriting is excluded.
+Decisions taken (recorded as assumptions A57–A63 by VTE-001):
 
-Everything stays offline. Scripted providers drive the parent and child Pi
-processes, and a scripted reflection callable stands in for GEPA's
-reflection model.
+- **Execution broker.** ORCA cannot run inside the Pi sandbox, so a host-side
+  Python broker owns `OrcaLocalScheduler`; the Pi extension talks to it over a
+  Unix socket in the Pi work directory (visible to the Pi process, not to the
+  agent's `bash`). The broker's journal is the authoritative execution record;
+  ingest cross-checks every spooled `task.execute` against it.
+- **Cache.** Jobs are keyed by sha256 of (input bytes, attached files, ORCA
+  binary). A hit returns the earlier output and is recorded as acquired
+  (`executed_here: false`, `cache_hit: true`), never as a new execution.
+  Scripted replay uses the same path in replay-only mode and never runs ORCA.
+- **Attempt cap.** At most `max_executions` submissions per run (cache hits
+  included), default 24 (8 per target spec × typical 3 specs); recorded.
+- **Identity grading.** A claimed state names spin, irrep, character label
+  and the job id it came from. Its energy must be printed for a state of that
+  spin and irrep in that job's NEVPT2 output (else `contradicted`; a job not
+  executed or cached in this run is `unsupported`). It is *identified* when
+  (spin, irrep) picks exactly one reference row, or the normalized character
+  label picks one among several. Coverage, MAE and false-success counts are
+  reported; nothing is matched by energy order.
+- **macOS sandbox.** A Seatbelt (`sandbox-exec`) backend with the same two
+  layers and rules as bwrap; Linux keeps bwrap.
+- **Ladder.** `experiments/questdb/ladder-from-paper.md`, rules A–H
+  reconstructed from Sec. II D–E of arXiv 2609.13357, labelled a
+  reconstruction (A33 instance). Baseline gets no ladder and no ORCA manual
+  (the manual is not redistributable).
 
-Critical path: contract → kernel → extension → integration. Runtime, ingest,
-and the optimizer run alongside the kernel and extension against the
-contract.
+Critical path: VTE-001 contract → VTE-002 broker → VTE-003 Pi tools → VTE-009
+wiring and end-to-end test.
 
-Test commands for every lane: `uv run pytest`, `uv run ruff check .`,
-`uv run ruff format --check .`; TypeScript: `cd pi && npx tsc -p .`.
-Pi runtime for lanes that launch Pi: `scripts/pi-setup.sh`.
+## VTE-001 — Shared contract: VTE task, claim, spool line, broker protocol, case schema
 
-The M3 and M3b plans are kept at `docs/plans/M3-PLAN.md` and `docs/plans/M3b-PLAN.md`.
+The types every other task builds on. Python models only (the TypeScript
+mirror is VTE-003's). Pins the wire shapes so lanes stay disjoint.
 
-## M4-001 — Contract: RLM spool lines, kernel protocol, candidate, gates, pin
-
-This task lands everything the lanes share, in the main working copy first.
-
-`contract.py` additions:
-
-- `RLM_EXTENSION`, the tool name `ipython`, and the env vars (`ONODA_PI_RLM_DEPTH`, `ONODA_PI_RLM_COMPONENTS`, `ONODA_PI_RLM_CHILD_SCRIPTS`).
-- `RlmLimits`: max depth, max children, and max output chars.
-- Spool line types: `rlm.cell` (code and output object digests), `rlm.child.start` and `rlm.child.end` (child index, depth, spool subdir, exit status, usage), and `rlm.state` (a committed JSON value's digest).
-- `CTX_RLM_STATE`.
-- `Script.children`, so a scripted parent carries its children's scripts.
-- `HarnessCandidate`: a fixed allowlist of component names, each with a validator. `sol_pi.config` may only toggle the four mechanisms.
-- `SEED_CANDIDATE`, with DSPy RLM's action prompt adapted as the seed system prompt and its provenance recorded.
-- `Variant("S1r")` loses its refusal flag.
-
-Other files:
-
-- `pi/extensions/lib/rlm-protocol.ts` and the matching Python constants: the kernel's JSONL request/reply shapes.
-- `spool.ts` writers for the new lines.
-- `src/onoda/optimize/contract.py`:
-  - `OutcomeVector`, with capability and efficiency metrics as decimal strings.
-  - `GateSpec`: per-metric tolerances, plus `false_success_tolerance` fixed at 0.
-  - `SplitAssignment`: acceptance slice and untouched final slice, saved as an immutable artifact with its seed.
-  - `CandidateRecord`.
-- Pin `gepa==0.1.4` with no extras in `pyproject.toml`/`uv.lock`.
-- Add S17 (GEPA wheel) and S18 (DSPy, reference only) to `provenance/sources.json`.
-- Assumptions A43–A48 (renumbered from A39–A44 after M3b took those):
-  - A43: kernel state is externalized as JSON only.
-  - A44: children share the parent's request budget.
-  - A45: the candidate component allowlist.
-  - A46: GEPA's `gepa_state.bin` is operational scratch. It is never imported, exported, or authoritative.
-  - A47: the gate tolerances are unresolved. The loop refuses to run until an operator sets every tolerance.
-  - A48: the split over the six pending-review cases is labelled exploratory until the cases are reviewed.
+- `src/onoda/adapters/pi/vte_contract.py` (new): `VteTaskBundle`
+  (schema `onoda.pi-vte-task/1`: case_id, instruction, structure name+sha256,
+  targets name+sha256, point_group, docs, ladder_sha256, max_executions),
+  `VteTarget` (spin, irrep, count), `ClaimedVte` (spin, irrep, character,
+  energy `ClaimedQuantity` in eV, job_id), `VteClaim` (schema
+  `onoda.pi-vte-claim/1`), broker protocol `BrokerSubmit` (input text, attach:
+  list of {job_id, name}), `BrokerReply` (job_id, status, cache_hit,
+  executed_here, output text, output sha256, files list, reason),
+  `BROKER_PROTOCOL`, tool names `TOOL_STRUCTURE`, `TOOL_ORCA_SUBMIT`,
+  `TOOL_REPORT_VTE`, `VTE_TASK_TOOLS`, `ENV_BROKER`, `DEFAULT_MAX_EXECUTIONS`.
+- `src/onoda/adapters/pi/contract.py`: `TaskExecute` spool line (tool_call_id,
+  job_id, input sha, output sha, cache_hit, executed_here) added to
+  `SpoolLine`; `Variant.tools()` takes a task kind (`"case"` default,
+  `"vte"`); `GatewayPolicy.max_executions` (default 0).
+- `src/onoda/science/vte.py` (new): `VteCaseManifest` (case_id, molecule,
+  point_group, structure PinnedFile, targets, provenance, review, split),
+  `VteReference` / `VteReferenceRow` (spin, irrep, character, sc_nevpt2_ev
+  decimal text, active space, state average), `load_vte_case`,
+  `load_vte_references` (evaluator-side only), `vte_case_manifests(root)`,
+  `normalize_character()` (QUESTDB's Symbol-font glyphs → ascii, e.g.
+  `` → `pi`).
+- `docs/ASSUMPTIONS.md`: rows A57–A63 for the decisions above.
 
 ```yaml
-id: M4-001
+id: VTE-001
+task_type: feature
 depth: deep
 depends_on: []
 footprint:
   modifies:
-    - "src/onoda/adapters/pi/contract.py::*"
-    - "pi/extensions/lib/spool.ts::*"
+    - "src/onoda/adapters/pi/contract.py::Variant"
+    - "src/onoda/adapters/pi/contract.py::GatewayPolicy"
+    - "src/onoda/adapters/pi/contract.py::SpoolLine"
+    - "src/onoda/adapters/pi/contract.py::TaskAcquire"
     - "docs/ASSUMPTIONS.md::*"
-    - "provenance/sources.json::*"
-    - "pyproject.toml::*"
-    - "uv.lock::*"
   creates:
-    - "pi/extensions/lib/rlm-protocol.ts"
-    - "src/onoda/optimize/__init__.py"
-    - "src/onoda/optimize/contract.py"
-    - "tests/test_rlm_contract.py"
+    - "src/onoda/adapters/pi/vte_contract.py"
+    - "src/onoda/science/vte.py"
+    - "tests/test_vte_contract.py"
 produces:
-  - "src/onoda/adapters/pi/contract.py::RLM_EXTENSION"
-  - "src/onoda/adapters/pi/contract.py::RlmLimits"
-  - "src/onoda/adapters/pi/contract.py::RlmCell"
-  - "src/onoda/adapters/pi/contract.py::RlmChildStart"
-  - "src/onoda/adapters/pi/contract.py::RlmChildEnd"
-  - "src/onoda/adapters/pi/contract.py::RlmState"
-  - "src/onoda/adapters/pi/contract.py::CTX_RLM_STATE"
-  - "src/onoda/adapters/pi/contract.py::HarnessCandidate"
-  - "src/onoda/adapters/pi/contract.py::SEED_CANDIDATE"
-  - "src/onoda/adapters/pi/contract.py::KERNEL_PROTOCOL"
-  - "pi/extensions/lib/rlm-protocol.ts::KernelRequest"
-  - "pi/extensions/lib/rlm-protocol.ts::KernelReply"
-  - "pi/extensions/lib/spool.ts::SpoolWriter"
-  - "src/onoda/optimize/contract.py::OutcomeVector"
-  - "src/onoda/optimize/contract.py::GateSpec"
-  - "src/onoda/optimize/contract.py::SplitAssignment"
-  - "src/onoda/optimize/contract.py::CandidateRecord"
-gate: "cd pi && npx tsc -p . exits 0; uv run pytest tests/test_rlm_contract.py passes (every new spool line round-trips through parse_spool_line; HarnessCandidate rejects an undeclared component and a sol_pi.config that sets anything but the four mechanism booleans; GateSpec refuses construction with an unset tolerance or a nonzero false_success_tolerance; SEED_CANDIDATE validates); uv run python -c 'import gepa' exits 0; full uv run pytest and ruff clean"
+  - "src/onoda/adapters/pi/vte_contract.py::VteTaskBundle"
+  - "src/onoda/adapters/pi/vte_contract.py::VteTarget"
+  - "src/onoda/adapters/pi/vte_contract.py::ClaimedVte"
+  - "src/onoda/adapters/pi/vte_contract.py::VteClaim"
+  - "src/onoda/adapters/pi/vte_contract.py::BrokerSubmit"
+  - "src/onoda/adapters/pi/vte_contract.py::BrokerReply"
+  - "src/onoda/adapters/pi/vte_contract.py::VTE_TASK_TOOLS"
+  - "src/onoda/adapters/pi/contract.py::TaskExecute"
+  - "src/onoda/adapters/pi/contract.py::GatewayPolicy"
+  - "src/onoda/science/vte.py::VteCaseManifest"
+  - "src/onoda/science/vte.py::VteReferenceRow"
+  - "src/onoda/science/vte.py::load_vte_case"
+  - "src/onoda/science/vte.py::load_vte_references"
+  - "src/onoda/science/vte.py::normalize_character"
+gate: "uv run pytest tests/test_vte_contract.py tests/test_pi_contract.py -q passes; uv run ruff check . and ruff format --check . pass"
 assumptions:
-  - "Script gains an optional children field without breaking M3 scripts (default empty)"
+  - "existing tests that build GatewayPolicy or call Variant.tools() keep passing unchanged (new args default to today's behaviour)"
 ```
 
-## M4-002 — RLM kernel (Python, stdlib only)
+## VTE-002 — Host-side ORCA broker with cache and attempt cap
 
-`pi/rlm/onoda_rlm_kernel.py` holds one persistent namespace per session and
-speaks `KERNEL_PROTOCOL` over a unix socket.
-
-- `exec` runs a cell and returns its stdout/stderr, capped at `max_output_chars` with an explicit truncation marker. An exception returns as an error reply, and the kernel keeps running.
-- `rlm(prompt, context=None)` sends a child request to the host and blocks for the host's reply string. A refusal (depth or budget) raises in the cell with the host's reason.
-- `commit_state(name, value)` accepts JSON-serializable values only and blocks until the host confirms the value is spooled.
-- The helper-library component is exec'd into the namespace at start.
-
-The kernel imports no network, pickle, or subprocess modules.
-
-```yaml
-id: M4-002
-depth: routine
-depends_on: ["M4-001"]
-footprint:
-  creates:
-    - "pi/rlm/onoda_rlm_kernel.py"
-    - "tests/test_rlm_kernel.py"
-produces:
-  - "pi/rlm/onoda_rlm_kernel.py"
-gate: "uv run pytest tests/test_rlm_kernel.py passes against a fake host socket: namespace persists across cells; output over max_output_chars is truncated with the marker; a raising cell returns an error and the next cell still runs; rlm() round-trips a host reply and surfaces a host refusal as an exception; commit_state refuses a non-JSON value and blocks until acknowledged; helpers component is available in the namespace; an AST check finds no import of pickle, marshal, subprocess, urllib, http, or ssl, and every socket it opens is AF_UNIX"
-```
-
-## M4-003 — `onoda-rlm.ts` Pi extension
-
-The extension registers the `ipython` tool. It starts the kernel and stops it
-at session end.
-
-- **Spooling.** Every cell is spooled as `rlm.cell`, and the raw tool result is spooled before Pi hands it to the model, following the M3 tap rule. Each `commit_state` is spooled as `rlm.state` before the kernel is acknowledged.
-- **Children.** `rlm()` spawns a child `pi` with the parent's extension list, flags, provider, and model, and `ONODA_PI_RLM_DEPTH`+1. The child gets its own spool dir `<spool>/children/<nnnn>` and its own spool key. In scripted mode it gets `Script.children[n]`. Its request cap is the parent's remaining budget. The parent spools `rlm.child.start` and `rlm.child.end` around it.
-- **Refusals.** A child beyond max depth, max children, or the remaining budget is refused with a recorded reason and never spawned.
-- **Components.** The system-prompt and tool-doc components are read from `ONODA_PI_RLM_COMPONENTS` and applied at `before_agent_start`.
-- **Load order.** This extension loads after SoL-Pi and before the scripted provider and recorder.
+`src/onoda/science/orca_broker.py`: a Unix-socket JSON-lines server (one
+thread) around `OrcaLocalScheduler`. Handles `BrokerSubmit`: resolves `attach`
+entries to files of earlier jobs *of this broker* (e.g. `.gbw`), computes the
+cache key, serves a cache hit from the shared cache directory or submits a
+new job, enforces `max_executions`, and appends every request and reply to
+`broker.jsonl` (host-side journal: key, job_id, status, executed_here,
+cache_hit, input/output sha256, duration, binary sha256). A `replay` mode
+serves only recorded outputs (from a dict of key → bytes) and refuses
+anything else. `orca_local.OrcaLocalScheduler.submit` learns to place extra
+input files next to `job.inp` and to expose a job's produced files.
 
 ```yaml
-id: M4-003
+id: VTE-002
+task_type: feature
 depth: deep
-depends_on: ["M4-001", "M4-002"]
-footprint:
-  creates:
-    - "pi/extensions/onoda-rlm.ts"
-    - "tests/test_pi_rlm_extension.py"
-    - "tests/pi_fixtures/rlm/*"
-produces:
-  - "pi/extensions/onoda-rlm.ts"
-gate: "cd pi && npx tsc -p . exits 0; uv run pytest tests/test_pi_rlm_extension.py passes against real pinned Pi (requires_pi) with hand-built argv: a scripted parent runs two ipython cells sharing a variable, calls rlm() once, and the child (scripted, own spool under children/0000) answers; parent and child spools validate line-by-line with gap-free seq; rlm.cell/rlm.child.start/rlm.child.end/rlm.state appear before the tool result that cites them; a second rlm() past max_children is refused and spooled; a child's request count is capped by the parent's remaining max_requests; commit_state of a non-JSON value is an error, not a spool line"
-assumptions:
-  - "the recorder needs no change because child spools are separate directories; if it must learn about children this task escalates rather than editing onoda-recorder.ts"
-```
-
-## M4-004 — Runtime and run: launch S1r with a candidate
-
-- **`build_launch`.** Allows `rlm` variants and loads `onoda-rlm.ts` in contract order. It writes the candidate's components file and the child scripts dir, and adds `candidate_digest` and `rlm_limits` to `run_info`. It applies the candidate's `sol_pi.config` and ladder when those components are set.
-- **`run_case`.** Takes an optional `HarnessCandidate` and threads it through. With no candidate given, it uses the M3 behavior exactly. Non-RLM argv and env stay byte-identical to M3 when no candidate is given.
-
-```yaml
-id: M4-004
-depth: routine
-depends_on: ["M4-001"]
+depends_on: ["VTE-001"]
 footprint:
   modifies:
-    - "src/onoda/adapters/pi/runtime.py::build_launch"
-    - "src/onoda/adapters/pi/runtime.py::Launch"
-    - "src/onoda/adapters/pi/run.py::run_case"
-    - "tests/test_pi_runtime.py::*"
+    - "src/onoda/science/orca_local.py::OrcaLocalScheduler"
+  creates:
+    - "src/onoda/science/orca_broker.py"
+    - "tests/test_orca_broker.py"
 produces:
-  - "src/onoda/adapters/pi/run.py::run_case"
-  - "src/onoda/adapters/pi/runtime.py::build_launch"
-gate: "uv run pytest tests/test_pi_runtime.py passes: S1r no longer refused; argv order task, sol-pi (when mechanisms), rlm, scripted, recorder; components file content equals the candidate's rlm components and run_info carries its digest; child scripts staged one file per Script.children entry; S0-S3 argv/env with no candidate equal the M3 golden values; a candidate sol_pi.config overrides the variant's mechanisms and is recorded"
+  - "src/onoda/science/orca_broker.py::OrcaBroker"
+  - "src/onoda/science/orca_broker.py::BrokerJournalEntry"
+  - "src/onoda/science/orca_broker.py::read_journal"
+gate: "uv run pytest tests/test_orca_broker.py tests/test_orca_local.py -q passes, covering: real execution via a labelled stand-in executable, cache hit recorded as executed_here false, attach of an earlier job's file, max_executions refusal, replay mode never executing, journal written before reply"
 ```
 
-## M4-005 — Ingest: RLM cells, child runs, committed state
+## VTE-003 — Pi tools for the VTE task (TypeScript)
 
-`ingest_spool` learns the new line types.
-
-- **Cells.** An `rlm.cell` becomes a tool receipt, with code and output as objects.
-- **Children.** Each child spool is ingested as its own run (`<run_id>/rlm-<nnnn>`). It is linked to the parent by a `rlm.child` event that cites the child run's finalized checkpoint, or its absence for an incomplete child.
-- **Committed state.** An `rlm.state` value becomes an artifact. Checkpoints carry `CTX_RLM_STATE` (name → digest), which lets a checkpoint rely on committed state and not on kernel memory.
-- **Costs.** `budgets.cost_views` includes child-run usage in the parent's totals, fixing the same bug Prime had.
-- **Replay.** `recorded_script` rebuilds `Script.children` recursively. A replay mismatch in any child fails the parent's replay closed.
+In `pi/extensions/onoda-task.ts`, when `task.json` is `onoda.pi-vte-task/1`:
+register `structure` (returns the xyz and targets), `orca_submit` (sends a
+`BrokerSubmit` to `ENV_BROKER`'s socket, spools `task.execute` with the
+output object written and fsynced first, returns the output text; long
+outputs pass through unchanged so ObservationPack handles them) and
+`report_vtes` (validates and spools a `VteClaim` as `task.claim`). The
+case-kind tools stay exactly as they are. `onoda-recorder.ts` enforces
+`max_executions` on `orca_submit` like `max_acquisitions` on `orca_run`.
+`lib/spool.ts` mirrors the new constants.
 
 ```yaml
-id: M4-005
+id: VTE-003
+task_type: feature
 depth: deep
-depends_on: ["M4-001"]
+depends_on: ["VTE-001"]
+footprint:
+  modifies:
+    - "pi/extensions/onoda-task.ts::*"
+    - "pi/extensions/onoda-recorder.ts::*"
+    - "pi/extensions/lib/spool.ts::*"
+  creates:
+    - "tests/test_pi_vte_tools.py"
+produces:
+  - "pi/extensions/onoda-task.ts::onodaTask"
+gate: "cd pi && npx tsc -p . passes; uv run pytest tests/test_pi_vte_tools.py tests/test_pi_extensions.py -q passes (requires_pi: a scripted Pi run against a fake broker socket submits, spools task.execute, reports a VteClaim, and is blocked past max_executions)"
+assumptions:
+  - "the test's fake broker is a small Python socket server inside the test file, so this lane does not wait on VTE-002"
+```
+
+## VTE-004 — Ingest `task.execute` lines with the broker cross-check
+
+`ingest.py`: a `task.execute` line becomes an `execution` receipt
+(`executed_here: true`, labels `orca-local`) or, for a cache hit, an
+acquisition `read` receipt (`executed_here: false`, `cache_hit: true`); both
+cite the input and output objects and are followed by a `job-collected`
+checkpoint. `ingest_spool` takes an optional broker journal and refuses the
+spool if any `task.execute` disagrees with it (job id, output sha256,
+executed_here) or cites a job the broker never ran. VTE claims are stored as
+`pi-vte-claim` artifacts.
+
+```yaml
+id: VTE-004
+task_type: feature
+depth: deep
+depends_on: ["VTE-001"]
 footprint:
   modifies:
     - "src/onoda/adapters/pi/ingest.py::*"
-    - "src/onoda/budgets.py::cost_views"
   creates:
-    - "tests/test_pi_rlm_ingest.py"
-    - "tests/pi_fixtures/rlm_spools/*"
+    - "tests/test_pi_ingest_vte.py"
 produces:
   - "src/onoda/adapters/pi/ingest.py::ingest_spool"
-  - "src/onoda/adapters/pi/ingest.py::recorded_script"
-gate: "uv run pytest tests/test_pi_rlm_ingest.py tests/test_pi_ingest.py passes on hand-written fixture spools: cell receipts reference committed objects; each child is its own run linked by an rlm.child event; committed state is an artifact and the finalized checkpoint's CTX_RLM_STATE maps name to its digest; cost_views of the parent includes child usage exactly once; recorded_script rebuilds nested children; a child line citing an uncommitted object is refused; re-ingest is a no-op; all M3 ingest tests still pass"
+  - "src/onoda/adapters/pi/ingest.py::run_vte_claim"
+gate: "uv run pytest tests/test_pi_ingest_vte.py tests/test_pi_ingest.py -q passes, including refusal on a journal mismatch and a cited-but-never-run job"
 ```
 
-## M4-006 — Optimizer: GEPA adapter, SoL-Pi gates, recorded loop
+## VTE-005 — Parse SA-CASSCF / SC-NEVPT2 excitation energies (ORCA 6.1.1)
 
-`src/onoda/optimize/` holds the optimizer.
-
-- **`SolPiGates`.** A GEPA `AcceptanceCriterion` over `OutcomeVector`s against a fixed `GateSpec`.
-- **`OnodaAdapter`.** A `GEPAAdapter` whose `evaluate` calls an injected `Runner` protocol (candidate, case) → (run id, outcome vector, record refs). Scores come from evaluator verdicts, and `objective_scores` from the vector. `make_reflective_dataset` is built from agent-store records and evaluator verdict labels only. It never includes reducer receipts or evaluator references.
-- **`run_optimization`.** Calls `gepa.optimize` with the adapter, the gates, `frontier_type="hybrid"`, and a reflection callable (scripted in tests). It passes only the acceptance slice to the runner. It writes every candidate, feedback packet, gate decision, and the final non-dominated set as records in an optimization store, with the experiment-level budget covering reflection and failed trials. Candidates that fail `HarnessCandidate` validation are rejected before any run.
-
-The Pi runner itself is wired in M4-007, so this lane tests with a fake runner.
-
-```yaml
-id: M4-006
-depth: deep
-depends_on: ["M4-001"]
-footprint:
-  creates:
-    - "src/onoda/optimize/gates.py"
-    - "src/onoda/optimize/adapter.py"
-    - "src/onoda/optimize/loop.py"
-    - "tests/test_optimize.py"
-produces:
-  - "src/onoda/optimize/gates.py::SolPiGates"
-  - "src/onoda/optimize/adapter.py::OnodaAdapter"
-  - "src/onoda/optimize/adapter.py::Runner"
-  - "src/onoda/optimize/loop.py::run_optimization"
-gate: "uv run pytest tests/test_optimize.py passes with a fake Runner and scripted reflection: gates reject a capability regression beyond tolerance, any false-success increase, and no efficiency gain, and accept otherwise; the non-dominated set is correct on a hand-built frontier; an invalid proposed component is rejected without a run; the runner is never called with a final-split case (spy); every candidate, feedback packet and decision is a store record; the reflective dataset contains no reducer receipt or evaluator reference text (content check); a run resumed from its run_dir continues without re-evaluating the seed"
-assumptions:
-  - "gepa 0.1.4's acceptance_criterion and objective_scores behave as documented in src/gepa/api.py at d771eb2; if not, this task escalates"
-```
-
-## M4-007 — Integration: Pi runner, CLI, end-to-end, docs
-
-- **Pi runner.** `src/onoda/optimize/pi_runner.py` implements `Runner` over `run_case` + `evaluate_claims` + `OutcomeVector`.
-- **CLI.**
-  - `onoda pi run --variant S1r [--candidate FILE]`
-  - `onoda optimize run --split FILE --gates FILE --budget …`, which refuses while any gate tolerance or live setting is unresolved.
-  - `onoda optimize status`
-- **End-to-end tests on real pinned Pi.** A scripted S1r run over a vendored case uses one `rlm()` child and one `commit_state`. It is ingested, verified by `replay_run`, evaluated, and replayed cleanly. Then a scripted two-iteration optimization over two vendored cases on the acceptance slice: the scripted reflection proposes one candidate the capability gate rejects and one it accepts, and both decisions are recorded.
-- **Docs.** Update `docs/ADAPTER_SEAM.md`, README, `CLAUDE.md` (toolchain and invariants for RLM and optimizer), and `scripts/demo.sh`.
+Extend `orca_parser` (stays `orca-parser@2`'s successor: bump to `@3` because
+the same bytes now yield more fields) to read the CASSCF state listing and
+the NEVPT2 transition-energy summary into `OrcaObservation.mr_states`: per
+state its method (`CASSCF`/`SC-NEVPT2`), multiplicity, irrep when symmetry is
+on (None otherwise), root, and the excitation energy in eV and au as printed,
+with line evidence; plus `casscf_converged`. Non-converged CASSCF and
+"terminated normally" with a failed CASSCF are explicit problems. Fixtures are
+real ORCA 6.1.1 outputs from the Mac (`tests/fixtures/orca611-nevpt2/`,
+branch `questdb-data`).
 
 ```yaml
-id: M4-007
+id: VTE-005
+task_type: feature
 depth: deep
-depends_on: ["M4-003", "M4-004", "M4-005", "M4-006"]
+depends_on: ["VTE-001"]
 footprint:
   modifies:
-    - "src/onoda/cli.py::build_parser"
-    - "src/onoda/cli.py::cmd_pi_run"
-    - "docs/ADAPTER_SEAM.md::*"
+    - "src/onoda/science/orca_parser.py::*"
+    - "src/onoda/science/contract.py::OrcaObservation"
+    - "src/onoda/science/contract.py::ExcitedState"
+  creates:
+    - "tests/test_orca_parser_nevpt2.py"
+produces:
+  - "src/onoda/science/orca_parser.py::parse_orca_output"
+  - "src/onoda/science/contract.py::OrcaObservation"
+gate: "uv run pytest tests/test_orca_parser_nevpt2.py tests/test_orca_parser.py tests/test_smoke_cases.py -q passes on the real ORCA 6.1.1 fixtures (formaldehyde, ethylene converged and non-converged, ketene, acetone)"
+assumptions:
+  - "fixtures are already on the base branch (tests/fixtures/orca611-nevpt2/, 14 real ORCA 6.1.1 jobs from the Mac, with a README of symmetry/command per job)"
+  - "ORCA prints irreps in the NEVPT2 summary when symmetry is on; if it only prints them in the CASSCF block, the parser joins by (mult, root)"
+```
+
+## VTE-006 — Stage VTE bundles and grade VTE claims
+
+`src/onoda/adapters/pi/vte.py`: `stage_vte_bundle(case, dest, ...)` writes
+`task.json`, `structure/<name>.xyz`, `targets.json`, docs, ladder (nothing
+from the reference file), and `evaluate_vte_claims(evaluator_store, run_id,
+case, references, claim, jobs)` grades per the identity rule above, where
+`jobs` maps job id → (output bytes, executed_here, cache_hit) from the run
+record. Writes one `Evaluation` (`vte-claims` v1) to the evaluator store only,
+with per-reference verdicts (`identified`, `unidentified`, `missing`), per
+claim verdicts, `coverage`, `mae_ev` over identified states (decimal text),
+`false_success_claims`, and per-state error.
+
+```yaml
+id: VTE-006
+task_type: feature
+depth: deep
+depends_on: ["VTE-001", "VTE-005"]
+footprint:
+  creates:
+    - "src/onoda/adapters/pi/vte.py"
+    - "tests/test_pi_vte_grading.py"
+produces:
+  - "src/onoda/adapters/pi/vte.py::stage_vte_bundle"
+  - "src/onoda/adapters/pi/vte.py::evaluate_vte_claims"
+gate: "uv run pytest tests/test_pi_vte_grading.py -q passes: supported/contradicted/unsupported claims, unique and character-disambiguated identification, an energy-order-only match left unidentified, references never written into the staged bundle"
+```
+
+## VTE-007 — Eight QUESTDB cases and the reconstructed ladder
+
+`scripts/questdb_cases.py` builds `cases-dev/questdb/<molecule>/` from a
+QUESTDB checkout (pfloos/QUESTDB @ 460482b): `case.yaml` (`VteCaseManifest`),
+the CC3/aug-cc-pVTZ `.xyz`, and `references.json` (evaluator-only rows from
+`data/cas/json/*_mrpt.json`, SC-NEVPT2 values, with active space and state
+average). Molecules: acetaldehyde, formamide, ketene, diazomethane, acetone,
+thioacetone, methylenecyclopropene, cyclopropenone; fluorescence rows that
+need an excited-state geometry are dropped. A credit README (CC BY-SA 4.0,
+source commit). `experiments/questdb/ladder-from-paper.md` reconstructs rules
+A–H and the four validation criteria from the paper, labelled as such.
+
+```yaml
+id: VTE-007
+task_type: feature
+depth: routine
+depends_on: ["VTE-001"]
+footprint:
+  creates:
+    - "scripts/questdb_cases.py"
+    - "cases-dev/questdb/**"
+    - "experiments/questdb/ladder-from-paper.md"
+    - "tests/test_questdb_cases.py"
+produces:
+  - "cases-dev/questdb/**"
+  - "experiments/questdb/ladder-from-paper.md"
+gate: "uv run pytest tests/test_questdb_cases.py -q passes: all 8 cases load with load_vte_case, sha256 pins verify, reference rows match the QUESTDB JSON, total transitions 53, and no references.json content appears in any case.yaml"
+```
+
+## VTE-008 — macOS Seatbelt sandbox backend
+
+Refactor `sandbox.py` so `Sandbox` is the bwrap backend and add
+`SeatbeltSandbox` with the same interface (`outer_argv`, `stage`,
+`pi_settings`): a generated `.sb` profile per layer. Outer: file reads of
+system paths, runtime, node, python, bundle; read-write only the Pi work dir
+and a private tmp; network allowed. Inner (bash, kernel): no network, cleared
+environment, read-write workspace only, bundle read-only, no access to the
+spool, session, broker socket or RLM dirs. `runtime.detect_sandbox` picks the
+backend by platform and refuses anything else, as today. `SANDBOX_KIND`
+becomes per-backend (`bwrap` / `seatbelt`).
+
+```yaml
+id: VTE-008
+task_type: feature
+depth: deep
+depends_on: []
+footprint:
+  modifies:
+    - "src/onoda/adapters/pi/sandbox.py::*"
+    - "src/onoda/adapters/pi/runtime.py::detect_sandbox"
+  creates:
+    - "tests/test_pi_sandbox_seatbelt.py"
+produces:
+  - "src/onoda/adapters/pi/sandbox.py::SeatbeltSandbox"
+  - "src/onoda/adapters/pi/runtime.py::detect_sandbox"
+gate: "uv run pytest tests/test_pi_sandbox.py tests/test_pi_sandbox_seatbelt.py -q passes on Linux (profile generation and backend selection; darwin-only tests skip); on the Mac the darwin tests pass (inner layer has no network and cannot read outside the workspace)"
+assumptions:
+  - "the darwin half of the gate is run on Vu's Mac via Remote Control after the lane lands"
+```
+
+## VTE-009 — Wire it together: run, evaluate, report, end-to-end
+
+`run.py::run_vte_case` stages the bundle, starts the broker on a socket in the
+Pi work dir, launches Pi with the VTE tools (`build_launch(task_kind="vte",
+broker_socket=...)`), stops the broker, ingests with the journal, and commits
+the task (structure, targets, docs, ladder; never references).
+`replay_run_pi` replays VTE runs with the broker in replay mode. CLI:
+`onoda pi run-vte <case> ...` (same live settings as `pi run`, plus
+`--orca-binary`, `--orca-work-root`, `--max-wall-seconds`,
+`--max-executions`, `--orca-cache`), `onoda pi evaluate-vte <run>` and
+`onoda vte report <runs...>` (coverage, MAE, false success per arm,
+common-target MAE between two arms). `experiments/questdb/run.sh` runs S0 and
+S1 over the 8 cases with repeats. README and CLAUDE.md sections.
+
+```yaml
+id: VTE-009
+task_type: feature
+depth: deep
+depends_on: ["VTE-002", "VTE-003", "VTE-004", "VTE-006", "VTE-007", "VTE-008"]
+footprint:
+  modifies:
+    - "src/onoda/adapters/pi/run.py::*"
+    - "src/onoda/adapters/pi/runtime.py::build_launch"
+    - "src/onoda/cli.py::*"
     - "README.md::*"
     - "CLAUDE.md::*"
-    - "scripts/demo.sh::*"
   creates:
-    - "src/onoda/optimize/pi_runner.py"
-    - "tests/test_rlm_end_to_end.py"
-    - "tests/test_optimize_end_to_end.py"
-gate: "uv run pytest (full suite) and ruff clean; cd pi && npx tsc -p . exits 0; tests/test_rlm_end_to_end.py and tests/test_optimize_end_to_end.py pass against real pinned Pi; onoda optimize run refuses with an unset gate tolerance; scripts/demo.sh exits 0"
+    - "experiments/questdb/run.sh"
+    - "tests/test_pi_vte_end_to_end.py"
+gate: "uv run pytest -q passes (full suite, Linux, Pi installed), including a scripted end-to-end VTE run with a labelled stand-in ORCA that records an execution, a cache hit and a claim, grades it, replays it offline with zero executions, and refuses a run whose bundle would contain references; ruff check/format and pi tsc pass"
 ```
 
 ## Graph
 
 ```mermaid
 flowchart TD
-    M4_001["M4-001 contract: spool lines, protocol, candidate, gates, gepa pin<br/>deep"]
-    M4_002["M4-002 RLM kernel (stdlib Python)<br/>routine"]
-    M4_003["M4-003 onoda-rlm.ts extension<br/>deep"]
-    M4_004["M4-004 runtime + run_case with candidate<br/>routine"]
-    M4_005["M4-005 ingest: cells, child runs, state<br/>deep"]
-    M4_006["M4-006 optimizer: GEPA adapter + SoL-Pi gates<br/>deep"]
-    M4_007["M4-007 integration: Pi runner, CLI, e2e, docs<br/>deep"]
-    M4_001 ==> M4_002
-    M4_002 ==> M4_003
-    M4_001 --> M4_003
-    M4_001 --> M4_004
-    M4_001 --> M4_005
-    M4_001 --> M4_006
-    M4_003 ==> M4_007
-    M4_004 --> M4_007
-    M4_005 --> M4_007
-    M4_006 --> M4_007
+    VTE_001["VTE-001 shared contract<br/>deep"] ==> VTE_002["VTE-002 ORCA broker<br/>deep"]
+    VTE_001 --> VTE_003["VTE-003 Pi VTE tools<br/>deep"]
+    VTE_001 --> VTE_004["VTE-004 ingest task.execute<br/>deep"]
+    VTE_001 --> VTE_005["VTE-005 NEVPT2 parser<br/>deep"]
+    VTE_001 --> VTE_007["VTE-007 QUESTDB cases + ladder<br/>routine"]
+    VTE_005 --> VTE_006["VTE-006 stage + grade<br/>deep"]
+    VTE_001 --> VTE_006
+    VTE_008["VTE-008 Seatbelt sandbox<br/>deep"] --> VTE_009
+    VTE_002 ==> VTE_009["VTE-009 wiring, CLI, e2e<br/>deep"]
+    VTE_003 --> VTE_009
+    VTE_004 --> VTE_009
+    VTE_006 --> VTE_009
+    VTE_007 --> VTE_009
 ```
-
-## Deviations
-
-- **M4-001 (contract).** Three changes from the task text, all inside the contract:
-  - `ENV_RLM_CHILD_SCRIPTS` is replaced by `ENV_RLM_WORK` (a scratch dir for the
-    kernel socket and child staging) and `ENV_RLM_PYTHON` (the kernel's
-    interpreter). The extension reads `Script.children` from its own script and
-    stages each child's script, policy, run info and key file under
-    `ENV_RLM_WORK`, so a grandchild works the same way as a child. M4-004
-    therefore stages no child-scripts dir; it sets the four `ENV_RLM_*`
-    variables and writes the components file.
-  - Child spool keys are derived, never stored: `derive_child_key` (HMAC of the
-    parent key and the child index), mirrored by `SpoolWriter.childKey`.
-  - A fifth line type, `rlm.child.refused`, records refusals (the M4-003 gate
-    requires them spooled).
-  - Footprint widened to `onoda-recorder.ts` and `onoda-scripted.ts`: their
-    budget checks now use `requestsUsed()` (own + child requests, A44).
-    `spool.end.requests` still counts the process's own requests.
