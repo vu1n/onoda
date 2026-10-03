@@ -43,6 +43,11 @@ Spin = Literal[1, 3]
 # QUESTDB's tables were converted from Word documents set in the Symbol font,
 # so Greek letters arrive as private-use code points.
 _SYMBOL_FONT = {"": "pi", "": "n", "": "sigma", "": "delta"}
+# How agents write a character: Unicode Greek (matched after lowercasing) and
+# arrow separators. None of these occur in QUESTDB's labels.
+_GREEK = {"π": "pi", "σ": "sigma", "ς": "sigma", "δ": "delta", "∗": "*"}
+_SEPARATORS = {"→": ",", "⟶": ",", "->": ","}
+_TO_RE = re.compile(r"(?<=\S)\s+to\s+(?=\S)", re.IGNORECASE)
 _PRIMES = {"’": "'", "‘": "'", "”": "''", "“": "''", '"': "''"}
 _DECIMAL_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)$")
 _IRREP_RE = re.compile(r"^[A-Z][a-z0-9]*'{0,2}$")
@@ -58,15 +63,25 @@ def normalize_irrep(text: str) -> str:
 
 
 def normalize_character(text: str) -> str:
-    """QUESTDB's character label in ascii: Symbol-font glyphs to names, no spaces, lowercase.
+    """A character label in ascii: Greek glyphs to names, separators to `,`, no spaces, lowercase.
 
-    `\\uf070,\\uf070*` -> `pi,pi*`; `n,3s` stays `n,3s`. A bare `p` is left as
-    is: in a few tables it may be a lost pi, but guessing would invent an identity.
+    QUESTDB's `\\uf070,\\uf070*` -> `pi,pi*`; `n,3s` stays `n,3s`. What agents
+    write is read the same way: Unicode Greek (`π`, `σ`, `δ`, either case) and
+    `∗` become `pi`, `sigma`, `delta` and `*`, and an arrow (`→`, `->`) or a
+    spaced `to` between the two orbitals becomes `,` (`n → π*` -> `n,pi*`). A
+    bare `p` is left as is: in a few tables it may be a lost pi, but guessing
+    would invent an identity.
     """
     out = text
     for k, v in _SYMBOL_FONT.items():
         out = out.replace(k, v)
-    return re.sub(r"\s+", "", out).lower()
+    out = _TO_RE.sub(",", out)
+    for k, v in _SEPARATORS.items():
+        out = out.replace(k, v)
+    out = re.sub(r"\s+", "", out).lower()
+    for k, v in _GREEK.items():
+        out = out.replace(k, v)
+    return out
 
 
 def parse_state_label(label: str) -> tuple[int, str, str] | None:

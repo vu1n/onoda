@@ -488,7 +488,8 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 		label: "Report VTEs",
 		description:
 			"Report your final answer: each target state's vertical excitation energy in eV exactly as printed in the " +
-			"output of the job you cite, with its spin, irrep and dominant character. Report only states you identified.",
+			"output of the job you cite, with its spin, irrep and dominant character. Report only states you identified. " +
+			"Write the character as the two orbitals separated by a comma, like n,pi* or pi,3s.",
 		promptSnippet: "Report the excited states' vertical transition energies as your answer",
 		parameters: VteParams,
 		async execute(toolCallId, params) {

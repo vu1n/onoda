@@ -50,6 +50,26 @@ def test_state_labels_from_questdb_tables():
     assert normalize_character(" N , * ") == "n,pi*"
 
 
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ("π,π*", "pi,pi*"),
+        ("π→π*", "pi,pi*"),
+        ("n → π*", "n,pi*"),
+        ("n->pi*", "n,pi*"),
+        ("n -> π*", "n,pi*"),
+        ("n to pi*", "n,pi*"),
+        ("π to 3s", "pi,3s"),
+        ("Π,3s", "pi,3s"),
+        ("σ,σ*", "sigma,sigma*"),
+        ("δ,π*", "delta,pi*"),
+        ("n,π∗", "n,pi*"),
+    ],
+)
+def test_character_as_agents_write_it(written, expected):
+    assert normalize_character(written) == expected
+
+
 def test_target_irrep_must_be_normalized():
     VteTarget(spin=1, irrep="A''", count=2)
     with pytest.raises(ValidationError):
