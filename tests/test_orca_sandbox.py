@@ -167,6 +167,13 @@ def test_the_broker_refuses_real_orca_without_a_working_sandbox(tmp_path):
     assert runs(binary) == 0
 
 
+def test_the_broker_refuses_a_cache_the_sandbox_could_read(tmp_path, host_sandbox):
+    binary, sb = host_sandbox
+    with pytest.raises(CapabilityError, match="cache"):
+        broker(tmp_path, scheduler=scheduler(tmp_path, binary), job_sandbox=sb,
+               cache_dir=binary.parent / "cache")  # fmt: skip
+
+
 # ------------------------------------------------------- this host's sandbox
 
 PROBE = """#!/usr/bin/env {python}
@@ -255,6 +262,7 @@ def test_a_job_in_the_sandbox_reaches_only_its_job_dir(tmp_path, host_sandbox, m
     job_dir = str((tmp_path / "work" / entry.scheduler_job_id).resolve())
     assert entry.sandbox == sb.kind and entry.executed_here
     assert seen["read_secret"] != "ok"
+    assert seen["list_cache"] != "ok" and seen["read_cache"] != "ok"  # F2: never the cache
     # bwrap gives the job a private /tmp, so a write there never reaches the host.
     assert not (tmp_path / "escaped.txt").exists()
     # Not even the other jobs: at most its own directory shows under the work root.
@@ -271,7 +279,7 @@ def test_without_the_sandbox_the_same_probe_escapes(tmp_path, monkeypatch):
     binary, cache = probe(tmp_path, stand_in(tmp_path).parent)
     seen, entry = run_probe(tmp_path, binary, None, cache, monkeypatch)
     assert entry.sandbox is None
-    assert seen["read_secret"] == "ok"
+    assert seen["read_secret"] == "ok" and seen["read_cache"] == "ok"
 
 
 # ------------------------------------------------------------ darwin only

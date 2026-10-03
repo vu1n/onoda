@@ -685,3 +685,26 @@ def test_limits_are_broker_settings(tmp_path):
 def test_a_live_broker_always_checks_inputs(tmp_path):
     with pytest.raises(OnodaError, match="limits"):
         broker(tmp_path, scheduler=scheduler(tmp_path, stand_in(tmp_path)), limits=None)
+
+
+# --- cache entries name plain files only ------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["../../../secret.txt", "/etc/hosts", "job.inp/../x", "notes"])
+def test_a_cache_entry_naming_a_file_outside_its_entry_is_refused(tmp_path, name):
+    binary = stand_in(tmp_path)
+    cache = tmp_path / "cache"
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary), cache_dir=cache)
+    b.submit(submit())
+    (entry,) = [p for p in cache.iterdir() if not p.name.startswith(".")]
+    target = entry / "files" / name
+    target = Path(name) if name.startswith("/") else target
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("host secret\n")
+    data = json.loads((entry / "entry.json").read_bytes())
+    data["files"] = [{"name": name, "sha256": sha256_digest(target.resolve().read_bytes())}]
+    (entry / "entry.json").write_text(json.dumps(data))
+    r = b.submit(submit(call="c2"))
+    assert r.status == "refused" and r.reason == "cache_corrupt"
+    assert runs(binary) == 1

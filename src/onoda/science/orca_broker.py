@@ -257,7 +257,7 @@ class BrokerReply(_Frozen):
 class ProducedFile(_Frozen):
     """A file a job produced that a later submission may attach."""
 
-    name: str
+    name: PlainFileName
     sha256: str
 
 
@@ -464,6 +464,10 @@ class _Cache:
             raise _CacheCorrupt(f"cache entry {key} does not match its log")
         files: dict[str, tuple[str, Path]] = {}
         for f in entry.files:
+            # The entry is data from a shared directory: its names are checked
+            # before any path is built from them.
+            if not attachable(f.name):
+                raise _CacheCorrupt(f"cache entry {key}: {f.name!r} is not a product name")
             p = d / "files" / f.name
             try:
                 data = read_produced(p)
@@ -525,12 +529,13 @@ class _Refused(Exception):
 def _check_confinement(
     scheduler: OrcaLocalScheduler,
     job_sandbox: JobSandbox | None,
+    cache_dir: str | os.PathLike[str] | None,
     limits: BrokerLimits | None,
 ) -> None:
     """Refuse a live broker that would run agent input unconfined (A65): fail closed.
 
-    Real ORCA needs a working job sandbox; only a labelled stand-in may run
-    without one (a host without bwrap/Seatbelt).
+    Real ORCA needs a working job sandbox that cannot read the cache; only a
+    labelled stand-in may run without one (a host without bwrap/Seatbelt).
     """
     if limits is None:
         raise OnodaError("a live broker checks every input against its limits")
@@ -539,6 +544,8 @@ def _check_confinement(
             raise CapabilityError("the broker runs ORCA only inside a job sandbox (A65)")
         return
     job_sandbox.check(scheduler.root)
+    if cache_dir is not None and job_sandbox.exposes(cache_dir):
+        raise CapabilityError(f"the ORCA job sandbox could read the broker cache {cache_dir}")
 
 
 class OrcaBroker:
@@ -576,7 +583,7 @@ class OrcaBroker:
         self.limits = limits
         self.job_sandbox = job_sandbox
         if scheduler is not None:
-            _check_confinement(scheduler, job_sandbox, limits)
+            _check_confinement(scheduler, job_sandbox, cache_dir, limits)
             self.binary_sha256 = sha256_file(scheduler.settings.binary)
             self.stand_in = scheduler.settings.stand_in
         else:
