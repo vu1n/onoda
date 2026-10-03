@@ -35,7 +35,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from onoda.canonical import digest_of
 from onoda.records import Frozen as _Frozen
@@ -96,6 +96,12 @@ TOOL_ORCA_RUN = "orca_run"  # acquire the pinned output; recorded as acquired, n
 TOOL_REPORT = "report_states"  # the agent's final claim
 TOOL_IPYTHON = "ipython"  # RLM variants only: a persistent Python kernel with rlm()
 TASK_TOOLS = (TOOL_CASE_INPUT, TOOL_ORCA_RUN, TOOL_REPORT)
+# VTE tasks (A57): the agent runs its own jobs; see `vte_contract`.
+TOOL_STRUCTURE = "structure"  # read the molecule's xyz, point group and target states
+TOOL_ORCA_SUBMIT = "orca_submit"  # run one ORCA input through the host broker
+TOOL_REPORT_VTE = "report_vtes"  # the agent's final VTE claim
+VTE_TASK_TOOLS = (TOOL_STRUCTURE, TOOL_ORCA_SUBMIT, TOOL_REPORT_VTE)
+TaskKind = Literal["case", "vte"]
 BASE_TOOLS = ("read", "bash", "edit", "write")
 MECHANISM_TOOLS = {"observationPack": ("obs_recall",), "onlineContextCompact": ("update_plan",)}
 
@@ -140,10 +146,11 @@ class Variant(_Frozen):
             cfg["evidencePreservingReducerModel"] = reducer_model
         return cfg
 
-    def tools(self) -> tuple[str, ...]:
+    def tools(self, task_kind: TaskKind = "case") -> tuple[str, ...]:
         extra = tuple(t for m in self.mechanisms for t in MECHANISM_TOOLS.get(m, ()))
         rlm = (TOOL_IPYTHON,) if self.rlm else ()
-        return (*TASK_TOOLS, *BASE_TOOLS, *extra, *rlm)
+        task = VTE_TASK_TOOLS if task_kind == "vte" else TASK_TOOLS
+        return (*task, *BASE_TOOLS, *extra, *rlm)
 
 
 # S2 letters follow SOL_PI_DELTA §2's mechanism order (assumptions register A31).
@@ -203,7 +210,8 @@ class GatewayPolicy(_Frozen):
 
     A call outside `allowed_tools`, a `then_run` without a string `command`
     or containing an unfusable token, a file tool whose path leaves the
-    sandbox roots, an `orca_run` past `max_acquisitions`,
+    sandbox roots, an `orca_run` past `max_acquisitions`, an `orca_submit`
+    past `max_executions` (VTE tasks; cache hits count),
     any call after `max_requests` provider requests, or any call once the
     summed cost reached `max_cost_usd` is blocked and spooled as `tool.call`
     with `decision: "blocked"`. Both budgets also abort the agent at
@@ -215,6 +223,7 @@ class GatewayPolicy(_Frozen):
     allowed_tools: tuple[str, ...]
     max_requests: int = Field(gt=0)
     max_acquisitions: int = Field(ge=0)
+    max_executions: int = Field(0, ge=0)  # VTE tasks: orca_submit calls (A59)
     max_cost_usd: str | None = None  # decimal text; checked against Pi's cost estimate (A35)
     unfusable_command_tokens: tuple[str, ...] = UNFUSABLE_COMMAND_TOKENS
     # Absolute path -> placeholder, applied to every string before computing a
@@ -465,6 +474,32 @@ class TaskAcquire(_Line):
     executed_here: Literal[False] = False
 
 
+class TaskExecute(_Line):
+    """One `orca_submit` the host broker answered (VTE tasks, A59).
+
+    Written after the broker's reply and before the agent sees the output.
+    `executed_here` is the broker's word: true only when ORCA ran for this
+    submission; a cache hit replays an earlier job's bytes (`cache_hit`,
+    `executed_here` false). Ingest checks every field against the broker's
+    own journal. A refused submission writes no `task.execute`.
+    """
+
+    type: Literal["task.execute"]
+    tool_call_id: str
+    job_id: str
+    status: Literal["completed", "failed"]
+    input: Sha256  # the .inp bytes the agent submitted
+    output: Sha256  # the job's log bytes handed to the agent
+    cache_hit: bool
+    executed_here: bool
+
+    @model_validator(mode="after")
+    def _cache(self) -> TaskExecute:
+        if self.cache_hit and self.executed_here:
+            raise ValueError("a cache hit is never an execution")
+        return self
+
+
 class TaskClaim(_Line):
     type: Literal["task.claim"]
     tool_call_id: str
@@ -561,6 +596,7 @@ SpoolLine = Annotated[
     | ToolCall
     | ToolResult
     | TaskAcquire
+    | TaskExecute
     | TaskClaim
     | Compaction
     | ReplayMismatchLine
