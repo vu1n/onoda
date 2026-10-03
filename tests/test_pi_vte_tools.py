@@ -313,6 +313,31 @@ def test_orca_submit_past_max_executions_is_blocked(tmp_path, broker):
     assert [e.tool_call_id for e in run.of("task.execute")] == ["x1", "x2"]
 
 
+def test_refused_submissions_do_not_spend_the_execution_budget(tmp_path, broker):
+    """The cap counts replies that name a job, as the broker does (A59)."""
+    turns = [
+        turn(
+            call("x1", "orca_submit", input=INPUT + "# REFUSE\n"),
+            call("x2", "orca_submit", input=INPUT + "# 2\n"),
+            call("x3", "orca_submit", input=INPUT + "# 3\n"),
+            call("x4", "orca_submit", input=INPUT + "# 4\n"),
+        ),
+        turn(text("Synthetic scripted run complete.")),
+    ]
+    run = run_vte(tmp_path, turns, broker, max_executions=2)
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    calls = {c.tool_call_id: c for c in run.of("tool.call")}
+    assert [calls[c].decision for c in ("x1", "x2", "x3", "x4")] == [
+        "allowed",
+        "allowed",
+        "allowed",
+        "blocked",
+    ]
+    assert "execution budget exhausted (2)" in calls["x4"].reason
+    assert [s.tool_call_id for s in broker.submits] == ["x1", "x2", "x3"]
+    assert [e.tool_call_id for e in run.of("task.execute")] == ["x2", "x3"]
+
+
 def test_policy_without_max_executions_blocks_every_submit(tmp_path, broker):
     turns = [turn(call("x1", "orca_submit", input=INPUT)), turn(text("done"))]
     run = run_vte(tmp_path, turns, broker, max_executions=None)

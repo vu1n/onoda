@@ -436,19 +436,23 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 				if (!JOB_ID_RE.test(a.job_id)) throw new Error(`attach: ${JSON.stringify(a.job_id)} is not a job id (j0001, ...)`);
 				if (!FILE_NAME_RE.test(a.name)) throw new Error(`attach: ${JSON.stringify(a.name)} is not a plain file name`);
 			}
-			// Counted once it reaches the broker, which keeps its own count (A59).
-			counters().executions++;
 			const inputHex = sha256Hex(input);
-			const { reply, output } = checkReply(
-				await brokerRequest(socketPath, {
-					protocol: BROKER_PROTOCOL,
-					op: "submit",
-					tool_call_id: toolCallId,
-					input: params.input,
-					attach,
-				}),
-				inputHex,
-			);
+			const raw = await brokerRequest(socketPath, {
+				protocol: BROKER_PROTOCOL,
+				op: "submit",
+				tool_call_id: toolCallId,
+				input: params.input,
+				attach,
+			});
+			// Counted as the broker counts (A59): a reply that names a job (completed
+			// or failed, cache hits included), before its bytes are checked. A refusal
+			// or a broker error spends nothing; the gateway blocks once the count
+			// reaches max_executions.
+			const named = raw as Partial<BrokerReply> | null;
+			if (named && (named.status === "completed" || named.status === "failed") && typeof named.job_id === "string") {
+				counters().executions++;
+			}
+			const { reply, output } = checkReply(raw, inputHex);
 			if (reply.status === "refused") throw new Error(`orca_submit refused: ${reply.reason ?? "no reason given"}`);
 			w.line({
 				type: "task.execute",
