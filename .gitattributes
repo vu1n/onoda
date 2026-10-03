@@ -1,1 +1,3 @@
 cases/orca/cclib/** -text -diff linguist-vendored
+tests/fixtures/orca611-nevpt2/*.out -text -diff linguist-vendored
+experiments/questdb-phase0/questdb-raw/** -text -diff linguist-vendored

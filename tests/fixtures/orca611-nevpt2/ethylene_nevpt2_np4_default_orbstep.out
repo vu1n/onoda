@@ -1,0 +1,2477 @@
+
+                                 *****************
+                                 * O   R   C   A *
+                                 *****************
+
+                                            #,                                       
+                                            ###                                      
+                                            ####                                     
+                                            #####                                    
+                                            ######                                   
+                                           ########,                                 
+                                     ,,################,,,,,                         
+                               ,,#################################,,                 
+                          ,,##########################################,,             
+                       ,#########################################, ''#####,          
+                    ,#############################################,,   '####,        
+                  ,##################################################,,,,####,       
+                ,###########''''           ''''###############################       
+              ,#####''   ,,,,##########,,,,          '''####'''          '####       
+            ,##' ,,,,###########################,,,                        '##       
+           ' ,,###''''                  '''############,,,                           
+         ,,##''                                '''############,,,,        ,,,,,,###''
+      ,#''                                            '''#######################'''  
+     '                                                          ''''####''''         
+             ,#######,   #######,   ,#######,      ##                                
+            ,#'     '#,  ##    ##  ,#'     '#,    #''#        ,####,    ,#,          
+            ##       ##  ##   ,#'  ##            #'  '#       #'       ,# #          
+            ##       ##  #######   ##           ,######,      #####,      #          
+            '#,     ,#'  ##    ##  '#,     ,#' ,#      #,     #,   #      #          
+             '#######'   ##     ##  '#######'  #'      '#     '####' #    #          
+
+
+
+                #########################################################
+                #                        -***-                          #
+                #          Department of theory and spectroscopy        #
+                #                                                       #
+                #                      Frank Neese                      #
+                #                                                       #
+                #     Directorship, Architecture, Infrastructure        #
+                #                    SHARK, DRIVERS                     #
+                #        Core code/Algorithms in most modules           #
+                #                                                       #
+                #        Max Planck Institute fuer Kohlenforschung      #
+                #                Kaiser Wilhelm Platz 1                 #
+                #                 D-45470 Muelheim/Ruhr                 #
+                #                      Germany                          #
+                #                                                       #
+                #                  All rights reserved                  #
+                #                        -***-                          #
+                #########################################################
+
+
+                         Program Version 6.1.1  -  RELEASE   -
+                                (GIT: $487d211cc3$)
+                          ($2025-11-21 10:33:24 +0100$)
+
+
+ With contributions from (in alphabetic order):
+[Max-Planck-Institut fuer Kohlenforschung]                               
+  Daniel Aravena         : Magnetic Suceptibility                        
+  Michael Atanasov       : Ab Initio Ligand Field Theory (pilot matlab implementation)
+  Alexander A. Auer      : GIAO ZORA, VPT2 properties, NMR spectrum      
+  Ute Becker             : All parallelization in ORCA, NUMFREQ, NUMCALC 
+  Giovanni Bistoni       : ED, misc. LED, open-shell LED, HFLD           
+  Dmytro Bykov           : pre 5.0 version of the SCF Hessian            
+  Marcos Casanova-Páez   : Triplet and SCS-CIS(D). UHF-(DLPNO)-IP/EA/STEOM-CCSD. UHF-CVS-IP/STEOM-CCSD   
+  Vijay G. Chilkuri      : MRCI spin determinant printing, contributions to CSF-ICE 
+  Pauline Colinet        : FMM embedding                                 
+  Dipayan Datta          : RHF DLPNO-CCSD density                        
+  Achintya Kumar Dutta   : EOM-CC, STEOM-CC                              
+  Nicolas Foglia         : Exact transition moments, OPA infrastructure, MCD improvements    
+  Dmitry Ganyushin       : Spin-Orbit,Spin-Spin,Magnetic field MRCI      
+  Miquel Garcia-Rates    : C-PCM and meta-GGA Hessian, CCSD/C-PCM, Gaussian charge scheme 
+  Tiago L. C. Gouveia    : GS-ROHF, GS-ROCIS                             
+  Yang Guo               : DLPNO-NEVPT2, F12-NEVPT2, CIM, IAO-localization        
+  Andreas Hansen         : Spin unrestricted coupled pair/coupled cluster methods 
+  Ingolf Harden          : AUTO-CI MPn and infrastructure                
+  Benjamin Helmich-Paris : MC-RPA, TRAH-(SCF,CASSCF), AVAS, COSX integrals, SCF dyn. polar., MC-PDFT, srDFT 
+  Lee Huntington         : MR-EOM, pCC                                   
+  Robert Izsak           : Overlap fitted RIJCOSX, COSX-SCS-MP3, EOM     
+  Riya Kayal             : Wick's Theorem for AUTO-CI, AUTO-CI UHF-CCSDT 
+  Emily Kempfer          : AUTO-CI RHF CISDT and CCSDT, approximate NEVPT4
+  Christian Kollmar      : KDIIS, OOCD, Brueckner-CCSD(T), CCSD density, CASPT2, CASPT2-K, improved NEVPT2 
+  Axel Koslowski         : Symmetry handling                             
+  Simone Kossmann        : meta-GGA functionals, TD-DFT gradient, OOMP2, (MP2 Hessian; deprecated post 5.0) 
+  Lucas Lang             : DCDCAS, Hyperfine gauge corrections, ICE-SOC+SSC
+  Marvin Lechner         : AUTO-CI (C++ implementation), FIC-MRCC        
+  Spencer Leger          : CASSCF response                               
+  Dagmar Lenk            : GEPOL surface, SMD, ORCA-2-JSON               
+  Dimitrios Liakos       : Extrapolation schemes; Compound Job, Property file
+  Dimitrios Manganas     : Further ROCIS development; embedding schemes. LFT, Crystal Embedding 
+  Dimitrios Pantazis     : SARC Basis sets                               
+  Anastasios Papadopoulos: AUTO-CI, single reference methods and gradients 
+  Taras Petrenko         : pre 6.0 DFT Hessian and TD-DFT gradient,  ECA, NRVS 
+  Petra Pikulova         : Analytic Raman intensities                    
+  Peter Pinski           : DLPNO-MP2, DLPNO-MP2 Gradient                 
+  Shashank Vittal Rao    : ES-AILFT, MagRelax                            
+  Christoph Reimann      : Effective Core Potentials                     
+  Marius Retegan         : Local ZFS, SOC                                
+  Christoph Riplinger    : Optimizer, TS searches, QM/MM, DLPNO-CCSD(T), (RO)-DLPNO pert. Triples 
+  Michael Roemelt        : Original ROCIS implementation, recursive CI coupling coefficients
+  Masaaki Saitow         : Open-shell DLPNO-CCSD energy and density      
+  Barbara Sandhoefer     : DKH picture change effects                    
+  Yorick L. A. Schmerwitz: GMF and freeze-and-release deltaSCF, NEB S-IDPP initial path                    
+  Kantharuban Sivalingam : CASSCF convergence/infrastructure, NEVPT2, NEVPT3, NEVPT4(SD), FIC-MRCI and CEPA variants
+  Bernardo de Souza      : ESD, SOC TD-DFT                               
+  Georgi L. Stoychev     : AutoAux, RI-MP2 NMR, DLPNO-MP2 response, X2C  
+  Van Anh Tran           : RI-MP2 g-tensors                              
+  Willem Van den Heuvel  : Paramagnetic NMR                              
+  Zikuan Wang            : NOTCH, Electric field optimization            
+  Frank Wennmohs         : Technical directorship and infrastructure     
+  Hang Xu                : AUTO-CI-Response properties                   
+                                                                         
+[FACCTs GmbH]                                                            
+  Markus Bursch, Nicolas Foglia, Miquel Garcia-Rates, Ingolf Harden, Hagen Neugebauer, Anastasios Papadopoulos, 
+  Christoph Riplinger, Bernardo de Souza, Georgi L. Stoychev                                                    
+                                                                 
+  APM, various basis sets, CI-OPT, improved COSX, DLPNO-Multilevel,           
+  DOCKER, DRACO, updates on ESD, Fragmentator, GOAT, IRC, LR-CPCM, L-BFGS, MBIS, meta-GGA TD-DFT gradient, ML-optimized integration grids, 
+  MM, NACMEs, nearIR, NEB, NEB-TS, NL-DFT gradient (VV10), 2- and 3-layer-ONIOM, interface openCOSMO-RS, QMMM,   
+  Crystal-QMMM, RESP, rigid body optimization, SF, symmetry and pop. for TD-DFT, various functionals, SOLVATOR                                   
+                                                                         
+[Other institutions]                                                     
+  V. Asgeirsson          : NEB                                           
+  Christoph Bannwarth    : sTDA-DFT, sTD-DFT, PBEh-3c, B97-3c, D3        
+  Giovanni Bistoni       : ETS/NOCV, ADLD/ADEX, COVALED                  
+  Martin Brehm           : Molecular dynamics                            
+  Ronald Cardenas        : ETS/NOCV                                      
+  Martina Colucci        : COVALED                                       
+  Sebastian Ehlert       : rSCAN, r2SCAN, r2SCAN-3c, D4, dhf basis sets  
+  Marvin Friede          : D4 for Fr, Ra, Ac-Lr                          
+  Lars Goerigk           : TD-DFT with DH, B97 family of functionals     
+  Stefan Grimme          : VdW corrections, initial TS optimization, DFT functionals, gCP, sTDA/sTD-DF 
+  Waldemar Hujo          : DFT-NL                                        
+  H. Jonsson             : NEB                                           
+  Holger Kruse           : gCP                                           
+  Marcel Mueller         : wB97X-3c, vDZP basis set                      
+  Hagen Neugebauer       : wr2SCAN, Native XTB                           
+  Gianluca Regni         : ADLD/ADEX                                     
+  Tobias Risthaus        : pre 6.0 range-separated hybrid DFT and stability analysis
+  Lukas Wittmann         : regularized MP2, r2SCAN double-hybrids, wr2SCAN        
+                                                                         
+We gratefully acknowledge several colleagues who have allowed us to      
+interface, adapt or use parts of their codes:                            
+  Ed Valeev, F. Pavosevic, A. Kumar             : LibInt (2-el integral package), F12 methods 
+  Garnet Chan, S. Sharma, J. Yang, R. Olivares  : DMRG                   
+  Ulf Ekstrom                                   : XCFun DFT Library      
+  Mihaly Kallay                                 : mrcc  (arbitrary order and MRCC methods)
+  Frank Weinhold                                : gennbo (NPA and NBO analysis)           
+  Simon Mueller                                 : openCOSMO-RS                            
+  Christopher J. Cramer and Donald G. Truhlar   : smd solvation model                     
+  S Lehtola, MJT Oliveira, MAL Marques          : LibXC Library                           
+  Liviu Ungur et al                             : ANISO software                          
+
+
+ Your calculation uses the libint2 library for the computation of 2-el integrals
+ For citations please refer to: http://libint.valeyev.net
+
+ Your ORCA version has been built with support for libXC version: 7.0.0
+ For citations please refer to: https://libxc.gitlab.io
+
+ This ORCA versions uses:
+   CBLAS   interface :  Fast vector & matrix operations
+   LAPACKE interface :  Fast linear algebra routines
+   SCALAPACK package :  Parallel linear algebra routines
+   Shared memory     :  Shared parallel matrices
+
+
+  ***********************************
+  * Starting time: Sat Oct  3 01:32:21 2026
+  * Host name:     vus-MacBook-Pro.local
+  * Process ID:    13534
+  * Working dir.:  /Users/vuln/code/onoda/orca-jobs/questdb-phase0
+  ***********************************
+
+NOTE: MaxCore=2000 MB was set to SCF,MP2,MDCI,CIPSI,MRCI,RASCI and CIS
+      => If you want to overwrite this, your respective input block should be placed after the MaxCore statement
+================================================================================
+
+----- Orbital basis set information -----
+Your calculation utilizes the basis: aug-cc-pVTZ 
+    H, B-Ne : Obtained from the ccRepo (grant-hill.group.shef.ac.uk/ccrepo) Feb. 2017
+              R. A. Kendall, T. H. Dunning, Jr., R. J. Harrison, J. Chem. Phys. 96, 6796 (1992)
+         He : Obtained from the ccRepo (grant-hill.group.shef.ac.uk/ccrepo) Feb. 2017
+              D. E. Woon, T. H. Dunning, Jr., J. Chem. Phys. 100, 2975 (1994)
+  Li-Be, Na : Obtained from the ccRepo (grant-hill.group.shef.ac.uk/ccrepo) Feb. 2017
+              B. P. Prascher, D. E. Woon, K. A. Peterson, T. H. Dunning, Jr., A. K. Wilson, Theor. Chem. Acc. 128, 69 (2011)
+         Mg : Obtained from the Peterson Research Group Website (tyr0.chem.wsu.edu/~kipeters) Feb. 2017
+              B. P. Prascher, D. E. Woon, K. A. Peterson, T. H. Dunning, Jr., A. K. Wilson, Theor. Chem. Acc. 128, 69 (2011)
+      Al-Ar : Obtained from the ccRepo (grant-hill.group.shef.ac.uk/ccrepo) Feb. 2017
+              D. E. Woon, T. H. Dunning, Jr., J. Chem. Phys. 98, 1358 (1993)
+      Sc-Zn : Obtained from the ccRepo (grant-hill.group.shef.ac.uk/ccrepo) Feb. 2017
+              N. B. Balabanov, K. A. Peterson, J. Chem. Phys. 123, 064107 (2005)
+              N. B. Balabanov, K. A. Peterson, J. Chem. Phys. 125, 074110 (2006)
+      Ga-Kr : Obtained from the ccRepo (grant-hill.group.shef.ac.uk/ccrepo) Feb. 2017
+              A. K. Wilson, D. E. Woon, K. A. Peterson, T. H. Dunning, Jr., J. Chem. Phys. 110, 7667 (1999)
+     Ag, Au : Obtained from the Peterson Research Group Website (tyr0.chem.wsu.edu/~kipeters) Feb. 2017
+              K. A. Peterson, C. Puzzarini, Theor. Chem. Acc. 114, 283 (2005)
+
+----- AuxJ basis set information -----
+Your calculation utilizes the AutoAux generation procedure.
+  G. L. Stoychev, A. A. Auer, F. Neese, J. Chem. Theory Comput. 13, 554 (2017)
+
+----- AuxC basis set information -----
+Your calculation utilizes the AutoAux generation procedure.
+  G. L. Stoychev, A. A. Auer, F. Neese, J. Chem. Theory Comput. 13, 554 (2017)
+
+----- AuxJK basis set information -----
+Your calculation utilizes the AutoAux generation procedure.
+  G. L. Stoychev, A. A. Auer, F. Neese, J. Chem. Theory Comput. 13, 554 (2017)
+
+----- AuxX basis set information -----
+Your calculation utilizes the AutoAux generation procedure.
+  G. L. Stoychev, A. A. Auer, F. Neese, J. Chem. Theory Comput. 13, 554 (2017)
+
+================================================================================
+                                        WARNINGS
+                       Please study these warnings very carefully!
+================================================================================
+
+
+WARNING: CASSCF multiplicity blocks not in descending order!
+       : This is important for any CASSCF property run ...
+ ===>  : Re-ordering the multiplicity blocks, nroots, irreps and alike!
+
+IMPORTANT NOTE: CASSCF must signal convergence for a subsequent CASPT2/NEVPT2! 
+                Set maxiter=1 to run CASPT2/NEVPT2 with arbitrary orbitals.
+
+
+================================================================================
+                                       INPUT FILE
+================================================================================
+NAME = ethylene_nevpt2_np4.inp
+|  1> # Step B (timed): SA-CASSCF(2,2) + SC-NEVPT2 / aug-cc-pVTZ / RIJCOSX /
+|  2> # AutoAux, orbitals projected from step A. Geometry: QUESTDB geometries/xyz/ethylene.xyz.
+|  3> ! aug-cc-pVTZ RIJCOSX AutoAux TightSCF MORead
+|  4> %moinp "ethylene_guess.gbw"
+|  5> %maxcore 2000
+|  6> %pal nprocs 4 end
+|  7> %casscf
+|  8>   nel 2
+|  9>   norb 2
+| 10>   mult 1,3
+| 11>   nroots 3,1
+| 12>   trafostep ri
+| 13>   PTMethod SC_NEVPT2
+| 14> end
+| 15> * xyz 0 1
+| 16> C 0.00000000 0.66690369 0.00000000
+| 17> C 0.00000000 -0.66690369 0.00000000
+| 18> H 0.00000000 1.22952147 0.92229027
+| 19> H 0.00000000 -1.22952147 0.92229027
+| 20> H 0.00000000 1.22952147 -0.92229027
+| 21> H 0.00000000 -1.22952147 -0.92229027
+| 22> *
+| 23> 
+| 24>                          ****END OF INPUT****
+================================================================================
+
+                       ****************************
+                       * Single Point Calculation *
+                       ****************************
+
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  C      0.000000    0.666904    0.000000
+  C      0.000000   -0.666904    0.000000
+  H      0.000000    1.229521    0.922290
+  H      0.000000   -1.229521    0.922290
+  H      0.000000    1.229521   -0.922290
+  H      0.000000   -1.229521   -0.922290
+
+----------------------------
+CARTESIAN COORDINATES (A.U.)
+----------------------------
+  NO LB      ZA    FRAG     MASS         X           Y           Z
+   0 C     6.0000    0    12.011    0.000000    1.260265    0.000000
+   1 C     6.0000    0    12.011    0.000000   -1.260265    0.000000
+   2 H     1.0000    0     1.008    0.000000    2.323459    1.742876
+   3 H     1.0000    0     1.008    0.000000   -2.323459    1.742876
+   4 H     1.0000    0     1.008    0.000000    2.323459   -1.742876
+   5 H     1.0000    0     1.008    0.000000   -2.323459   -1.742876
+
+--------------------------------
+INTERNAL COORDINATES (ANGSTROEM)
+--------------------------------
+ C      0   0   0     0.000000000000     0.00000000     0.00000000
+ C      1   0   0     1.333807380000     0.00000000     0.00000000
+ H      1   2   0     1.080350919150   121.38412896     0.00000000
+ H      2   1   3     1.080350919150   121.38412896     0.00000000
+ H      1   2   3     1.080350919150   121.38412896   180.00000121
+ H      2   1   3     1.080350919150   121.38412896   180.00000121
+
+---------------------------
+INTERNAL COORDINATES (A.U.)
+---------------------------
+ C      0   0   0     0.000000000000     0.00000000     0.00000000
+ C      1   0   0     2.520530663603     0.00000000     0.00000000
+ H      1   2   0     2.041567365724   121.38412896     0.00000000
+ H      2   1   3     2.041567365724   121.38412896     0.00000000
+ H      1   2   3     2.041567365724   121.38412896   180.00000121
+ H      2   1   3     2.041567365724   121.38412896   180.00000121
+
+---------------------
+BASIS SET INFORMATION
+---------------------
+There are 2 groups of distinct atoms
+
+ Group   1 Type C   : 19s6p3d2f contracted to 5s4p3d2f pattern {88111/3111/111/11}
+ Group   2 Type H   : 6s3p2d contracted to 4s3p2d pattern {3111/111/11}
+
+Atom   0C    basis set group =>   1
+Atom   1C    basis set group =>   1
+Atom   2H    basis set group =>   2
+Atom   3H    basis set group =>   2
+Atom   4H    basis set group =>   2
+Atom   5H    basis set group =>   2
+---------------------------------
+AUXILIARY/J BASIS SET INFORMATION
+---------------------------------
+There are 2 groups of distinct atoms
+
+ Group   1 Type C   : 16s13p12d7f5g contracted to 16s13p12d7f5g pattern {1111111111111111/1111111111111/111111111111/1111111/11111}
+ Group   2 Type H   : 14s6p5d4f contracted to 14s6p5d4f pattern {11111111111111/111111/11111/1111}
+
+Atom   0C    basis set group =>   1
+Atom   1C    basis set group =>   1
+Atom   2H    basis set group =>   2
+Atom   3H    basis set group =>   2
+Atom   4H    basis set group =>   2
+Atom   5H    basis set group =>   2
+---------------------------------
+AUXILIARY/C BASIS SET INFORMATION
+---------------------------------
+There are 2 groups of distinct atoms
+
+ Group   1 Type C   : 16s13p12d7f5g contracted to 16s13p12d7f5g pattern {1111111111111111/1111111111111/111111111111/1111111/11111}
+ Group   2 Type H   : 14s6p5d4f contracted to 14s6p5d4f pattern {11111111111111/111111/11111/1111}
+
+Atom   0C    basis set group =>   1
+Atom   1C    basis set group =>   1
+Atom   2H    basis set group =>   2
+Atom   3H    basis set group =>   2
+Atom   4H    basis set group =>   2
+Atom   5H    basis set group =>   2
+----------------------------------
+AUXILIARY/JK BASIS SET INFORMATION
+----------------------------------
+There are 2 groups of distinct atoms
+
+ Group   1 Type C   : 16s13p12d7f5g contracted to 16s13p12d7f5g pattern {1111111111111111/1111111111111/111111111111/1111111/11111}
+ Group   2 Type H   : 14s6p5d4f contracted to 14s6p5d4f pattern {11111111111111/111111/11111/1111}
+
+Atom   0C    basis set group =>   1
+Atom   1C    basis set group =>   1
+Atom   2H    basis set group =>   2
+Atom   3H    basis set group =>   2
+Atom   4H    basis set group =>   2
+Atom   5H    basis set group =>   2
+---------------------------------
+AUXILIARY/X BASIS SET INFORMATION
+---------------------------------
+There are 2 groups of distinct atoms
+
+ Group   1 Type C   : 16s13p12d7f5g contracted to 16s13p12d7f5g pattern {1111111111111111/1111111111111/111111111111/1111111/11111}
+ Group   2 Type H   : 14s6p5d4f contracted to 14s6p5d4f pattern {11111111111111/111111/11111/1111}
+
+Atom   0C    basis set group =>   1
+Atom   1C    basis set group =>   1
+Atom   2H    basis set group =>   2
+Atom   3H    basis set group =>   2
+Atom   4H    basis set group =>   2
+Atom   5H    basis set group =>   2
+
+
+           ************************************************************
+           *        Program running with 4 parallel MPI-processes     *
+           *              working on a common directory               *
+           ************************************************************
+------------------------------------------------------------------------------
+                             ORCA STARTUP CALCULATIONS
+                           -- RI-GTO INTEGRALS CHOSEN --
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+                   ___                                                        
+                  /   \      - P O W E R E D   B Y -                         
+                 /     \                                                     
+                 |  |  |   _    _      __       _____    __    __             
+                 |  |  |  | |  | |    /  \     |  _  \  |  |  /  |          
+                  \  \/   | |  | |   /    \    | | | |  |  | /  /          
+                 / \  \   | |__| |  /  /\  \   | |_| |  |  |/  /          
+                |  |  |   |  __  | /  /__\  \  |    /   |      \           
+                |  |  |   | |  | | |   __   |  |    \   |  |\   \          
+                \     /   | |  | | |  |  |  |  | |\  \  |  | \   \       
+                 \___/    |_|  |_| |__|  |__|  |_| \__\ |__|  \__/        
+                                                                              
+                      - O R C A' S   B I G   F R I E N D -                    
+                                      &                                       
+                       - I N T E G R A L  F E E D E R -                       
+                                                                              
+ v1 FN, 2020, v2 2021, v3 2022-2024                                           
+------------------------------------------------------------------------------
+
+
+----------------------
+SHARK INTEGRAL PACKAGE
+----------------------
+
+Number of atoms                             ...      6
+Number of basis functions                   ...    196
+Number of shells                            ...     76
+Maximum angular momentum                    ...      3
+Integral batch strategy                     ... SHARK/LIBINT Hybrid
+RI-J (if used) integral strategy            ... SPLIT-RIJ (Revised 2003 algorithm where possible)
+Printlevel                                  ...      1
+Contraction scheme used                     ... PARTIAL GENERAL contraction
+Prescreening option                         ... SCHWARTZ
+   Thresh                                   ... 2.500e-11
+   Tcut                                     ... 2.500e-12
+   Tpresel                                  ... 2.500e-12 
+Coulomb Range Separation                    ... NOT USED
+Exchange Range Separation                   ... NOT USED
+Multipole approximations                    ... NOT USED
+Finite Nucleus Model                        ... NOT USED
+CABS basis                                  ... NOT available
+Auxiliary Coulomb fitting basis             ... AVAILABLE
+   # of basis functions in Aux-J            ...    758
+   # of shells in Aux-J                     ...    222
+   Maximum angular momentum in Aux-J        ...      4
+Auxiliary J/K fitting basis                 ... AVAILABLE
+   # of basis functions in Aux-JK           ...    758
+   # of shells in Aux-JK                    ...    222
+   Maximum angular momentum in Aux-JK       ...      4
+Auxiliary Correlation fitting basis         ... AVAILABLE
+   # of basis functions in Aux-C            ...    758
+   # of shells in Aux-C                     ...    222
+   Maximum angular momentum in Aux-C        ...      4
+Auxiliary 'external' fitting basis          ... NOT available
+
+Checking pre-screening integrals            ... done (  0.0 sec) Dimension = 76
+Save PGC pre-screening integrals            ... done (  0.0 sec) Dimension = 76
+Calculate PGC overlap integrals             ... done (  0.0 sec) Dimension = 64
+Calculating pre-screening integrals (ORCA)  ... done (  0.0 sec) Dimension = 64
+Shell pair information
+Shell pair cut-off parameter TPreSel        ...   2.5e-12
+Total number of shell pairs                 ...      2926
+Shell pairs after pre-screening             ...      2890
+Total number of primitive shell pairs       ...      3934
+Primitive shell pairs kept                  ...      3737
+          la=0 lb=0:    705 shell pairs
+          la=1 lb=0:    760 shell pairs
+          la=1 lb=1:    210 shell pairs
+          la=2 lb=0:    532 shell pairs
+          la=2 lb=1:    280 shell pairs
+          la=2 lb=2:    105 shell pairs
+          la=3 lb=0:    152 shell pairs
+          la=3 lb=1:     80 shell pairs
+          la=3 lb=2:     56 shell pairs
+          la=3 lb=3:     10 shell pairs
+
+Checking whether 4 symmetric matrices of dimension 196 fit in memory
+:Max Core in MB      =   2000.00
+ MB in use           =      6.41
+ MB left             =   1993.59
+ MB needed           =      0.59
+ Data fit in memory  = YES
+Calculating RI/J V-Matrix + Cholesky decomp.... done (  0.0 sec)
+Calculating RI/JK V-Matrix + Cholesky decomp.... done (  0.0 sec)
+Calculating RI/C V-Matrix + Cholesky decomp.... done (  0.0 sec)
+Calculating Nuclear repulsion               ... done (  0.0 sec) ENN=     33.409327122949 Eh
+
+Diagonalization of the overlap matrix:
+Smallest eigenvalue                        ... 4.802e-06
+Time for diagonalization                   ...    0.001 sec
+Threshold for overlap eigenvalues          ... 1.000e-07
+Number of eigenvalues below threshold      ... 0
+Time for construction of square roots      ...    0.000 sec
+Total time needed                          ...    0.002 sec
+
+-------------------
+DFT GRID GENERATION
+-------------------
+
+General Integration Accuracy     IntAcc      ... 4.388
+Radial Grid Type                 RadialGrid  ... OptM3 with GC (2021)
+Angular Grid (max. ang.)         AngularGrid ... 4 (Lebedev-302)
+Angular grid pruning method      GridPruning ... 4 (adaptive)
+Weight generation scheme         WeightScheme... mBecke (2022)
+Basis function cutoff            BFCut       ... 1.0000e-11
+Integration weight cutoff        WCut        ... 1.0000e-14
+Partially contracted basis set               ... off
+Rotationally invariant grid construction     ... off
+Angular grids for H and He will be reduced by one unit
+Diffuse basis detected: some atoms will have their outermost
+                        angular grid increased by 1.
+
+Total number of grid points                  ...    26764
+Total number of batches                      ...      422
+Average number of points per batch           ...       63
+Average number of grid points per atom       ...     4461
+
+---------------------
+SHARK GRID GENERATION
+---------------------
+
+General Integration Accuracy     IntAcc      ... 4.388
+Radial Grid Type                 RadialGrid  ... OptM3 with GC (2021)
+Angular Grid (max. ang.)         AngularGrid ... 4 (Lebedev-302)
+Angular grid pruning method      GridPruning ... 4 (adaptive)
+Weight generation scheme         WeightScheme... mBecke (2022)
+Basis function cutoff            BFCut       ... 1.0000e-11
+Integration weight cutoff        WCut        ... 1.0000e-14
+Partially contracted basis set               ... off
+Rotationally invariant grid construction     ... off
+Angular grids for H and He will be reduced by one unit
+Diffuse basis detected: some atoms will have their outermost
+                        angular grid increased by 1.
+Steep s-basis detected: some atoms will have their radial
+                        grid points doubled.
+
+Total number of grid points                  ...    39718
+Total number of batches                      ...      624
+Average number of points per batch           ...       63
+Average number of grid points per atom       ...     6620
+
+--------------------
+COSX GRID GENERATION
+--------------------
+
+GRIDX 1
+-------
+General Integration Accuracy     IntAcc      ... 3.816
+Radial Grid Type                 RadialGrid  ... OptM3 with GC (2021)
+Angular Grid (max. ang.)         AngularGrid ... 1 (Lebedev-50)
+Angular grid pruning method      GridPruning ... 4 (adaptive)
+Weight generation scheme         WeightScheme... mBecke (2022)
+Basis function cutoff            BFCut       ... 1.0000e-11
+Integration weight cutoff        WCut        ... 1.0000e-14
+Partially contracted basis set               ... on
+Rotationally invariant grid construction     ... off
+Angular grids for H and He will be reduced by one unit
+Diffuse basis detected: some atoms will have their outermost
+                        angular grid increased by 1.
+
+Total number of grid points                  ...     3376
+Total number of batches                      ...       30
+Average number of points per batch           ...      112
+Average number of grid points per atom       ...      563
+UseSFitting                                  ... on
+
+GRIDX 2
+-------
+General Integration Accuracy     IntAcc      ... 4.020
+Radial Grid Type                 RadialGrid  ... OptM3 with GC (2021)
+Angular Grid (max. ang.)         AngularGrid ... 2 (Lebedev-110)
+Angular grid pruning method      GridPruning ... 4 (adaptive)
+Weight generation scheme         WeightScheme... mBecke (2022)
+Basis function cutoff            BFCut       ... 1.0000e-11
+Integration weight cutoff        WCut        ... 1.0000e-14
+Partially contracted basis set               ... on
+Rotationally invariant grid construction     ... off
+Angular grids for H and He will be reduced by one unit
+Diffuse basis detected: some atoms will have their outermost
+                        angular grid increased by 1.
+
+Total number of grid points                  ...     8052
+Total number of batches                      ...       66
+Average number of points per batch           ...      122
+Average number of grid points per atom       ...     1342
+UseSFitting                                  ... on
+
+GRIDX 3
+-------
+General Integration Accuracy     IntAcc      ... 4.338
+Radial Grid Type                 RadialGrid  ... OptM3 with GC (2021)
+Angular Grid (max. ang.)         AngularGrid ... 3 (Lebedev-194)
+Angular grid pruning method      GridPruning ... 4 (adaptive)
+Weight generation scheme         WeightScheme... mBecke (2022)
+Basis function cutoff            BFCut       ... 1.0000e-11
+Integration weight cutoff        WCut        ... 1.0000e-14
+Partially contracted basis set               ... on
+Rotationally invariant grid construction     ... off
+Angular grids for H and He will be reduced by one unit
+Diffuse basis detected: some atoms will have their outermost
+                        angular grid increased by 1.
+
+Total number of grid points                  ...    18472
+Total number of batches                      ...      146
+Average number of points per batch           ...      126
+Average number of grid points per atom       ...     3079
+UseSFitting                                  ... on
+Grids setup in   0.3 sec
+Initializing property integral containers    ... done (  0.0 sec)
+
+SHARK setup successfully completed in   0.4 seconds
+
+Maximum memory used throughout the entire STARTUP-calculation: 20.6 MB
+
+
+           ************************************************************
+           *        Program running with 4 parallel MPI-processes     *
+           *              working on a common directory               *
+           ************************************************************
+-------------------------------------------------------------------------------
+                                 ORCA GUESS
+                   Start orbitals & Density for SCF / CASSCF
+-------------------------------------------------------------------------------
+
+------------
+SCF SETTINGS
+------------
+Hamiltonian:
+ Ab initio Hamiltonian  Method          .... Hartree-Fock(GTOs)
+ RI-approximation to the Coulomb term is turned on
+   Number of AuxJ basis functions       .... 758
+   RIJ-COSX (HFX calculated with COS-X)).... on
+
+
+General Settings:
+ Integral files         IntName         .... ethylene_nevpt2_np4
+ Hartree-Fock type      HFTyp           .... CASSCF
+ Total Charge           Charge          ....    0
+ Multiplicity           Mult            ....    1
+ Number of Electrons    NEL             ....   16
+ Basis Dimension        Dim             ....  184
+ Nuclear Repulsion      ENuc            ....     33.4093271229 Eh
+
+---------------------
+INITIAL GUESS: MOREAD
+---------------------
+Guess MOs are being read from file: ethylene_guess.gbw
+Input Geometry matches current geometry (good)
+Atom 0: N(Shells)= 14 and 6 - projection required
+Input basis set needs projection
+NBasis(read)= 48
+NBasis(calc)= 184
+Basis set overlap was calculated
+Using GuessMode=CMatrix for the initial guess
+Initial orthogonal set was formed
+CASSCF - fitting 2 shells:
+   closed-shell contains   7 orbitals (  0 ...   6)
+   active space contains   2 orbitals (  7 ...   8)
+Virtual orbitals were projected
+Gram-Schmidt orthogonalization of all MOs with pivot on actives
+Initial density was built
+Canonicalizing active space vectors CAS(2,2) {7-8} C(184,184) Active space vectors have been canonicalized
+                      ------------------
+                      INITIAL GUESS DONE (   0.0 sec)
+                      ------------------
+             **** ENERGY FILE WAS UPDATED (ethylene_nevpt2_np4.en.tmp) ****
+Finished Guess after   0.1 sec
+Maximum memory used throughout the entire GUESS-calculation: 11.1 MB
+
+
+           ************************************************************
+           *        Program running with 4 parallel MPI-processes     *
+           *              working on a common directory               *
+           ************************************************************
+-------------------------------------------------------------------------------
+                              ORCA-CASSCF
+-------------------------------------------------------------------------------
+
+Building the CAS space              ... done (1 configurations for Mult=3)
+Building the CAS space              ... done (3 configurations for Mult=1)
+Memory for address arrays  		      ... done
+Make address arrays			      ... done
+Memory for buffers 			      ... done
+Setting up spin-function prototypes	      ... (MAXOPEN=2) 2 4 done
+Trivial cases - DOMO's			      ... done (  0.0 MB)
+Number of open shells			    ...  2
+domo->virtual excitations			... done (  0.0 MB)
+domo->somo excitations				... done (  0.0 MB)
+somo->virtual excitations			... done (  0.0 MB)
+somo->somo excitations				... done (  0.0 MB)
+Coupling container construction done
+Memory for address arrays  		      ... done
+Make address arrays			      ... done
+Memory for buffers 			      ... done
+Setting up spin-function prototypes	      ... (MAXOPEN=2) 0 2 4 done
+Trivial cases - DOMO's			      ... done (  0.0 MB)
+Number of open shells			    ...  0
+domo->virtual excitations			... done (  0.0 MB)
+domo->somo excitations				... done (  0.0 MB)
+somo->virtual excitations			... done (  0.0 MB)
+somo->somo excitations				... done (  0.0 MB)
+Number of open shells			    ...  2
+domo->virtual excitations			... done (  0.0 MB)
+domo->somo excitations				... done (  0.0 MB)
+somo->virtual excitations			... done (  0.0 MB)
+somo->somo excitations				... done (  0.0 MB)
+Coupling container construction done
+
+ CASSCF (estimated) memory needed     ... 1.9 MB
+ NEVPT2 (estimated) memory needed     ... 3.4 MB
+
+
+SYSTEM-SPECIFIC SETTINGS:
+Number of active electrons          ...    2
+Number of active orbitals           ...    2
+Total number of electrons           ...   16
+Total number of orbitals            ...  184
+Total number aux. functions         ...  758
+
+Determined orbital ranges:
+   Internal       0 -    6 (   7 orbitals)
+   Active         7 -    8 (   2 orbitals)
+   External       9 -  183 ( 175 orbitals)
+Number of rotation parameters      ...   1589
+
+CI-STEP:
+CI strategy                         ... General CI
+Number of multiplicity blocks       ...    2
+BLOCK  0 WEIGHT=   0.5000
+  Multiplicity                      ...    3
+  #(Configurations)                 ...    1
+  #(CSFs)                           ...    1
+  #(Roots)                          ...    1
+    ROOT=0 WEIGHT=    0.500000
+
+BLOCK  1 WEIGHT=   0.5000
+  Multiplicity                      ...    1
+  #(Configurations)                 ...    3
+  #(CSFs)                           ...    3
+  #(Roots)                          ...    3
+    ROOT=0 WEIGHT=    0.166667
+    ROOT=1 WEIGHT=    0.166667
+    ROOT=2 WEIGHT=    0.166667
+
+  PrintLevel                        ...    1
+  N(GuessMat)                       ...      2048
+  MaxDim(CI)                        ...        10
+  MaxIter(CI)                       ...        64
+  Energy Tolerance CI               ...  2.50e-09
+  Residual Tolerance CI             ...  2.50e-09
+  Shift(CI)                         ...  1.00e-04
+
+INTEGRAL-TRANSFORMATION-STEP:
+  Algorithm                         ... RI-MO
+
+ORBITAL-IMPROVEMENT-STEP:
+  Algorithm                         ... SuperCI(PT)
+  Default Parametrization           ... CAYLEY
+  Act-Act rotations                 ... depends on algorithm used
+
+  Note: SuperCI(PT) will ignore FreezeIE, FreezeAct and FreezeGrad. In general Default settings are encouraged.
+        In conjunction with ShiftUp, ShiftDn or GradScaling the performance of SuperCI(PT) is less optimal.  
+
+  MaxRot                            ... 2.00e-01 
+  Max. no of vectors (DIIS)         ... 15
+  DThresh (cut-off) metric          ... 1.00e-06
+  Switch step at gradient           ...  3.00e-02 
+  Switch step at iteration          ...        50   
+  Switch step to                    ... SuperCI(PT)    
+
+SCF-SETTINGS:
+  Incremental                       ... off
+  RIJCOSX approximation             ... on
+  UseFinalGrid                      ... on
+  RI-JK approximation               ... off
+  AO integral handling              ... DIRECT
+  Integral Neglect Thresh           ...  2.50e-11
+  Primitive cutoff TCut             ...  2.50e-12
+  Energy convergence tolerance      ...  2.50e-08
+  Orbital gradient convergence      ...  2.50e-04
+  Max. number of iterations         ...        75  
+
+PT2-SETTINGS:
+  A PT2 calculation will be performed on top of the CASSCF wave function (PT2 = SC-NEVPT2)   
+ CI step strategy                   ... General CI
+  D4C handling                      ... PS approximation (factorized) 
+  CI truncation for D4C at          ...  1.00e-12
+  CI truncation for D3  at          ...  1.00e-14
+  Orbitals                          ... canonical for each state 
+  Last  frozen  orbital             ... 1
+  First deleted orbital             ... 184
+  RI Step                           ... store IJV(array) (MC_ONDISK during integral transformation) 
+
+FINAL ORBITALS:
+  Active   Orbitals                 ... natural 
+  Internal Orbitals                 ... canonical 
+  External Orbitals                 ... canonical 
+
+------------------
+CAS-SCF ITERATIONS
+------------------
+
+
+MACRO-ITERATION   1: 
+   --- Inactive Energy E0 = -76.87675071 Eh
+CI-ITERATION   0: 
+   -77.915666574   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -78.071494926   0.000000000000 (    0.00)
+   -77.690093862   0.000000000000
+   -77.507962578   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+
+                 <<<<<<<<<<<<<<<<<<INITIAL CI STATE CHECK>>>>>>>>>>>>>>>>>>
+
+BLOCK  0 MULT= 3 NROOTS= 1 
+ROOT   0:  E=     -77.9156665738 Eh
+      1.00000 [     0]: 11
+
+BLOCK  1 MULT= 1 NROOTS= 3 
+ROOT   0:  E=     -78.0714949256 Eh
+      0.95820 [     0]: 20
+      0.04180 [     2]: 02
+ROOT   1:  E=     -77.6900938620 Eh 10.378 eV  83707.9 cm**-1
+      1.00000 [     1]: 11
+ROOT   2:  E=     -77.5079625783 Eh 15.334 eV 123681.1 cm**-1
+      0.95820 [     2]: 02
+      0.04180 [     0]: 20
+
+                 <<<<<<<<<<<<<<<<<<INITIAL CI STATE CHECK>>>>>>>>>>>>>>>>>>
+
+   E(CAS)=   -77.836091848 Eh DE=    0.000000e+00
+   --- Energy gap subspaces: Ext-Act = 2.192   Act-Int = 0.276
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.339181e+01 Max(G)=   -8.882767e+00 Rot=37,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     14.903296288 Max(X)(10,2) =    -14.762918030 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   2: 
+   --- Inactive Energy E0 = -64.90104679 Eh
+CI-ITERATION   0: 
+   -66.847279995   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -67.094344492   0.000000000000 (    0.00)
+   -66.672013492   0.000000000000
+   -66.313677712   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -66.770312614 Eh DE=    1.106578e+01
+   --- Energy gap subspaces: Ext-Act = 2.464   Act-Int = -0.031
+   N(occ)=  1.00000 1.00000
+   ||g|| =     2.394641e+01 Max(G)=   -6.269131e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      6.591211417 Max(X)(70,6) =      5.266122577 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   3: 
+   --- Inactive Energy E0 = -67.82332012 Eh
+CI-ITERATION   0: 
+   -69.590073856   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -69.773919600   0.000000000000 (    0.00)
+   -69.347044877   0.000000000000
+   -69.121611873   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -69.502132987 Eh DE=   -2.731820e+00
+   --- Energy gap subspaces: Ext-Act = 2.387   Act-Int = 0.155
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.986252e+01 Max(G)=   -5.509337e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.092496220 Max(X)(80,6) =     -1.289710263 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   4: 
+   --- Inactive Energy E0 = -71.07785180 Eh
+CI-ITERATION   0: 
+   -72.798592856   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -72.996995698   0.000000000000 (    0.00)
+   -72.566356446   0.000000000000
+   -72.278183900   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -72.706219102 Eh DE=   -3.204086e+00
+   --- Energy gap subspaces: Ext-Act = 2.376   Act-Int = 0.188
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.102655e+01 Max(G)=    2.766367e+00 Rot=72,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     72.215949624 Max(X)(69,6) =     72.197999726 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   5: 
+   --- Inactive Energy E0 = -71.07037825 Eh
+CI-ITERATION   0: 
+   -72.793152736   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -72.992106860   0.000000000000 (    0.00)
+   -72.561642860   0.000000000000
+   -72.271498224   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -72.700784359 Eh DE=    5.434743e-03
+   --- Energy gap subspaces: Ext-Act = 2.377   Act-Int = 0.187
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.101750e+01 Max(G)=    2.749686e+00 Rot=72,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.900386591 Max(X)(69,6) =     -1.203776081 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   6: 
+   --- Inactive Energy E0 = -71.22507463 Eh
+CI-ITERATION   0: 
+   -72.946097579   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.143125044   0.000000000000 (    0.00)
+   -72.713268647   0.000000000000
+   -72.425162924   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -72.853308225 Eh DE=   -1.525239e-01
+   --- Energy gap subspaces: Ext-Act = 2.380   Act-Int = 0.190
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.797866e+00 Max(G)=    2.277291e+00 Rot=72,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.251170517 Max(X)(70,6) =      0.675486511 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   7: 
+   --- Inactive Energy E0 = -71.89151907 Eh
+CI-ITERATION   0: 
+   -73.554250317   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.732942751   0.000000000000 (    0.00)
+   -73.297698932   0.000000000000
+   -73.068931731   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.460387394 Eh DE=   -6.070792e-01
+   --- Energy gap subspaces: Ext-Act = 2.357   Act-Int = 0.214
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.561497e+00 Max(G)=    1.839294e+00 Rot=79,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     13.797425279 Max(X)(67,6) =    -13.203184628 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   8: 
+   --- Inactive Energy E0 = -71.91931233 Eh
+CI-ITERATION   0: 
+   -73.578972558   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.758298047   0.000000000000 (    0.00)
+   -73.325902597   0.000000000000
+   -73.089224355   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.485057112 Eh DE=   -2.466972e-02
+   --- Energy gap subspaces: Ext-Act = 2.356   Act-Int = 0.215
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.431141e+00 Max(G)=    1.789142e+00 Rot=79,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      6.510171578 Max(X)(67,6) =     -5.679602236 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION   9: 
+   --- Inactive Energy E0 = -71.65497358 Eh
+CI-ITERATION   0: 
+   -73.345538948   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.524743266   0.000000000000 (    0.00)
+   -73.077597223   0.000000000000
+   -72.868662868   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.251270033 Eh DE=    2.337871e-01
+   --- Energy gap subspaces: Ext-Act = 2.362   Act-Int = 0.210
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.000432e+00 Max(G)=   -1.924877e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.530127320 Max(X)(68,6) =     -3.744169119 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  10: 
+   --- Inactive Energy E0 = -71.64260750 Eh
+CI-ITERATION   0: 
+   -73.279131388   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.449947838   0.000000000000 (    0.00)
+   -73.012240321   0.000000000000
+   -72.808081954   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.184610713 Eh DE=    6.665932e-02
+   --- Energy gap subspaces: Ext-Act = 2.345   Act-Int = 0.226
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.584451e+00 Max(G)=   -2.550949e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.373916550 Max(X)(70,6) =     -2.852077135 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  11: 
+   --- Inactive Energy E0 = -71.64818296 Eh
+CI-ITERATION   0: 
+   -73.283614485   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.454676568   0.000000000000 (    0.00)
+   -73.018756986   0.000000000000
+   -72.810415903   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.189115485 Eh DE=   -4.504772e-03
+   --- Energy gap subspaces: Ext-Act = 2.344   Act-Int = 0.226
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.546519e+00 Max(G)=   -2.489589e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.933600846 Max(X)(70,6) =      2.354337113 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  12: 
+   --- Inactive Energy E0 = -71.55710269 Eh
+CI-ITERATION   0: 
+   -73.201601144   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.373106452   0.000000000000 (    0.00)
+   -72.937666582   0.000000000000
+   -72.727206494   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.107130493 Eh DE=    8.198499e-02
+   --- Energy gap subspaces: Ext-Act = 2.343   Act-Int = 0.224
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.977472e+00 Max(G)=   -2.398538e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.984017903 Max(X)(69,6) =      2.287669246 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  13: 
+   --- Inactive Energy E0 = -71.35724657 Eh
+CI-ITERATION   0: 
+   -73.033716988   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.204079735   0.000000000000 (    0.00)
+   -72.765194644   0.000000000000
+   -72.563077838   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -72.938917197 Eh DE=    1.682133e-01
+   --- Energy gap subspaces: Ext-Act = 2.354   Act-Int = 0.223
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.715622e+00 Max(G)=   -2.447053e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.766811106 Max(X)(70,6) =     -2.536684040 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  14: 
+   --- Inactive Energy E0 = -71.76898826 Eh
+CI-ITERATION   0: 
+   -73.352031192   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.509028492   0.000000000000 (    0.00)
+   -73.087818124   0.000000000000
+   -72.887845385   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.256797596 Eh DE=   -3.178804e-01
+   --- Energy gap subspaces: Ext-Act = 2.322   Act-Int = 0.252
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.828940e+00 Max(G)=   -1.856374e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.299382255 Max(X)(70,6) =     -3.274302667 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  15: 
+   --- Inactive Energy E0 = -71.78532193 Eh
+CI-ITERATION   0: 
+   -73.365956117   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.524226875   0.000000000000 (    0.00)
+   -73.115605693   0.000000000000
+   -72.887217280   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.270819700 Eh DE=   -1.402210e-02
+   --- Energy gap subspaces: Ext-Act = 2.323   Act-Int = 0.256
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.616215e+00 Max(G)=   -1.793344e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      5.996721315 Max(X)(70,6) =      4.758384323 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  16: 
+   --- Inactive Energy E0 = -71.77944777 Eh
+CI-ITERATION   0: 
+   -73.376373196   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.536526784   0.000000000000 (    0.00)
+   -73.123846425   0.000000000000
+   -72.897293061   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.281130976 Eh DE=   -1.031128e-02
+   --- Energy gap subspaces: Ext-Act = 2.329   Act-Int = 0.250
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.608711e+00 Max(G)=   -1.708611e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      5.842593706 Max(X)(70,6) =      4.185214222 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  17: 
+   --- Inactive Energy E0 = -71.74621863 Eh
+CI-ITERATION   0: 
+   -73.348489038   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.504464427   0.000000000000 (    0.00)
+   -73.086384150   0.000000000000
+   -72.879194922   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.252585102 Eh DE=    2.854587e-02
+   --- Energy gap subspaces: Ext-Act = 2.327   Act-Int = 0.253
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.596986e+00 Max(G)=   -1.336175e+00 Rot=105,2
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.145151530 Max(X)(70,6) =      2.777491322 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  18: 
+   --- Inactive Energy E0 = -71.77290767 Eh
+CI-ITERATION   0: 
+   -73.379290613   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.534721012   0.000000000000 (    0.00)
+   -73.119171755   0.000000000000
+   -72.908761320   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.283420988 Eh DE=   -3.083589e-02
+   --- Energy gap subspaces: Ext-Act = 2.330   Act-Int = 0.253
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.299828e+00 Max(G)=    1.256297e+00 Rot=79,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     17.063947144 Max(X)(69,6) =    -16.853553549 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  19: 
+   --- Inactive Energy E0 = -71.64464565 Eh
+CI-ITERATION   0: 
+   -73.256138224   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.410982639   0.000000000000 (    0.00)
+   -72.995245036   0.000000000000
+   -72.787825808   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.160411359 Eh DE=    1.230096e-01
+   --- Energy gap subspaces: Ext-Act = 2.330   Act-Int = 0.253
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.922396e+00 Max(G)=    1.257170e+00 Rot=105,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     14.031672408 Max(X)(70,6) =     13.968912646 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  20: 
+   --- Inactive Energy E0 = -71.76861958 Eh
+CI-ITERATION   0: 
+   -73.382931854   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.539387529   0.000000000000 (    0.00)
+   -73.120794131   0.000000000000
+   -72.913049148   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.287004395 Eh DE=   -1.265930e-01
+   --- Energy gap subspaces: Ext-Act = 2.333   Act-Int = 0.249
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.431470e+00 Max(G)=    1.425251e+00 Rot=105,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.989965941 Max(X)(70,6) =      4.201260527 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  21: 
+   --- Inactive Energy E0 = -71.76436261 Eh
+CI-ITERATION   0: 
+   -73.398805736   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.558096034   0.000000000000 (    0.00)
+   -73.137803451   0.000000000000
+   -72.923658125   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.302662470 Eh DE=   -1.565807e-02
+   --- Energy gap subspaces: Ext-Act = 2.341   Act-Int = 0.244
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.259293e+00 Max(G)=    1.527692e+00 Rot=79,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      5.173046566 Max(X)(70,6) =      4.423549111 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  22: 
+   --- Inactive Energy E0 = -71.66028352 Eh
+CI-ITERATION   0: 
+   -73.301022030   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.459480833   0.000000000000 (    0.00)
+   -73.038499776   0.000000000000
+   -72.827533771   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.204763412 Eh DE=    9.789906e-02
+   --- Energy gap subspaces: Ext-Act = 2.343   Act-Int = 0.244
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.687413e+00 Max(G)=    1.535358e+00 Rot=79,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      7.249303550 Max(X)(70,6) =     -7.098779185 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  23: 
+   --- Inactive Energy E0 = -71.75948934 Eh
+CI-ITERATION   0: 
+   -73.391417843   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.552216406   0.000000000000 (    0.00)
+   -73.139357975   0.000000000000
+   -72.904599299   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.295071202 Eh DE=   -9.030779e-02
+   --- Energy gap subspaces: Ext-Act = 2.338   Act-Int = 0.247
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.464913e+00 Max(G)=    1.314578e+00 Rot=79,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     16.437057514 Max(X)(69,6) =    -13.097064531 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  24: 
+   --- Inactive Energy E0 = -71.63731797 Eh
+CI-ITERATION   0: 
+   -73.261442402   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.422568736   0.000000000000 (    0.00)
+   -73.012711268   0.000000000000
+   -72.772573558   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.165363461 Eh DE=    1.297077e-01
+   --- Energy gap subspaces: Ext-Act = 2.334   Act-Int = 0.245
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.233456e+00 Max(G)=    1.733143e+00 Rot=105,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.103292502 Max(X)(70,6) =      0.437899848 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  25: 
+   --- Inactive Energy E0 = -71.56528264 Eh
+CI-ITERATION   0: 
+   -73.208482507   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.368605402   0.000000000000 (    0.00)
+   -72.939455190   0.000000000000
+   -72.741695645   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.112533959 Eh DE=    5.282950e-02
+   --- Energy gap subspaces: Ext-Act = 2.348   Act-Int = 0.234
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.306477e+00 Max(G)=    1.550861e+00 Rot=42,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.150314849 Max(X)(9,2) =      0.701103325 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  26: 
+   --- Inactive Energy E0 = -71.90459145 Eh
+CI-ITERATION   0: 
+   -73.552297235   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.716724367   0.000000000000 (    0.00)
+   -73.280482170   0.000000000000
+   -73.082150284   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.456041421 Eh DE=   -3.435075e-01
+   --- Energy gap subspaces: Ext-Act = 2.347   Act-Int = 0.228
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.814900e+00 Max(G)=   -1.198255e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.454437207 Max(X)(66,6) =     -1.850990254 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  27: 
+   --- Inactive Energy E0 = -71.72903426 Eh
+CI-ITERATION   0: 
+   -73.384255364   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.548453141   0.000000000000 (    0.00)
+   -73.112505767   0.000000000000
+   -72.913194405   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.287819901 Eh DE=    1.682215e-01
+   --- Energy gap subspaces: Ext-Act = 2.346   Act-Int = 0.228
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.671175e+00 Max(G)=   -1.360093e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =    280.228181823 Max(X)(69,6) =    280.217003302 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  28: 
+   --- Inactive Energy E0 = -71.70863591 Eh
+CI-ITERATION   0: 
+   -73.380464836   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.545900844   0.000000000000 (    0.00)
+   -73.113166880   0.000000000000
+   -72.904013526   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.284079293 Eh DE=    3.740608e-03
+   --- Energy gap subspaces: Ext-Act = 2.356   Act-Int = 0.224
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.509945e+00 Max(G)=    1.257060e+00 Rot=146,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      6.060701028 Max(X)(67,6) =     -4.693723053 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  29: 
+   --- Inactive Energy E0 = -71.70140239 Eh
+CI-ITERATION   0: 
+   -73.403843650   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.570153797   0.000000000000 (    0.00)
+   -73.131234360   0.000000000000
+   -72.930445870   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.307227496 Eh DE=   -2.314820e-02
+   --- Energy gap subspaces: Ext-Act = 2.370   Act-Int = 0.219
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.404197e+00 Max(G)=   -1.336086e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.155794699 Max(X)(65,6) =     -2.141770296 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  30: 
+   --- Inactive Energy E0 = -71.74189289 Eh
+CI-ITERATION   0: 
+   -73.437489485   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.604186053   0.000000000000 (    0.00)
+   -73.166193210   0.000000000000
+   -72.962962131   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.340968308 Eh DE=   -3.374081e-02
+   --- Energy gap subspaces: Ext-Act = 2.365   Act-Int = 0.220
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.470802e+00 Max(G)=   -1.589863e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.850028462 Max(X)(66,6) =      2.040540440 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  31: 
+   --- Inactive Energy E0 = -71.73329414 Eh
+CI-ITERATION   0: 
+   -73.422848345   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.588586996   0.000000000000 (    0.00)
+   -73.151674053   0.000000000000
+   -72.949923339   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.326454904 Eh DE=    1.451340e-02
+   --- Energy gap subspaces: Ext-Act = 2.363   Act-Int = 0.221
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.561569e+00 Max(G)=   -1.645129e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.611740486 Max(X)(68,6) =      1.820004328 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  32: 
+   --- Inactive Energy E0 = -71.97460696 Eh
+CI-ITERATION   0: 
+   -73.595495184   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.756354440   0.000000000000 (    0.00)
+   -73.326832264   0.000000000000
+   -73.126547296   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.499369925 Eh DE=   -1.729150e-01
+   --- Energy gap subspaces: Ext-Act = 2.338   Act-Int = 0.238
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.931558e+00 Max(G)=   -1.458155e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.082971673 Max(X)(65,6) =     -1.116362253 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  33: 
+   --- Inactive Energy E0 = -71.97996259 Eh
+CI-ITERATION   0: 
+   -73.594923791   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.753901187   0.000000000000 (    0.00)
+   -73.325377994   0.000000000000
+   -73.128773391   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.498803991 Eh DE=    5.659344e-04
+   --- Energy gap subspaces: Ext-Act = 2.336   Act-Int = 0.241
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.940096e+00 Max(G)=   -1.461719e+00 Rot=105,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.531782568 Max(X)(65,6) =     -1.671036132 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  34: 
+   --- Inactive Energy E0 = -72.09074690 Eh
+CI-ITERATION   0: 
+   -73.699350085   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.858467913   0.000000000000 (    0.00)
+   -73.425141234   0.000000000000
+   -73.237677925   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.603222888 Eh DE=   -1.044189e-01
+   --- Energy gap subspaces: Ext-Act = 2.333   Act-Int = 0.238
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.114500e+00 Max(G)=    1.127866e+00 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.327699378 Max(X)(64,6) =     -1.317466929 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  35: 
+   --- Inactive Energy E0 = -72.11961758 Eh
+CI-ITERATION   0: 
+   -73.745162280   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.908880803   0.000000000000 (    0.00)
+   -73.472055551   0.000000000000
+   -73.278196345   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.649103256 Eh DE=   -4.588037e-02
+   --- Energy gap subspaces: Ext-Act = 2.337   Act-Int = 0.229
+   N(occ)=  1.00000 1.00000
+   ||g|| =     5.705952e+00 Max(G)=    1.007587e+00 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.797892036 Max(X)(64,6) =      1.790786806 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  36: 
+   --- Inactive Energy E0 = -72.09962537 Eh
+CI-ITERATION   0: 
+   -73.722910804   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.886110992   0.000000000000 (    0.00)
+   -73.449003711   0.000000000000
+   -73.257610990   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.626909684 Eh DE=    2.219357e-02
+   --- Energy gap subspaces: Ext-Act = 2.336   Act-Int = 0.229
+   N(occ)=  1.00000 1.00000
+   ||g|| =     5.815440e+00 Max(G)=    9.712595e-01 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     11.640533186 Max(X)(64,6) =     11.266334796 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  37: 
+   --- Inactive Energy E0 = -72.07742695 Eh
+CI-ITERATION   0: 
+   -73.701091244   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.865047235   0.000000000000 (    0.00)
+   -73.427238067   0.000000000000
+   -73.235055182   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.605102369 Eh DE=    2.180731e-02
+   --- Energy gap subspaces: Ext-Act = 2.336   Act-Int = 0.228
+   N(occ)=  1.00000 1.00000
+   ||g|| =     5.987544e+00 Max(G)=   -1.057357e+00 Rot=108,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     10.282808236 Max(X)(65,6) =     -9.631004870 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  38: 
+   --- Inactive Energy E0 = -72.13460646 Eh
+CI-ITERATION   0: 
+   -73.767390106   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.932758060   0.000000000000 (    0.00)
+   -73.493770451   0.000000000000
+   -73.299946398   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.671440871 Eh DE=   -6.633850e-02
+   --- Energy gap subspaces: Ext-Act = 2.339   Act-Int = 0.225
+   N(occ)=  1.00000 1.00000
+   ||g|| =     5.741567e+00 Max(G)=    1.206605e+00 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      5.013872782 Max(X)(62,6) =      4.637369487 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  39: 
+   --- Inactive Energy E0 = -72.36483437 Eh
+CI-ITERATION   0: 
+   -73.955785188   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.118293762   0.000000000000 (    0.00)
+   -73.682347569   0.000000000000
+   -73.490707430   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.859784054 Eh DE=   -1.883432e-01
+   --- Energy gap subspaces: Ext-Act = 2.324   Act-Int = 0.237
+   N(occ)=  1.00000 1.00000
+   ||g|| =     4.274981e+00 Max(G)=    1.550380e+00 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.049162646 Max(X)(58,6) =     -0.989931502 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  40: 
+   --- Inactive Energy E0 = -72.31484231 Eh
+CI-ITERATION   0: 
+   -73.896860743   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.060344830   0.000000000000 (    0.00)
+   -73.636301316   0.000000000000
+   -73.416187559   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.800569322 Eh DE=    5.921473e-02
+   --- Energy gap subspaces: Ext-Act = 2.320   Act-Int = 0.243
+   N(occ)=  1.00000 1.00000
+   ||g|| =     5.325781e+00 Max(G)=    1.282711e+00 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     38.356357521 Max(X)(9,3) =    -38.283064234 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  41: 
+   --- Inactive Energy E0 = -71.83324921 Eh
+CI-ITERATION   0: 
+   -73.343185383   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.490561142   0.000000000000 (    0.00)
+   -73.087604607   0.000000000000
+   -72.876787349   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.247418208 Eh DE=    5.531511e-01
+   --- Energy gap subspaces: Ext-Act = 2.295   Act-Int = 0.257
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.325981e+00 Max(G)=    1.156849e+00 Rot=172,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.243326007 Max(X)(62,6) =      1.060569036 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  42: 
+   --- Inactive Energy E0 = -71.62486507 Eh
+CI-ITERATION   0: 
+   -73.172036253   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.338259574   0.000000000000 (    0.00)
+   -72.951834046   0.000000000000
+   -72.652200672   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.076400509 Eh DE=    1.710177e-01
+   --- Energy gap subspaces: Ext-Act = 2.305   Act-Int = 0.239
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.257106e+00 Max(G)=   -1.199761e+00 Rot=125,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.982941335 Max(X)(61,6) =     -1.352701249 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  43: 
+   --- Inactive Energy E0 = -72.23503736 Eh
+CI-ITERATION   0: 
+   -73.755640746   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.927136485   0.000000000000 (    0.00)
+   -73.548150254   0.000000000000
+   -73.218678314   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.660147882 Eh DE=   -5.837474e-01
+   --- Energy gap subspaces: Ext-Act = 2.297   Act-Int = 0.238
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.296967e+00 Max(G)=   -1.249247e+00 Rot=43,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.079903069 Max(X)(57,6) =      1.426643574 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  44: 
+   --- Inactive Energy E0 = -72.16566434 Eh
+CI-ITERATION   0: 
+   -73.703567245   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.867175178   0.000000000000 (    0.00)
+   -73.480310830   0.000000000000
+   -73.196202836   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.609065097 Eh DE=    5.108279e-02
+   --- Energy gap subspaces: Ext-Act = 2.305   Act-Int = 0.214
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.181423e+00 Max(G)=   -1.614483e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.877456776 Max(X)(57,6) =     -1.944164811 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  45: 
+   --- Inactive Energy E0 = -72.14329467 Eh
+CI-ITERATION   0: 
+   -73.669300885   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.837700070   0.000000000000 (    0.00)
+   -73.467423144   0.000000000000
+   -73.137366612   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.575065414 Eh DE=    3.399968e-02
+   --- Energy gap subspaces: Ext-Act = 2.305   Act-Int = 0.221
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.629788e+00 Max(G)=   -1.470213e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.295906445 Max(X)(56,6) =     -3.547966804 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  46: 
+   --- Inactive Energy E0 = -72.15555038 Eh
+CI-ITERATION   0: 
+   -73.667136792   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.837731483   0.000000000000 (    0.00)
+   -73.473904106   0.000000000000
+   -73.123867350   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.572818886 Eh DE=    2.246528e-03
+   --- Energy gap subspaces: Ext-Act = 2.299   Act-Int = 0.227
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.628340e+00 Max(G)=   -1.447390e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      6.923679171 Max(X)(57,6) =     -6.787701990 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  47: 
+   --- Inactive Energy E0 = -72.16562868 Eh
+CI-ITERATION   0: 
+   -73.683430201   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.850828360   0.000000000000 (    0.00)
+   -73.481706471   0.000000000000
+   -73.151386828   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.589035377 Eh DE=   -1.621649e-02
+   --- Energy gap subspaces: Ext-Act = 2.301   Act-Int = 0.229
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.572806e+00 Max(G)=   -1.514644e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      5.976949503 Max(X)(57,6) =      5.848295218 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  48: 
+   --- Inactive Energy E0 = -72.06017365 Eh
+CI-ITERATION   0: 
+   -73.600568640   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.766658322   0.000000000000 (    0.00)
+   -73.390728970   0.000000000000
+   -73.078652795   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.506291001 Eh DE=    8.274438e-02
+   --- Energy gap subspaces: Ext-Act = 2.310   Act-Int = 0.214
+   N(occ)=  1.00000 1.00000
+   ||g|| =     6.878855e+00 Max(G)=   -1.574221e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.637957386 Max(X)(57,6) =     -3.432370148 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  49: 
+   --- Inactive Energy E0 = -72.06409956 Eh
+CI-ITERATION   0: 
+   -73.576704287   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.739054690   0.000000000000 (    0.00)
+   -73.367746434   0.000000000000
+   -73.058518182   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.482572028 Eh DE=    2.371897e-02
+   --- Energy gap subspaces: Ext-Act = 2.301   Act-Int = 0.214
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.159511e+00 Max(G)=   -1.526723e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.457183142 Max(X)(55,6) =      2.735929011 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  50: 
+   --- Inactive Energy E0 = -72.02126041 Eh
+CI-ITERATION   0: 
+   -73.510907078   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.673096298   0.000000000000 (    0.00)
+   -73.315183022   0.000000000000
+   -72.980488247   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.416914800 Eh DE=    6.565723e-02
+   --- Energy gap subspaces: Ext-Act = 2.287   Act-Int = 0.225
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.744189e+00 Max(G)=   -1.491098e+00 Rot=105,3
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     12.255648337 Max(X)(56,6) =     12.004154570 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  51: 
+   --- Inactive Energy E0 = -71.99928240 Eh
+CI-ITERATION   0: 
+   -73.487557151   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.650628042   0.000000000000 (    0.00)
+   -73.298023101   0.000000000000
+   -72.951503304   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.393804317 Eh DE=    2.311048e-02
+   --- Energy gap subspaces: Ext-Act = 2.281   Act-Int = 0.224
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.965147e+00 Max(G)=   -1.486847e+00 Rot=9,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.169163399 Max(X)(55,6) =     -2.354032399 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  52: 
+   --- Inactive Energy E0 = -71.82088165 Eh
+CI-ITERATION   0: 
+   -73.337618429   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.516932990   0.000000000000 (    0.00)
+   -73.175465996   0.000000000000
+   -72.760066618   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.244220149 Eh DE=    1.495842e-01
+   --- Energy gap subspaces: Ext-Act = 2.287   Act-Int = 0.218
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.734184e+00 Max(G)=   -1.858832e+00 Rot=40,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.016908694 Max(X)(56,6) =     -1.946024432 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  53: 
+   --- Inactive Energy E0 = -72.10323540 Eh
+CI-ITERATION   0: 
+   -73.599099692   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.771681946   0.000000000000 (    0.00)
+   -73.432018198   0.000000000000
+   -73.033671265   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.505778414 Eh DE=   -2.615583e-01
+   --- Energy gap subspaces: Ext-Act = 2.280   Act-Int = 0.247
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.017991e+00 Max(G)=   -1.843836e+00 Rot=40,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.284075881 Max(X)(58,6) =     -1.449353331 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  54: 
+   --- Inactive Energy E0 = -71.74036520 Eh
+CI-ITERATION   0: 
+   -73.253294096   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.435309232   0.000000000000 (    0.00)
+   -73.089366094   0.000000000000
+   -72.680477554   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.160839194 Eh DE=    3.449392e-01
+   --- Energy gap subspaces: Ext-Act = 2.261   Act-Int = 0.232
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.086173e+00 Max(G)=   -1.982319e+00 Rot=9,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     12.209618533 Max(X)(59,6) =     12.082587438 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  55: 
+   --- Inactive Energy E0 = -71.62634459 Eh
+CI-ITERATION   0: 
+   -73.139317130   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.321143653   0.000000000000 (    0.00)
+   -72.975379390   0.000000000000
+   -72.567917321   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.047065292 Eh DE=    1.137739e-01
+   --- Energy gap subspaces: Ext-Act = 2.256   Act-Int = 0.234
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.509918e+00 Max(G)=    2.279737e+00 Rot=181,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.306010313 Max(X)(61,6) =      2.586067909 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  56: 
+   --- Inactive Energy E0 = -72.16816982 Eh
+CI-ITERATION   0: 
+   -73.619242314   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.780445411   0.000000000000 (    0.00)
+   -73.410268031   0.000000000000
+   -73.118716487   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.527859478 Eh DE=   -4.807942e-01
+   --- Energy gap subspaces: Ext-Act = 2.237   Act-Int = 0.268
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.315216e+00 Max(G)=    1.879401e+00 Rot=181,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.785834443 Max(X)(59,6) =      2.167896697 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  57: 
+   --- Inactive Energy E0 = -72.00426805 Eh
+CI-ITERATION   0: 
+   -73.470882911   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.625115303   0.000000000000 (    0.00)
+   -73.219711158   0.000000000000
+   -73.024014332   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.380248255 Eh DE=    1.476112e-01
+   --- Energy gap subspaces: Ext-Act = 2.263   Act-Int = 0.261
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.040986e+01 Max(G)=   -2.419410e+00 Rot=62,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.868828007 Max(X)(57,6) =     -4.697478022 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  58: 
+   --- Inactive Energy E0 = -71.87754397 Eh
+CI-ITERATION   0: 
+   -73.319807756   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.479706679   0.000000000000 (    0.00)
+   -73.109789409   0.000000000000
+   -72.822713511   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.228605478 Eh DE=    1.516428e-01
+   --- Energy gap subspaces: Ext-Act = 2.268   Act-Int = 0.264
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.156178e+01 Max(G)=   -2.342327e+00 Rot=62,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     51.424520755 Max(X)(62,6) =    -51.370941274 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  59: 
+   --- Inactive Energy E0 = -72.26874146 Eh
+CI-ITERATION   0: 
+   -73.676018499   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.826105825   0.000000000000 (    0.00)
+   -73.440860027   0.000000000000
+   -73.211444498   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.584410975 Eh DE=   -3.558055e-01
+   --- Energy gap subspaces: Ext-Act = 2.258   Act-Int = 0.275
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.046410e+01 Max(G)=    2.590750e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     10.134400396 Max(X)(9,5) =     -9.440667427 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  60: 
+   --- Inactive Energy E0 = -72.36532259 Eh
+CI-ITERATION   0: 
+   -73.769811192   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.917423779   0.000000000000 (    0.00)
+   -73.523223839   0.000000000000
+   -73.319575727   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.678276154 Eh DE=   -9.386518e-02
+   --- Energy gap subspaces: Ext-Act = 2.254   Act-Int = 0.271
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.002008e+01 Max(G)=    2.393987e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      5.592656611 Max(X)(60,6) =     -4.655046656 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  61: 
+   --- Inactive Energy E0 = -72.36014196 Eh
+CI-ITERATION   0: 
+   -73.772374035   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -73.922113967   0.000000000000 (    0.00)
+   -73.534314711   0.000000000000
+   -73.312269266   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.680970008 Eh DE=   -2.693855e-03
+   --- Energy gap subspaces: Ext-Act = 2.258   Act-Int = 0.272
+   N(occ)=  1.00000 1.00000
+   ||g|| =     1.006054e+01 Max(G)=    2.411069e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.498275020 Max(X)(9,5) =     -2.764653109 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  62: 
+   --- Inactive Energy E0 = -72.48421132 Eh
+CI-ITERATION   0: 
+   -73.899298665   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.047253079   0.000000000000 (    0.00)
+   -73.648027780   0.000000000000
+   -73.454123906   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.807883460 Eh DE=   -1.269135e-01
+   --- Energy gap subspaces: Ext-Act = 2.263   Act-Int = 0.275
+   N(occ)=  1.00000 1.00000
+   ||g|| =     9.662802e+00 Max(G)=    2.496600e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.083845446 Max(X)(60,6) =     -1.065994430 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  63: 
+   --- Inactive Energy E0 = -72.64838435 Eh
+CI-ITERATION   0: 
+   -74.115384709   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.272733418   0.000000000000 (    0.00)
+   -73.879132931   0.000000000000
+   -73.648698053   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.024453088 Eh DE=   -2.165696e-01
+   --- Energy gap subspaces: Ext-Act = 2.269   Act-Int = 0.256
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.532680e+00 Max(G)=    2.049469e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.874100787 Max(X)(9,5) =      1.218361021 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  64: 
+   --- Inactive Energy E0 = -72.80785175 Eh
+CI-ITERATION   0: 
+   -74.250026985   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.409123963   0.000000000000 (    0.00)
+   -74.022386903   0.000000000000
+   -73.773690641   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.159213744 Eh DE=   -1.347607e-01
+   --- Energy gap subspaces: Ext-Act = 2.252   Act-Int = 0.253
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.673933e+00 Max(G)=   -2.018338e+00 Rot=9,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      4.419154703 Max(X)(57,6) =     -2.666960864 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  65: 
+   --- Inactive Energy E0 = -72.78547047 Eh
+CI-ITERATION   0: 
+   -74.231008415   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.388418182   0.000000000000 (    0.00)
+   -74.000005373   0.000000000000
+   -73.760177174   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.140270996 Eh DE=    1.894275e-02
+   --- Energy gap subspaces: Ext-Act = 2.255   Act-Int = 0.243
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.772658e+00 Max(G)=   -1.950272e+00 Rot=9,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     15.672917948 Max(X)(57,6) =     15.259064212 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  66: 
+   --- Inactive Energy E0 = -72.79125061 Eh
+CI-ITERATION   0: 
+   -74.226660095   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.377079664   0.000000000000 (    0.00)
+   -74.008730361   0.000000000000
+   -73.750990623   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.136130156 Eh DE=    4.140840e-03
+   --- Energy gap subspaces: Ext-Act = 2.262   Act-Int = 0.244
+   N(occ)=  1.00000 1.00000
+   ||g|| =     7.912133e+00 Max(G)=    1.818292e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     34.162569631 Max(X)(9,5) =     34.060803364 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  67: 
+   --- Inactive Energy E0 = -72.76713329 Eh
+CI-ITERATION   0: 
+   -74.192903169   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.340538961   0.000000000000 (    0.00)
+   -73.976895770   0.000000000000
+   -73.718505541   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.102441630 Eh DE=    3.368853e-02
+   --- Energy gap subspaces: Ext-Act = 2.261   Act-Int = 0.249
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.053628e+00 Max(G)=    1.950251e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     22.016831534 Max(X)(9,5) =     20.519866005 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  68: 
+   --- Inactive Energy E0 = -72.77210453 Eh
+CI-ITERATION   0: 
+   -74.195336663   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.342050816   0.000000000000 (    0.00)
+   -73.979656055   0.000000000000
+   -73.721845255   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.104927019 Eh DE=   -2.485389e-03
+   --- Energy gap subspaces: Ext-Act = 2.262   Act-Int = 0.251
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.042913e+00 Max(G)=    1.986862e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =     27.163286549 Max(X)(9,5) =     23.750932420 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  69: 
+   --- Inactive Energy E0 = -72.65778280 Eh
+CI-ITERATION   0: 
+   -74.062791181   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.197187144   0.000000000000 (    0.00)
+   -73.818904783   0.000000000000
+   -73.635137608   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -73.973267180 Eh DE=    1.316598e-01
+   --- Energy gap subspaces: Ext-Act = 2.262   Act-Int = 0.287
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.330914e+00 Max(G)=   -1.432808e+00 Rot=9,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      3.330166189 Max(X)(59,6) =      2.794809405 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  70: 
+   --- Inactive Energy E0 = -72.71383840 Eh
+CI-ITERATION   0: 
+   -74.105459317   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.230566440   0.000000000000 (    0.00)
+   -73.872107500   0.000000000000
+   -73.680738914   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.016631801 Eh DE=   -4.336462e-02
+   --- Energy gap subspaces: Ext-Act = 2.268   Act-Int = 0.290
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.197102e+00 Max(G)=    1.437375e+00 Rot=130,0
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      1.497136012 Max(X)(59,6) =      0.797500160 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  71: 
+   --- Inactive Energy E0 = -72.89230052 Eh
+CI-ITERATION   0: 
+   -74.275033007   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.403901451   0.000000000000 (    0.00)
+   -74.025481065   0.000000000000
+   -73.858143466   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.185437501 Eh DE=   -1.688057e-01
+   --- Energy gap subspaces: Ext-Act = 2.223   Act-Int = 0.322
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.124983e+00 Max(G)=    2.213294e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      2.063408336 Max(X)(62,6) =      1.711238464 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  72: 
+   --- Inactive Energy E0 = -72.86769368 Eh
+CI-ITERATION   0: 
+   -74.243257520   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.373846416   0.000000000000 (    0.00)
+   -73.992867851   0.000000000000
+   -73.824665858   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.153525448 Eh DE=    3.191205e-02
+   --- Energy gap subspaces: Ext-Act = 2.243   Act-Int = 0.319
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.615887e+00 Max(G)=    2.674028e+00 Rot=105,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      8.339685213 Max(X)(62,6) =     -8.294512851 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  73: 
+   --- Inactive Energy E0 = -72.95822316 Eh
+CI-ITERATION   0: 
+   -74.360598219   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -74.496735901   0.000000000000 (    0.00)
+   -74.106617851   0.000000000000
+   -73.938009744   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.270526359 Eh DE=   -1.170009e-01
+   --- Energy gap subspaces: Ext-Act = 2.277   Act-Int = 0.315
+   N(occ)=  1.00000 1.00000
+   ||g|| =     8.002644e+00 Max(G)=    1.680190e+00 Rot=80,5
+   --- Orbital Update [SuperCI(PT)]
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+   --- SX_PT (Skipped TA=0 IT=0): ||X|| =      0.897213944 Max(X)(58,6) =     -0.391627994 
+   --- SFit(Active Orbitals)
+
+MACRO-ITERATION  74: 
+   --- Inactive Energy E0 = -73.69336231 Eh
+CI-ITERATION   0: 
+   -75.073194207   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -75.213730099   0.000000000000 (    0.00)
+   -74.816139965   0.000000000000
+   -74.650569170   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.983336976 Eh DE=   -7.128106e-01
+   --- Energy gap subspaces: Ext-Act = 2.265   Act-Int = 0.420
+   N(occ)=  1.00000 1.00000
+   ||g|| =     4.552401e+00 Max(G)=   -1.034813e+00 Rot=105,6
+                     ---- REACHED MAXIMUM NUMBER OF ITERATIONS ----
+                            --- FINALIZING ORBITALS ---
+                    ---- DOING ONE FINAL ITERATION FOR PRINTING ----
+   --- Canonicalize Internal Space
+   --- Canonicalize External Space
+================================================================================
+                                        WARNING
+Check your MOs and check whether a frozen core calculation is appropriate
+MO 1 should be a C  s semi-core orbital but seems to be delocalized with a H  s orbital (72.7% vs. 14.1%)
+================================================================================
+================================================================================
+                                        WARNING
+Check your MOs and check whether a frozen core calculation is appropriate
+MO 1 should be a C  s semi-core orbital but seems to be delocalized with a H  s orbital (72.7% vs. 14.1%)
+================================================================================
+
+MACRO-ITERATION  75: 
+   --- Inactive Energy E0 = -73.69336231 Eh
+   --- All densities will be recomputed
+CI-ITERATION   0: 
+   -75.073194207   0.000000000000 (    0.00)
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+CI-ITERATION   0: 
+   -75.213730099   0.000000000000 (    0.00)
+   -74.816139965   0.000000000000
+   -74.650569170   0.000000000000
+   CI-PROBLEM SOLVED
+   DENSITIES MADE
+   E(CAS)=   -74.983336976 Eh DE=    5.259437e-11
+   --- Energy gap subspaces: Ext-Act = -0.284   Act-Int = -1.078
+   N(occ)=  1.00000 1.00000
+   ||g|| =     4.552401e+00 Max(G)=    1.461339e+00 Rot=182,6
+[file orca_casscf/cas_driver_energy.cpp, line 6108, Process 0]: ERROR (ORCA_CASSCF): Convergence Failure. Retry with modified convergence settings!
+
+[file orca_casscf/cas_driver_energy.cpp, line 6108, Process 1]: ERROR (ORCA_CASSCF): Convergence Failure. Retry with modified convergence settings!
+
+[file orca_casscf/cas_driver_energy.cpp, line 6108, Process 2]: ERROR (ORCA_CASSCF): Convergence Failure. Retry with modified convergence settings!
+
+[file orca_casscf/cas_driver_energy.cpp, line 6108, Process 3]: ERROR (ORCA_CASSCF): Convergence Failure. Retry with modified convergence settings!
+
+
+ORCA finished by error termination in CASSCF
+Calling Command: mpirun -np 4  /Users/vuln/code/onoda/orca-6.1.1/orca_casscf_mpi --energy ethylene_nevpt2_np4.casinp.tmp ethylene_nevpt2_np4 
+[file orca_tools/qcmsg.cpp, line 394]: 
+  .... aborting the run
+

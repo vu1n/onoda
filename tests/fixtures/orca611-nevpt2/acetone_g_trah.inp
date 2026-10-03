@@ -1,0 +1,36 @@
+# QUESTDB acetone rows 1B2(n,3s) and 1B2(n,3pz): active (4,2,1,0), state average (A1,B2)=(1,2), (6e,7o).
+# Rotations undo the energy sort ORCA applies when reading these orbitals with UseSym.
+! aug-cc-pVTZ RIJCOSX AutoAux TightSCF UseSym MORead
+%moinp "acetone_c_valence_avtz_nosym.gbw"
+%maxcore 2000
+%pal nprocs 4 end
+%scf
+  rotate
+    {7,13,90}
+    {17,46,90}
+    {18,107,90}
+  end
+end
+%casscf
+  nel 6
+  norb 7
+  mult 1,1
+  irrep 0,3
+  nroots 1,2
+  trafostep ri
+  orbstep TRAH
+  maxiter 150
+  PTMethod SC_NEVPT2
+end
+* xyz 0 1
+C  0.00000000 0.00000000 0.09952603
+C  0.00000000 1.28064827 -0.69726848
+C  0.00000000 -1.28064827 -0.69726848
+O  0.00000000 0.00000000 1.31378294
+H  0.00000000 2.13623851 -0.02743853
+H  0.00000000 -2.13623851 -0.02743853
+H  0.87875797 1.31458431 -1.34408463
+H  -0.87875797 1.31458431 -1.34408463
+H  0.87875797 -1.31458431 -1.34408463
+H  -0.87875797 -1.31458431 -1.34408463
+*

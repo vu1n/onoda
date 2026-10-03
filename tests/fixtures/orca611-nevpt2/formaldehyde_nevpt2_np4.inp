@@ -1,0 +1,20 @@
+# Step B (timed): SA-CASSCF(6,5) + SC-NEVPT2 / aug-cc-pVTZ / RIJCOSX /
+# AutoAux, orbitals projected from step A. Geometry: QUESTDB geometries/xyz/formaldehyde_1.xyz.
+! aug-cc-pVTZ RIJCOSX AutoAux TightSCF MORead
+%moinp "formaldehyde_guess.gbw"
+%maxcore 2000
+%pal nprocs 4 end
+%casscf
+  nel 6
+  norb 5
+  mult 1,3
+  nroots 3,2
+  trafostep ri
+  PTMethod SC_NEVPT2
+end
+* xyz 0 1
+C 0.00000000 0.00000000 -0.60298484
+O 0.00000000 0.00000000 0.60539374
+H 0.00000000 0.93467276 -1.18217429
+H 0.00000000 -0.93467276 -1.18217429
+*
