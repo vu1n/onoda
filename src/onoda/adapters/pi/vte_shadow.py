@@ -128,12 +128,13 @@ def scf_note(scf: str, log: bytes) -> str | None:
     """Plain words for an absent SCF, which decision models read as an SCF failure (A68)."""
     if scf != "absent":
         return None
-    echo = [
-        ln for ln in log.decode("utf-8", errors="replace").splitlines() if _INPUT_ECHO.match(ln)
-    ]
+    moread = any(
+        _INPUT_ECHO.match(ln) and "moread" in ln.lower()
+        for ln in log.decode("utf-8", errors="replace").splitlines()
+    )
     why = (
         "its starting orbitals are read from a file with MORead"
-        if any("moread" in ln.lower() for ln in echo)
+        if moread
         else "the output has no SCF section"
     )
     return f"no SCF ran in this job ({why}); an absent SCF is not an SCF convergence failure"

@@ -83,7 +83,7 @@ class JobFacts:
     casscf_ground: str | None  # lowest SA-CASSCF root, Eh, converged CASSCF only
     active_irreps: tuple[tuple[str, int], ...]  # first listing, irreps with active orbitals
     root_weights: tuple[RootWeight, ...]  # first CI-step listing
-    nevpt2_transitions: tuple[Transition, ...] = ()  # SC-NEVPT2 listing, as printed
+    nevpt2_transitions: tuple[Transition, ...]  # SC-NEVPT2 listing, as printed
 
 
 def job_facts(log: bytes) -> JobFacts:
@@ -189,8 +189,8 @@ def _nevpt2_transitions(lines: list[str]) -> tuple[Transition, ...]:
     found: list[Transition] = []
     for ln in lines[start + 1 :]:
         if m := _TRANSITION.match(ln):
-            mult, irrep = int(m.group(2)), m.group(3)
-            found.append(Transition(mult, irrep, int(m.group(1)), m.group(4), m.group(5)))
+            root, mult, irrep, au, ev = m.group(1, 2, 3, 4, 5)
+            found.append(Transition(int(mult), irrep, int(root), au, ev))
         elif found and not ln.strip():
             break
     return tuple(found)
@@ -273,8 +273,9 @@ def _check_root_order(facts: JobFacts) -> str | None:
     blocks: dict[tuple[int, str | None], list[Transition]] = {}
     for t in facts.nevpt2_transitions:
         blocks.setdefault((t.multiplicity, t.irrep), []).append(t)
-    swapped = []
+    swapped: list[str] = []
     for (mult, irrep), roots in blocks.items():
+        # Order by the printed energies rather than trusting the listing's order.
         by_energy = sorted(roots, key=lambda t: Decimal(t.au))
         if [t.root for t in by_energy] != sorted(t.root for t in roots):
             listed = ", ".join(f"root {t.root} {t.ev} eV" for t in by_energy)
