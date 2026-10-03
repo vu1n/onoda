@@ -354,6 +354,28 @@ def test_journal_mismatch_is_refused_and_records_nothing(tmp_path, field, value)
     _assert_nothing_recorded(store)
 
 
+class CalledReply(BrokerReply):
+    """A journal reply that names the tool call it answered, as the broker journals it."""
+
+    tool_call_id: str | None = None
+
+
+def test_a_journal_naming_another_tool_call_is_refused(tmp_path):
+    sb = vte_run(tmp_path / "w")
+    store, task = make_store(tmp_path / "store")
+    other = CalledReply(**JOURNAL[1].model_dump(), tool_call_id="c9")
+    with pytest.raises(IntegrityError, match=r"disagrees with the broker journal on \['tool_call"):
+        ingest(store, task, sb.dir, journal=(other, JOURNAL[2]))
+    _assert_nothing_recorded(store)
+
+
+def test_a_journal_naming_the_same_tool_call_is_accepted(tmp_path):
+    sb = vte_run(tmp_path / "w")
+    store, task = make_store(tmp_path / "store")
+    same = CalledReply(**JOURNAL[1].model_dump(), tool_call_id="c2")
+    assert ingest(store, task, sb.dir, journal=(same, JOURNAL[2])).complete
+
+
 def test_execution_the_broker_served_from_cache_is_refused(tmp_path):
     """The spool says ORCA ran; the broker says it served a cache hit."""
     sb = vte_run(tmp_path / "w")

@@ -148,6 +148,7 @@ def test_real_execution_over_socket_is_journaled_as_stand_in(tmp_path):
     assert request.event == "request" and request.tool_call_id == "c1"
     assert request.input_sha256 == reply.input_sha256
     assert answer.event == "reply" and answer.job_id == "j0001"
+    assert answer.tool_call_id == "c1"  # ingest checks it against task.execute
     assert answer.executed_here and not answer.cache_hit and not answer.replay
     assert answer.stand_in is True  # synthetic, never presented as ORCA
     assert answer.binary_sha256 == sha256_digest(binary.read_bytes())

@@ -22,8 +22,8 @@ journal event that cites them:
   labelled `not-executed`, never an execution. All cite the submitted input
   and the job's log and are followed by a `job-collected` checkpoint whose
   `visible` names the job (`job.<job id>`).
-  Every line must agree with the broker's journal (job id, status, input and
-  output sha256, `executed_here`, `cache_hit`); a spool with any
+  Every line must agree with the broker's journal (job id, tool call id,
+  status, input and output sha256, `executed_here`, `cache_hit`); a spool with any
   `task.execute` is refused without that journal. Broker jobs no line cites
   (the extension stopped between the reply and its spool write) are listed
   in a `pi.broker-unspooled` event, so no host execution goes unrecorded.
@@ -185,7 +185,9 @@ class BrokerJournalRecord(Protocol):
 
     `vte_contract.BrokerReply` satisfies it, as does the broker's own journal
     entry. Entries without a job id (requests, refusals) are skipped; an
-    optional `stand_in` attribute marks a job a stand-in executable ran.
+    optional `stand_in` attribute marks a job a stand-in executable ran, and
+    an optional `tool_call_id` (the broker journals it on every reply) must
+    name the `task.execute` line's call.
     """
 
     job_id: str | None
@@ -634,6 +636,10 @@ def _check_broker(
             entry.executed_here,
         )
         fields = ("status", "input", "output", "cache_hit", "executed_here")
+        # The broker journals the tool call on every reply; a bare wire reply has none.
+        if (call := getattr(entry, "tool_call_id", None)) is not None:
+            spooled, journaled = (line.tool_call_id, *spooled), (call, *journaled)
+            fields = ("tool_call_id", *fields)
         if differ := [f for f, s, j in zip(fields, spooled, journaled, strict=True) if s != j]:
             raise IntegrityError(
                 f"task.execute at seq {line.seq} (job {line.job_id}) disagrees with the broker "
