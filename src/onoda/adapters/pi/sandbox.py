@@ -231,6 +231,7 @@ def _write_wrapper(path: Path, argv: list[str], *, passthrough: bool) -> None:
     """A /bin/sh script that execs `argv` (words quoted, `"$PWD"` left live) plus its args."""
     words = [w if w == '"$PWD"' else shlex.quote(w) for w in argv]
     tail = ' "$@"' if passthrough else ""
+    path.unlink(missing_ok=True)  # read-only (0555) from an earlier staging
     path.write_text(f"#!/bin/sh\nexec {' '.join(words)}{tail}\n")
     path.chmod(0o555)
 
