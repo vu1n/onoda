@@ -415,3 +415,8 @@ flowchart TD
   refusing the run (a crash between ORCA finishing and the spool write would
   otherwise make the run un-ingestable). Comparing the journal's
   `tool_call_id` with the spool line is a tighten item.
+- VTE-009: footprint widened to `orca_broker.py` (replay echoes the recorded
+  `cache_hit` and `reason`, never `executed_here`, so a run with a real
+  execution replays byte-identically) and `onoda-task.ts` tool text (attach
+  naming). New assumption A63: how `vte report` pools repeats and computes
+  the common-target MAE. RLM variants are refused for VTE runs.
