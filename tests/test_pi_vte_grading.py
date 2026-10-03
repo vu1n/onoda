@@ -315,7 +315,7 @@ def _without_irreps(out: bytes) -> bytes:
 
 
 def test_a_job_without_printed_irreps_supports_but_never_identifies(evaluator_store):
-    """A70: the irrep is the agent's own label when the output prints none."""
+    """A71: the irrep is the agent's own label when the output prints none."""
     case = _case("ketene")
     jobs = {"j0001": VteJob(_without_irreps(_out("ketene_f_target")), True, False)}
     e = _grade(evaluator_store, case, _claim(case, _state(1, "B1", "6.069", "j0001")), jobs)
