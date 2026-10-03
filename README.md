@@ -196,6 +196,39 @@ per-trial and per-call caps; `onoda optimize status` and the output's
 `spent_usd` show what was spent. `onoda pi run --live` needs the sandbox too,
 and `onoda pi run --sandbox` runs a scripted run inside it.
 
+QUESTDB slice: the agent writes and runs its own SA-CASSCF/SC-NEVPT2 ORCA
+jobs (A57–A62). A VTE case (`cases-dev/questdb/`, dev-only) gives the agent a
+QUESTDB geometry and its target states (counts per spin and irrep, no
+energies). `orca_submit` sends each input over a Unix socket in the Pi work
+dir to a host-side broker that runs ORCA, serves byte-identical jobs from a
+shared cache as acquired (`cache_hit`, never an execution) and caps
+submissions per run (`--max-executions`, cache hits included). The broker's
+journal is committed with the run and ingest refuses a spool that disagrees
+with it. The grader checks each claimed energy against the parser's reading
+of the cited job and pairs states with QUESTDB's SC-NEVPT2 references by
+identity (spin, irrep, character), never by energy order. References stay in
+the evaluator store.
+
+```bash
+onoda pi run-vte questdb-ketene --variant S0 --run-id k0 --store ./store-a \
+  --work-dir /tmp/k0 --script script.json \
+  --enable-live-execution --orca-binary /opt/orca/orca --orca-work-root ./orca-jobs \
+  --max-wall-seconds 1800 --orca-cache ./orca-cache   # every ORCA setting stated; off by default
+onoda pi evaluate-vte k0 --store ./store-a --evaluator-store ./evaluator
+onoda pi replay k0 --store ./store-a --work-dir ./replay   # broker in replay mode: runs nothing
+onoda vte report k0 k1 --store ./store-a --evaluator-store ./evaluator --arm S0 --arm S1
+```
+
+`--work-dir` must be short: the broker socket lives under it and macOS allows
+AF_UNIX paths under 104 bytes. A live run takes the same live flags as
+`pi run` and runs in the sandbox (Seatbelt on macOS). The report gives per arm
+coverage, MAE over identified states and false-success claims, and, for two
+arms, the MAE over the targets both identified; it declares no winner.
+`experiments/questdb/run.sh` runs Baseline (S0) and Decision (S1, the
+reconstructed ladder `experiments/questdb/ladder-from-paper.md`) over the eight
+cases with repeats on the owner's Mac; it refuses to start unless the model,
+credential, caps and ORCA execution are each set explicitly.
+
 ## Layout
 
 | Module | Responsibility |
@@ -223,7 +256,11 @@ and `onoda pi run --sandbox` runs a scripted run inside it.
 | `adapters.pi.runtime` | `doctor`, launch builder (isolated agent dir, extension load order, live-setting gate), process runner |
 | `adapters.pi.ingest` | Spool → run record: decision/tool/acquisition receipts, fused-call decomposition, ObservationPack handles as store digests, compactions, checkpoints |
 | `adapters.pi.task` | Task bundle staging and claim grading against the deterministic parser, in the evaluator store |
-| `adapters.pi.run` | One run end to end, and replay under recorded responses |
+| `adapters.pi.run` | One run end to end (case or VTE task), replay under recorded responses, VTE grading and the per-arm report |
+| `adapters.pi.vte_contract` | VTE task bundle, claim and the ORCA broker's wire protocol |
+| `adapters.pi.vte` | VTE bundle staging and identity grading against the deterministic parser, in the evaluator store |
+| `science.orca_broker` | Host-side ORCA broker for `orca_submit`: cache, attempt cap, journal, replay mode |
+| `science.vte` | VTE case manifests and evaluator-only reference rows |
 | `pi/extensions/` | onoda's Pi extensions (TypeScript): task tools, scripted provider, recorder writing the fsynced spool |
 | `ablation.contract` | M3b contract: arms, spec, outcome vector, metric names and directions, tolerances, gate result |
 | `ablation.metrics` | One run's outcome vector from the agent store and its claim evaluation; the A15 reducer-loss probe |
@@ -252,6 +289,7 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Harness optimization (M4) | GEPA proposes candidate components from agent traces; SoL-Pi's gates accept or reject each on acceptance cases only. A scripted two-proposal search on real Pi rejects one (a false success) and accepts one (fewer context bytes). Synthetic, not an improvement (A32) | `tests/test_optimize*.py`, `scripts/demo.sh` |
 | Live search (A51) | Built and tested offline only: OpenRouter reflection with recorded receipts against a fake transport, and the search-wide spend cap. No live search has run yet | `tests/test_live_optimizer.py` |
 | Sandbox (A50) | Scripted Pi runs inside bubblewrap: `bash` and the RLM kernel have no network, no credential and no host files; file tools stay in the workspace and bundle | `tests/test_pi_sandbox.py` |
+| Agent-run ORCA jobs (VTE, A57–A59) | Scripted Pi on real Pi submits jobs through the host broker to a labelled stand-in executable (one execution, one cache hit), claims a state and is graded by identity; a run whose jobs were all cache hits replays with zero executions. Replay of a run that executed a job still fails closed (the replay broker's reply shows a cache hit where the recording showed an execution). The stand-in's outputs are synthetic. No real ORCA job has been run by an agent yet | `tests/test_pi_vte_end_to_end.py` |
 | Repeat experiment | Not implemented | — |
 
 ## Acceptance tests

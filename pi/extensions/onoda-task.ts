@@ -262,7 +262,9 @@ const SubmitParams = Type.Object(
 				Type.Object(
 					{
 						job_id: Type.String({ description: "An earlier job of this run, e.g. j0001" }),
-						name: Type.String({ description: "A file that job produced, e.g. job.gbw" }),
+						name: Type.String({
+							description: 'A file that job produced, e.g. job.gbw; it arrives as j0001.gbw (%moinp "j0001.gbw")',
+						}),
 					},
 					{ additionalProperties: false },
 				),
@@ -419,8 +421,10 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 		label: "ORCA submit",
 		description:
 			"Run one ORCA job on the host and return its complete output. Pass the full input file text; to reuse files " +
-			"an earlier job produced (e.g. orbitals), list them in attach by job id and file name. An input identical to " +
-			"an earlier one (with the same attachments) returns that job's output from the cache under a new job id. " +
+			"an earlier job produced (e.g. orbitals), list them in attach by job id and file name. An attached file is " +
+			'placed next to the input as <job_id><suffix> (j0001 + job.gbw -> j0001.gbw), so read it with %moinp "j0001.gbw". ' +
+			"An input identical to an earlier one (with the same attachments) returns that job's output from the cache " +
+			"under a new job id. " +
 			"Every call counts against the run's job limit. Cite the job id when you report a value from its output.",
 		promptSnippet: "Run an ORCA input on the host and read its output",
 		parameters: SubmitParams,

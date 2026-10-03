@@ -390,15 +390,129 @@ def cmd_pi_run(a) -> Any:
     }
 
 
+def _vte_case(case_id: str, cases_root: str | None):
+    from onoda.adapters.pi.run import VTE_CASES_ROOT
+    from onoda.science.vte import load_vte_case, vte_case_manifests
+
+    manifests = vte_case_manifests(Path(cases_root) if cases_root else VTE_CASES_ROOT)
+    if case_id not in manifests:
+        raise OnodaError(f"unknown VTE case {case_id!r} under {cases_root or VTE_CASES_ROOT}")
+    return load_vte_case(manifests[case_id])
+
+
+def cmd_pi_run_vte(a) -> Any:
+    from onoda.adapters.pi.contract import Script
+    from onoda.adapters.pi.run import VTE_INSTRUCTION, run_vte_case
+    from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
+    from onoda.science.orca_local import OrcaSettings
+
+    if bool(a.script) == bool(a.live):
+        raise OnodaError("give exactly one of --script (offline) or --live")
+    if a.max_requests is not None and a.max_requests <= 0:
+        raise OnodaError("--max-requests must be greater than 0")
+    if a.max_executions <= 0:
+        raise OnodaError("--max-executions must be greater than 0")
+    if bool(a.reducer_provider) != bool(a.reducer_model):
+        raise OnodaError("give both --reducer-provider and --reducer-model, or neither")
+    live = None
+    if a.live:
+        live = LiveSettings(
+            provider=a.provider,
+            model=a.model,
+            credential_env=a.credential_env,
+            max_requests=a.max_requests,
+            max_cost_usd=a.max_cost_usd,
+        )
+    pi = run_vte_case(
+        _store(a.store),
+        _vte_case(a.case_id, a.cases_root),
+        run_id=a.run_id,
+        variant_id=a.variant,
+        work_dir=Path(a.work_dir),
+        # Every field defaults off; OrcaLocalScheduler refuses unresolved settings.
+        orca=OrcaSettings(
+            enabled=a.enable_live_execution,
+            binary=a.orca_binary,
+            work_root=a.orca_work_root,
+            max_wall_seconds=a.max_wall_seconds,
+            stand_in=a.stand_in,
+        ),
+        cache_dir=Path(a.orca_cache) if a.orca_cache else None,
+        script=Script.model_validate_json(Path(a.script).read_text()) if a.script else None,
+        live=live,
+        instruction=a.instruction or VTE_INSTRUCTION,
+        docs={Path(d).name: Path(d).read_bytes() for d in a.doc},
+        ladder=Path(a.ladder).read_bytes() if a.ladder else None,
+        synthetic_ladder=a.synthetic_ladder,
+        max_requests=a.max_requests,
+        max_executions=a.max_executions,
+        reducer=(a.reducer_provider, a.reducer_model) if a.reducer_provider else None,
+        timeout_s=a.timeout,
+        sandbox=detect_sandbox() if (a.live or a.sandbox) else None,
+    )
+    r = pi.ingest
+    return {
+        "run_id": r.run_id,
+        "status": r.status,
+        "complete": r.complete,
+        "invocations": len(r.invocations),
+        "claim": r.claim,
+        "observation_pack": r.observation_pack,
+        "pi_exit_code": pi.exit_code,
+    }
+
+
+def cmd_pi_evaluate_vte(a) -> Any:
+    from onoda.adapters.pi.run import evaluate_vte_run
+
+    store = _store(a.store)
+    run = store.run_record(a.run_id)
+    if run.config.get("task_kind") != "vte":
+        raise OnodaError(f"run {a.run_id} is not a VTE run; see `onoda pi evaluate`")
+    ev = evaluate_vte_run(
+        store,
+        _store(a.evaluator_store, evaluator=True),
+        a.run_id,
+        _vte_case(run.config["case_id"], a.cases_root),
+    )
+    m = ev.metrics
+    return {
+        "evaluation_id": ev.evaluation_id,
+        "evaluator": ev.evaluator,
+        "reference_version": ev.reference_version,
+        "coverage": m["coverage"],
+        "coverage_total": m["coverage.total"],
+        "mae_ev": m["mae_ev"],
+        "false_success_claims": m["false_success_claims"],
+        "assignments": ev.assignments,
+        "synthetic": m["synthetic"] == "true",
+    }
+
+
+def cmd_vte_report(a) -> Any:
+    from onoda.adapters.pi.run import vte_report
+
+    if a.arm and len(a.arm) != 2:
+        raise OnodaError("--arm names exactly two arms, or none")
+    return vte_report(
+        _store(a.store),
+        _store(a.evaluator_store, evaluator=True),
+        a.run_ids,
+        arms=tuple(a.arm or ()),
+    )
+
+
 def cmd_pi_replay(a) -> Any:
     from onoda.adapters.pi.run import replay_run_pi
 
     store = _store(a.store)
-    case_id = store.run_record(a.run_id).config.get("case_id")
+    cfg = store.run_record(a.run_id).config
+    case_id = cfg.get("case_id")
+    vte = cfg.get("task_kind") == "vte"
     return replay_run_pi(
         store,
         a.run_id,
-        _case(case_id, a.cases_root),
+        _vte_case(case_id, a.cases_root) if vte else _case(case_id, a.cases_root),
         work_dir=Path(a.work_dir),
         timeout_s=a.timeout,
     )
@@ -752,6 +866,8 @@ def cmd_ablation_show(a) -> Any:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS
+
     p = argparse.ArgumentParser(prog="onoda", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -894,12 +1010,53 @@ def build_parser() -> argparse.ArgumentParser:
         help='HarnessCandidate JSON ({"components": {...}}); RLM variants default to the seed',
     )
     pr.set_defaults(func=cmd_pi_run)
+    rv = pi.add_parser(
+        "run-vte", help="run one variant on one VTE case, its ORCA jobs on this host, and ingest it"
+    )
+    rv.add_argument("case_id")
+    rv.add_argument("--variant", required=True)
+    rv.add_argument("--run-id", required=True)
+    rv.add_argument("--store", required=True)
+    rv.add_argument("--work-dir", required=True, help="short: the broker socket lives under it")
+    rv.add_argument("--script", help="scripted-provider script (offline; outputs synthetic)")
+    rv.add_argument("--live", action="store_true", help="real provider; every live flag needed")
+    rv.add_argument("--provider")
+    rv.add_argument("--model")
+    rv.add_argument("--credential-env", help="name of the env var holding the API key")
+    rv.add_argument("--max-cost-usd")
+    rv.add_argument("--max-requests", type=int)
+    rv.add_argument(
+        "--sandbox", action="store_true", help="run Pi in the sandbox (always on for --live)"
+    )
+    rv.add_argument("--reducer-provider", help="reducer provider for S2b/S3 (live runs)")
+    rv.add_argument("--reducer-model", help="reducer model for S2b/S3 (live runs)")
+    rv.add_argument("--enable-live-execution", action="store_true", help="let the broker run ORCA")
+    rv.add_argument("--orca-binary")
+    rv.add_argument("--orca-work-root")
+    rv.add_argument("--max-wall-seconds", type=int, help="per ORCA job")
+    rv.add_argument(
+        "--stand-in", action="store_true", help="the binary is a test stand-in, not ORCA"
+    )
+    rv.add_argument(
+        "--max-executions",
+        type=int,
+        default=DEFAULT_MAX_EXECUTIONS,
+        help="orca_submit calls per run, cache hits included (A59)",
+    )
+    rv.add_argument("--orca-cache", help="shared broker cache directory (A59)")
+    rv.add_argument("--doc", action="append", default=[], help="allowed documentation (.md)")
+    rv.add_argument("--ladder", help="advisory ladder document (required from S1 on)")
+    rv.add_argument("--synthetic-ladder", action="store_true")
+    rv.add_argument("--instruction")
+    rv.add_argument("--timeout", type=float, default=3600, help="seconds for the whole Pi run")
+    rv.add_argument("--cases-root", help="VTE cases (default cases-dev/questdb)")
+    rv.set_defaults(func=cmd_pi_run_vte)
     rp2 = pi.add_parser("replay", help="re-run a scripted run; fails closed on any drift")
     rp2.add_argument("run_id")
     rp2.add_argument("--store", required=True)
     rp2.add_argument("--work-dir", required=True)
     rp2.add_argument("--timeout", type=float, default=300)
-    rp2.add_argument("--cases-root")
+    rp2.add_argument("--cases-root", help="cases root (VTE runs: default cases-dev/questdb)")
     rp2.set_defaults(func=cmd_pi_replay)
     pe = pi.add_parser("evaluate", help="grade a Pi run's claim in a separate evaluator store")
     pe.add_argument("run_id")
@@ -907,6 +1064,27 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--evaluator-store", required=True)
     pe.add_argument("--cases-root")
     pe.set_defaults(func=cmd_pi_evaluate)
+    pev = pi.add_parser(
+        "evaluate-vte", help="grade a VTE run's claim by state identity in the evaluator store"
+    )
+    pev.add_argument("run_id")
+    pev.add_argument("--store", required=True)
+    pev.add_argument("--evaluator-store", required=True)
+    pev.add_argument("--cases-root", help="VTE cases (default cases-dev/questdb)")
+    pev.set_defaults(func=cmd_pi_evaluate_vte)
+
+    vt = sub.add_parser("vte", help="QUESTDB vertical-transition-energy runs")
+    vt = vt.add_subparsers(dest="vte_command", required=True)
+    vr = vt.add_parser(
+        "report", help="coverage, MAE and false successes per arm over graded VTE runs"
+    )
+    vr.add_argument("run_ids", nargs="+")
+    vr.add_argument("--store", required=True)
+    vr.add_argument("--evaluator-store", required=True)
+    vr.add_argument(
+        "--arm", action="append", help="compare these two arms (repeat once); default: all"
+    )
+    vr.set_defaults(func=cmd_vte_report)
 
     ab = sub.add_parser("ablation", help="SoL-Pi add-one ablation over Pi arms (M3b)")
     ab = ab.add_subparsers(dest="ablation_command", required=True)

@@ -77,10 +77,12 @@ from onoda.adapters.pi.contract import (
     HarnessCandidate,
     Script,
     TaskBundle,
+    TaskKind,
     candidate_for,
     with_mechanisms,
 )
-from onoda.adapters.pi.sandbox import SANDBOX_KIND, Sandbox, SeatbeltSandbox, write_settings
+from onoda.adapters.pi.sandbox import Sandbox, SeatbeltSandbox, write_settings
+from onoda.adapters.pi.vte_contract import ENV_BROKER, VteTaskBundle
 from onoda.errors import CapabilityError, OnodaError
 
 _MIN_NODE = (22, 19, 0)
@@ -255,7 +257,7 @@ class Launch:
     # The spool HMAC key: in memory only (the Pi process unlinks its copy).
     spool_key: bytes = field(default=b"", repr=False)
     rlm: RlmStage | None = None  # set for rlm variants only
-    sandboxed: bool = False  # argv runs Pi inside the bwrap sandbox (A50)
+    sandboxed: bool = False  # argv runs Pi inside the sandbox (A50)
 
 
 @dataclass(frozen=True)
@@ -319,7 +321,9 @@ def build_launch(
     max_acquisitions: int,
     reducer: tuple[str, str] | None = None,
     candidate: HarnessCandidate | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox | SeatbeltSandbox | None = None,
+    task_kind: TaskKind = "case",
+    broker_socket: Path | None = None,
 ) -> Launch:
     """Stage one run of `variant_id` against the bundle at `bundle_dir` under
     `work_dir`. Exactly one of `script` (offline, deterministic) or `live` (a
@@ -332,8 +336,17 @@ def build_launch(
     (the effective mechanisms then drive `--tools`, the SoL-Pi config and
     `run_info["mechanisms"]`).
 
-    `sandbox` runs Pi inside `sandbox.Sandbox` (A50). A live run refuses to
-    stage without one: A38 requires a sandbox before any live run.
+    `sandbox` runs Pi inside `sandbox.Sandbox` or `SeatbeltSandbox` (A50),
+    and the run records its `kind`. A live run refuses to stage without one:
+    A38 requires a sandbox before any live run.
+
+    `task_kind="vte"` stages a VTE bundle (`VteTaskBundle`, A57): the variant
+    offers `Variant.tools("vte")`, the gateway's `max_executions` is the
+    bundle's own, and `broker_socket` (required) is handed to the task
+    extension as `ENV_BROKER`. The socket must sit directly in `work_dir`,
+    which the outer sandbox layer mounts and the inner one does not, and its
+    path must fit AF_UNIX on macOS (under 104 bytes). RLM variants are refused
+    for VTE tasks in this slice.
     """
     if (script is None) == (live is None):
         raise OnodaError("build_launch requires exactly one of script or live")
@@ -351,7 +364,29 @@ def build_launch(
     # Pi runs with the workspace as cwd, so every path handed to it must be absolute.
     bundle_dir = Path(bundle_dir).resolve()
     work_dir = Path(work_dir).resolve()
-    task_bundle = TaskBundle.model_validate_json((bundle_dir / "task.json").read_text())
+    task_json = (bundle_dir / "task.json").read_text()
+    task_bundle: TaskBundle | VteTaskBundle
+    max_executions = 0
+    if task_kind == "vte":
+        if variant.rlm:
+            raise CapabilityError(f"variant {variant_id} (RLM) is not offered for VTE tasks")
+        if broker_socket is None:
+            raise OnodaError("a VTE launch needs the broker socket")
+        broker_socket = Path(broker_socket).parent.resolve() / Path(broker_socket).name
+        if broker_socket.parent != work_dir:
+            raise OnodaError(f"broker socket {broker_socket} is not directly in {work_dir}")
+        if len(os.fsencode(broker_socket)) >= 104:
+            raise CapabilityError(
+                f"broker socket path {broker_socket} is {len(os.fsencode(broker_socket))} bytes; "
+                "AF_UNIX allows under 104 on macOS: use a shorter work directory"
+            )
+        task_bundle = VteTaskBundle.model_validate_json(task_json)
+        max_executions = task_bundle.max_executions
+    elif broker_socket is not None:
+        raise OnodaError("only a VTE launch takes a broker socket")
+    else:
+        task_bundle = TaskBundle.model_validate_json(task_json)
+    tools = effective_variant.tools(task_kind)
     if variant.ladder:
         if task_bundle.ladder_sha256 is None or not (bundle_dir / "ladder.md").is_file():
             raise CapabilityError(f"variant {variant_id} requires an advisory ladder")
@@ -410,9 +445,10 @@ def build_launch(
 
     policy_path = work_dir / "policy.json"
     policy = GatewayPolicy(
-        allowed_tools=effective_variant.tools(),
+        allowed_tools=tools,
         max_requests=max_requests,
         max_acquisitions=max_acquisitions,
+        max_executions=max_executions,
         max_cost_usd=live.max_cost_usd if live is not None else None,
         path_aliases=path_aliases,
         read_roots=(str(workspace_dir), str(bundle_dir)) if sandbox is not None else None,
@@ -432,7 +468,7 @@ def build_launch(
         "scripted": script is not None,
     }
     if sandbox is not None:  # absent for an unsandboxed run, so its record is unchanged
-        run_info["sandbox"] = SANDBOX_KIND
+        run_info["sandbox"] = sandbox.kind
     if live is not None:
         run_info["max_cost_usd"] = live.max_cost_usd
     # Recorded for any variant: a candidate can also change `sol_pi.config` and
@@ -481,6 +517,8 @@ def build_launch(
             ENV_RUN_INFO: str(run_info_path),
         }
     )
+    if broker_socket is not None:
+        env[ENV_BROKER] = str(broker_socket)
     if rlm is not None:
         env.update(rlm.env())
         if sandbox_python is not None:
@@ -514,7 +552,7 @@ def build_launch(
         "--model",
         model,
         "--tools",
-        ",".join(effective_variant.tools()),
+        ",".join(tools),
         "--mode",
         "json",
         "-p",

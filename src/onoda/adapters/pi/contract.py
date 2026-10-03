@@ -415,7 +415,7 @@ class SpoolStart(_Line):
     max_cost_usd: str | None = None  # a live run's cost cap, as given (decimal text)
     candidate_digest: str | None = None  # M4: the HarnessCandidate the run was launched with
     rlm_limits: dict[str, int] | None = None  # M4: its RlmLimits (RLM variants)
-    sandbox: str | None = None  # "bwrap" when Pi ran inside the sandbox (A50)
+    sandbox: str | None = None  # the backend's kind ("bwrap", "seatbelt") when sandboxed (A50)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 

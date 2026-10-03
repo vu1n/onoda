@@ -15,14 +15,27 @@ Only scripted-mode responses are replayed; nothing falls back to a live
 provider. Replay executes the recorded tool calls (bash included), so a run
 that arrived through `import_bundle` is refused: import is data-only.
 
+`run_vte_case` is the VTE task (A57-A59): it stages a `VteTaskBundle`
+(structure, targets, docs, ladder; the case's references are never staged or
+committed), starts an `OrcaBroker` on a Unix socket in the Pi work dir for
+the run's `orca_submit` calls, launches Pi with the VTE tools, stops the
+broker, commits the broker's journal and ingests the spool against it. The
+journal lives outside the Pi work dir, so the Pi process cannot rewrite it.
+`replay_run_pi` replays a VTE run with the broker in replay mode, serving
+only the recorded outputs (A59): nothing executes, and any changed
+submission is a `replay_miss` the recorded responses then fail on.
+`evaluate_vte_run` grades a VTE run in the evaluator store and `vte_report`
+summarizes graded runs per arm (A63).
+
 The spool HMAC key of each launch stays in memory and is handed to ingest
 (or the replay's spool check); it is never stored.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -34,16 +47,37 @@ from onoda.adapters.pi.contract import (
     candidate_for,
     derive_child_key,
 )
-from onoda.adapters.pi.ingest import IngestResult, _read_spool, ingest_spool, recorded_script
-from onoda.adapters.pi.runtime import LiveSettings, build_launch, launch
-from onoda.adapters.pi.sandbox import SANDBOX_KIND, Sandbox
+from onoda.adapters.pi.ingest import (
+    IngestResult,
+    _read_spool,
+    ingest_spool,
+    recorded_script,
+    run_vte_claim,
+)
+from onoda.adapters.pi.runtime import Launch, LaunchResult, LiveSettings, build_launch, launch
+from onoda.adapters.pi.sandbox import Sandbox, SeatbeltSandbox
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
+from onoda.adapters.pi.vte import VTE_EVALUATOR, VteJob, evaluate_vte_claims, stage_vte_bundle
+from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS, ENV_BROKER, VteTaskBundle
 from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
-from onoda.errors import CapabilityError, OnodaError, ReplayMismatch
+from onoda.errors import CapabilityError, IntegrityError, OnodaError, ReplayMismatch
 from onoda.portability import imported_runs
-from onoda.records import TaskManifest
-from onoda.science.contract import LoadedCase
+from onoda.records import Evaluation, TaskManifest
+from onoda.science.contract import CASES_ROOT, LoadedCase
+from onoda.science.orca_broker import (
+    JOURNAL_NAME,
+    BrokerJournalEntry,
+    BrokerReplay,
+    OrcaBroker,
+    read_journal,
+)
+from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
+from onoda.science.vte import (
+    REFERENCES_SCHEMA,
+    LoadedVteCase,
+    load_vte_references,
+)
 from onoda.store import Store, check_safe_id
 
 DEFAULT_INSTRUCTION = (
@@ -51,6 +85,17 @@ DEFAULT_INSTRUCTION = (
     "report_states once with the final single-point energy and every excited state the "
     "output lists, copying each value and unit exactly as printed."
 )
+
+VTE_INSTRUCTION = (
+    "Read the molecule and its target excited states with structure, write SA-CASSCF/SC-NEVPT2 "
+    "ORCA inputs and run them with orca_submit, then call report_vtes once with each target "
+    "state you identified: its spin, irrep, dominant character, the SC-NEVPT2 vertical "
+    "excitation energy in eV exactly as printed, and the job id whose output prints it."
+)
+
+# The eight QUESTDB dev cases (A62); dev-only, never part of `cases/` or a split.
+VTE_CASES_ROOT = CASES_ROOT.parent / "cases-dev" / "questdb"
+BROKER_SOCKET = "broker.sock"  # in the Pi work dir: the outer sandbox layer sees it, bash does not
 
 
 @dataclass(frozen=True)
@@ -134,11 +179,12 @@ def run_case(
     reducer: tuple[str, str] | None = None,
     timeout_s: float = 300,
     candidate: HarnessCandidate | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: Sandbox | SeatbeltSandbox | None = None,
 ) -> PiRun:
     """Run one variant on one case and ingest it as `run_id`.
 
-    `sandbox` runs Pi inside the bwrap sandbox (A50); a live run needs one.
+    `sandbox` runs Pi inside the sandbox (A50; bwrap or Seatbelt, recorded as
+    its `kind`); a live run needs one.
 
     A scripted run's `max_requests` defaults to 16. A live run's request cap
     is its own `live.max_requests` (A35); a different `max_requests` here is
@@ -161,14 +207,7 @@ def run_case(
     if store.has_record("run", run_id):
         raise OnodaError(f"run {run_id} already exists")
     candidate = candidate_for(variant_id, candidate)
-    if live is not None:
-        if max_requests is not None and max_requests != live.max_requests:
-            raise OnodaError(
-                f"max_requests {max_requests} conflicts with the live setting {live.max_requests}"
-            )
-        max_requests = live.max_requests or 0  # 0 or unset: live.validate() refuses it
-    elif max_requests is None:
-        max_requests = 16
+    max_requests = _request_cap(live, max_requests)
     work_dir = Path(work_dir)
     bundle_dir = work_dir / "bundle"
     candidate_ladder = candidate.ladder_bytes() if candidate is not None else None
@@ -211,7 +250,7 @@ def run_case(
         "max_acquisitions": max_acquisitions,
     }
     if sandbox is not None:
-        config["sandbox"] = SANDBOX_KIND
+        config["sandbox"] = sandbox.kind
     if reducer is not None:
         config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
     if candidate is not None:
@@ -223,17 +262,7 @@ def run_case(
         sol_pi_override = candidate.sol_pi_override()
         if sol_pi_override is not None:
             config["sol_pi_config_override"] = sol_pi_override
-    if script is not None:
-        config["script"] = store.put_json(
-            script.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]
-        ).digest
-    else:
-        assert live is not None
-        config.update(
-            provider=live.provider,
-            model=live.model,
-            max_cost_usd=live.max_cost_usd,
-        )
+    _record_driver(store, config, script, live)
     result = launch(prepared, timeout_s=timeout_s)
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
         raise OnodaError(
@@ -249,6 +278,389 @@ def run_case(
         expected_session_dir=prepared.session_dir,
     )
     return PiRun(ingested, result.exit_code, result.stderr[-2000:])
+
+
+def _record_driver(
+    store: Store, config: dict[str, Any], script: Script | None, live: LiveSettings | None
+) -> None:
+    """Add what drove the agent to `config`: the committed script, or the live settings."""
+    if script is not None:
+        config["script"] = store.put_json(
+            script.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]
+        ).digest
+    else:
+        assert live is not None
+        config.update(
+            provider=live.provider,
+            model=live.model,
+            max_cost_usd=live.max_cost_usd,
+        )
+
+
+def _request_cap(live: LiveSettings | None, max_requests: int | None) -> int:
+    """A live run's cap is its own setting (A35); a scripted run's defaults to 16."""
+    if live is not None:
+        if max_requests is not None and max_requests != live.max_requests:
+            raise OnodaError(
+                f"max_requests {max_requests} conflicts with the live setting {live.max_requests}"
+            )
+        return live.max_requests or 0  # 0 or unset: live.validate() refuses it
+    return 16 if max_requests is None else max_requests
+
+
+# ------------------------------------------------------------------ VTE runs
+
+
+def _refuse_references(bundle_dir: Path, case: LoadedVteCase) -> None:
+    """Refuse a staged bundle holding the evaluator-only references file (A58).
+
+    Checks the pin and the schema string only, so the references' content is
+    never read on the agent side: a staged file with the references' bytes, or
+    any staged file naming their schema, means a doc, ladder or structure was
+    pointed at them.
+    """
+    pin = case.manifest.references.sha256
+    for path in sorted(bundle_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if sha256_digest(data) == pin or REFERENCES_SCHEMA.encode() in data:
+            raise CapabilityError(
+                f"staged {path.relative_to(bundle_dir)} holds the evaluator-only references of "
+                f"{case.manifest.case_id} (A58); nothing was run or committed"
+            )
+
+
+def _commit_vte_task(
+    store: Store,
+    case: LoadedVteCase,
+    bundle_dir: Path,
+    bundle: VteTaskBundle,
+    *,
+    variant_id: str,
+    docs: Mapping[str, bytes],
+    ladder: bytes | None,
+    synthetic_ladder: bool,
+) -> TaskManifest:
+    """Commit what the agent may see: structure, targets, case manifest, docs, ladder.
+
+    Never the references (A58): the manifest only pins their sha256.
+    """
+    m = case.manifest
+    lic = m.provenance.license
+    src = {"case_id": m.case_id}
+    inputs = {
+        "structure": store.put_bytes(
+            case.structure_bytes,
+            media_type="chemical/x-xyz",
+            source={**src, "path": m.structure.path},
+            license=lic,
+            labels=["task-input", "structure"],
+        ).digest,
+        "targets": store.put_bytes(
+            (bundle_dir / "targets.json").read_bytes(),
+            media_type="application/json",
+            source=src,
+            labels=["task-input", "vte-targets"],
+        ).digest,
+        "case": store.put_json(m.model_dump(mode="json"), labels=["vte-case-manifest"]).digest,
+    }
+    for name in sorted(docs):
+        inputs[f"doc:{name}"] = store.put_bytes(
+            docs[name], media_type="text/markdown", labels=["allowed-documentation"]
+        ).digest
+    if ladder is not None:
+        inputs["ladder"] = store.put_bytes(
+            ladder,
+            media_type="text/markdown",
+            labels=["advisory-ladder", *(["synthetic"] if synthetic_ladder else [])],
+        ).digest
+    task_key = sha256_digest(
+        canonical_bytes(
+            {"inputs": inputs, "variant": variant_id, "max_executions": bundle.max_executions}
+        )
+    )
+    task = TaskManifest.new(
+        task_id=f"pi-{m.case_id}-{task_key[7:19]}",
+        inputs=inputs,
+        permitted_context=["task-input", "allowed-documentation", "advisory-ladder"],
+        split=m.split,
+        target={"kind": "vte-case", "case_id": m.case_id, "review": m.review.status},
+        profile_versions={"variant": variant_id},
+        synthetic=False,
+    )
+    store.put_record(task)
+    return task
+
+
+def _launch_with_broker(prepared: Launch, broker: OrcaBroker, timeout_s: float) -> LaunchResult:
+    """Serve `broker` on the launch's socket for exactly the Pi process's lifetime.
+
+    The broker answers one submission at a time, so stopping it waits for a
+    job in flight (bounded by the scheduler's wall-clock limit).
+    """
+    broker.serve(prepared.env[ENV_BROKER])
+    try:
+        return launch(prepared, timeout_s=timeout_s)
+    finally:
+        broker.close()
+
+
+def run_vte_case(
+    store: Store,
+    case: LoadedVteCase,
+    *,
+    run_id: str,
+    variant_id: str,
+    work_dir: Path,
+    orca: OrcaSettings,
+    cache_dir: Path | None = None,
+    script: Script | None = None,
+    live: LiveSettings | None = None,
+    instruction: str = VTE_INSTRUCTION,
+    docs: Mapping[str, bytes] = {},
+    ladder: bytes | None = None,
+    synthetic_ladder: bool = False,
+    max_requests: int | None = None,
+    max_executions: int = DEFAULT_MAX_EXECUTIONS,
+    reducer: tuple[str, str] | None = None,
+    timeout_s: float = 3600,
+    sandbox: Sandbox | SeatbeltSandbox | None = None,
+) -> PiRun:
+    """Run one variant on one VTE case, its ORCA jobs through a host broker; ingest it.
+
+    `orca` are the broker's live-execution settings (`OrcaSettings`, every
+    field off by default; unresolved settings fail closed before anything is
+    staged). `cache_dir` is the broker's shared cache (A59), so identical jobs
+    across runs are served as acquired. `max_executions` caps `orca_submit`
+    calls, cache hits included, and is the same number in the bundle, the
+    gateway policy and the broker. The Pi work dir is `work_dir/pi` and the
+    broker socket sits in it, so `work_dir` must be short enough for AF_UNIX
+    (checked before anything is committed). RLM variants are refused here.
+    Request caps, `reducer` and `sandbox` are as for `run_case`.
+    """
+    check_safe_id(run_id, "run id")
+    if variant_id not in VARIANTS:
+        raise OnodaError(f"unknown variant {variant_id!r}; see `onoda pi variants`")
+    if store.has_record("run", run_id):
+        raise OnodaError(f"run {run_id} already exists")
+    max_requests = _request_cap(live, max_requests)
+    scheduler = OrcaLocalScheduler(orca)  # resolves the settings; fails closed
+    work_dir = Path(work_dir)
+    bundle_dir = work_dir / "bundle"
+    bundle = stage_vte_bundle(
+        case,
+        bundle_dir,
+        instruction=instruction,
+        docs=docs,
+        ladder=ladder,
+        synthetic_ladder=synthetic_ladder,
+        max_executions=max_executions,
+    )
+    _refuse_references(bundle_dir, case)
+    prepared = build_launch(
+        variant_id=variant_id,
+        bundle_dir=bundle_dir,
+        work_dir=work_dir / "pi",
+        script=script,
+        live=live,
+        max_requests=max_requests,
+        max_acquisitions=0,
+        reducer=reducer,
+        sandbox=sandbox,
+        task_kind="vte",
+        broker_socket=work_dir / "pi" / BROKER_SOCKET,
+    )
+    # Outside the Pi work dir: the journal is the host's record, not Pi's.
+    broker = OrcaBroker(
+        work_dir / "broker" / JOURNAL_NAME,
+        scheduler=scheduler,
+        cache_dir=cache_dir,
+        max_executions=bundle.max_executions,
+    )
+    # Refusals happen above; only a launchable run commits anything.
+    task = _commit_vte_task(
+        store,
+        case,
+        bundle_dir,
+        bundle,
+        variant_id=variant_id,
+        docs=docs,
+        ladder=ladder,
+        synthetic_ladder=synthetic_ladder,
+    )
+    config: dict[str, Any] = {
+        "mode": "pi-scripted" if script is not None else "pi-live",
+        "variant": variant_id,
+        "task_kind": "vte",
+        "case_id": case.manifest.case_id,
+        "instruction": instruction,
+        "max_requests": max_requests,
+        "max_executions": bundle.max_executions,
+        "orca": {
+            "binary_sha256": broker.binary_sha256,
+            "stand_in": scheduler.settings.stand_in,
+            "max_wall_seconds": scheduler.settings.max_wall_seconds,
+            "shared_cache": cache_dir is not None,
+        },
+    }
+    if sandbox is not None:
+        config["sandbox"] = sandbox.kind
+    if reducer is not None:
+        config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
+    _record_driver(store, config, script, live)
+    result = _launch_with_broker(prepared, broker, timeout_s)
+    journal_path = broker.journal_path
+    config["broker_journal"] = store.put_bytes(
+        journal_path.read_bytes(), media_type="application/jsonl", labels=["broker-journal"]
+    ).digest
+    if not (result.spool_dir / SPOOL_EVENTS).is_file():
+        raise OnodaError(
+            f"pi exited {result.exit_code} before writing a spool: {result.stderr[-2000:]}"
+        )
+    ingested = ingest_spool(
+        store,
+        result.spool_dir,
+        run_id=run_id,
+        task=task,
+        config=config,
+        key=result.spool_key,
+        expected_session_dir=prepared.session_dir,
+        broker_journal=read_journal(journal_path),
+    )
+    return PiRun(ingested, result.exit_code, result.stderr[-2000:])
+
+
+def _vte_jobs(store: Store, run_id: str) -> dict[str, VteJob]:
+    """Every broker job of the run as its record holds it: log bytes and how it was obtained."""
+    jobs: dict[str, VteJob] = {}
+    for event in store.events(run_id):
+        if event.type != "invocation.committed":
+            continue
+        receipt = store.receipt(event.payload["invocation_id"])
+        job_id = receipt.metadata.get("job_id")
+        if job_id is None or "log" not in receipt.outputs:
+            continue
+        jobs[job_id] = VteJob(
+            store.get_bytes(receipt.outputs["log"]),
+            receipt.metadata["executed_here"] is True,
+            receipt.metadata["cache_hit"] is True,
+        )
+    return jobs
+
+
+def evaluate_vte_run(
+    store: Store, evaluator_store: Store, run_id: str, case: LoadedVteCase
+) -> Evaluation:
+    """Grade a VTE run's last claim against its own jobs and the case's references (A58).
+
+    The references are read here, on the evaluator side, and the evaluation
+    goes to `evaluator_store` only. A scripted run, or one whose jobs a
+    stand-in ran, is graded as synthetic.
+    """
+    run = store.run_record(run_id)
+    if run.config.get("task_kind") != "vte":
+        raise OnodaError(f"run {run_id} is not a VTE run")
+    if run.config.get("case_id") != case.manifest.case_id:
+        raise OnodaError(f"run {run_id} was recorded from case {run.config.get('case_id')!r}")
+    claims = [e for e in store.events(run_id) if e.type == "pi.claim"]
+    synthetic = "synthetic" in run.labels or bool(run.config.get("orca", {}).get("stand_in"))
+    return evaluate_vte_claims(
+        evaluator_store,
+        run_id=run_id,
+        case=case,
+        references=load_vte_references(case),
+        claim=run_vte_claim(store, run_id),
+        jobs=_vte_jobs(store, run_id),
+        claim_ref=claims[-1].payload_refs["claim"] if claims else None,
+        synthetic=synthetic,
+    )
+
+
+_REPORT_PLACES = Decimal("0.000001")
+
+
+def _mean(values: list[Decimal]) -> str:
+    if not values:
+        return "unresolved"
+    return format(
+        (sum(values, Decimal(0)) / len(values)).quantize(_REPORT_PLACES, ROUND_HALF_EVEN), "f"
+    )
+
+
+def _latest_vte_evaluation(evaluator_store: Store, run_id: str) -> Evaluation:
+    prefix = f"{run_id}.{VTE_EVALUATOR}-v"
+    ids = sorted(i for i in evaluator_store.list_record_ids("evaluation") if i.startswith(prefix))
+    if not ids:
+        raise OnodaError(f"run {run_id} has no {VTE_EVALUATOR} evaluation; run `pi evaluate-vte`")
+    ev = evaluator_store.get_record("evaluation", ids[-1])
+    assert isinstance(ev, Evaluation)
+    return ev
+
+
+def vte_report(
+    store: Store, evaluator_store: Store, run_ids: Iterable[str], *, arms: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """Coverage, MAE and false successes per arm over graded VTE runs; never a verdict (A63).
+
+    An arm is a run's variant. Per arm: identified reference rows over all
+    rows of its runs (`coverage`), MAE over every identified row of every run,
+    and the false-success claim count. When exactly two arms are compared (or
+    `arms` names two), `common_target_mae_ev` restricts both to targets
+    (case, reference row) each arm identified in at least one run, averaging
+    an arm's repeats per target first, so both arms are measured on the same
+    states. Values are decimal text; a mean over nothing is `unresolved`.
+    Runs graded as synthetic make the report synthetic: not a chemistry or
+    mechanism result.
+    """
+    per_arm: dict[str, dict[str, Any]] = {}
+    errors: dict[str, dict[tuple[str, str], list[Decimal]]] = {}
+    synthetic = False
+    for run_id in run_ids:
+        run = store.run_record(run_id)
+        if run.config.get("task_kind") != "vte":
+            raise OnodaError(f"run {run_id} is not a VTE run")
+        arm = run.config["variant"]
+        if arms and arm not in arms:
+            continue
+        ev = _latest_vte_evaluation(evaluator_store, run_id)
+        m = ev.metrics
+        synthetic |= m.get("synthetic") == "true"
+        a = per_arm.setdefault(
+            arm, {"runs": [], "coverage": 0, "coverage_total": 0, "false_success_claims": 0}
+        )
+        a["runs"].append(run_id)
+        a["coverage"] += int(m["coverage"])
+        a["coverage_total"] += int(m["coverage.total"])
+        a["false_success_claims"] += int(m["false_success_claims"])
+        by_target = errors.setdefault(arm, {})
+        for key, value in m.items():
+            if key.startswith("ref.") and key.endswith(".error_ev"):
+                target = (m["case.id"], key.removesuffix(".error_ev"))
+                by_target.setdefault(target, []).append(abs(Decimal(value)))
+    for arm, a in per_arm.items():
+        a["mae_ev"] = _mean([e for errs in errors[arm].values() for e in errs])
+        a["identified_targets"] = len(errors[arm])
+    report: dict[str, Any] = {
+        "arms": per_arm,
+        "synthetic": synthetic,
+        "note": (
+            "synthetic runs (scripted agent or stand-in ORCA): not a chemistry or mechanism result"
+            if synthetic
+            else "counts and errors only; no arm is declared better"
+        ),
+    }
+    compared = arms if len(arms) == 2 else tuple(sorted(per_arm)) if len(per_arm) == 2 else ()
+    if compared and all(arm in per_arm for arm in compared):
+        common = set(errors[compared[0]]) & set(errors[compared[1]])
+        report["common_targets"] = [f"{case}:{ref}" for case, ref in sorted(common)]
+        report["common_target_mae_ev"] = {
+            arm: _mean(
+                [sum(errors[arm][t], Decimal(0)) / len(errors[arm][t]) for t in sorted(common)]
+            )
+            for arm in compared
+        }
+    return report
 
 
 def _recorded_requests(store: Store, run_id: str) -> dict[str, list[str]]:
@@ -305,10 +717,55 @@ def _check_children(store: Store, run_id: str, spool_dir: Path, key: bytes) -> N
         _check_children(store, child, child_dir, child_key)
 
 
+def _replay_broker(store: Store, run_id: str, cfg: dict[str, Any], work_dir: Path) -> OrcaBroker:
+    """A replay-mode broker serving exactly the recorded outputs of a VTE run (A59)."""
+    digest = cfg.get("broker_journal")
+    if not isinstance(digest, str):
+        raise CapabilityError(f"run {run_id} recorded no broker journal")
+    recorded = _journal_entries(store.get_bytes(digest), digest)
+    outputs = {
+        e.output_sha256: store.get_bytes(e.output_sha256)
+        for e in recorded
+        if e.event == "reply" and e.output_sha256 is not None
+    }
+    return OrcaBroker(
+        work_dir / "broker" / JOURNAL_NAME,
+        replay=BrokerReplay.from_journal(recorded, outputs),
+        max_executions=cfg["max_executions"],
+    )
+
+
+def _journal_entries(data: bytes, what: str) -> list[BrokerJournalEntry]:
+    entries = [BrokerJournalEntry.model_validate_json(line) for line in data.splitlines()]
+    if [e.seq for e in entries] != list(range(1, len(entries) + 1)):
+        raise IntegrityError(f"broker journal {what} has a gap in seq")
+    return entries
+
+
+def _jobs_served(entries: Iterable[BrokerJournalEntry]) -> list[tuple[Any, ...]]:
+    """(job id, status, input, output) of every answered submission, in order."""
+    return [
+        (e.job_id, e.status, e.input_sha256, e.output_sha256)
+        for e in entries
+        if e.event == "reply" and e.job_id is not None
+    ]
+
+
 def replay_run_pi(
-    store: Store, run_id: str, case: LoadedCase, *, work_dir: Path, timeout_s: float = 300
+    store: Store,
+    run_id: str,
+    case: LoadedCase | LoadedVteCase,
+    *,
+    work_dir: Path,
+    timeout_s: float = 300,
 ) -> dict[str, Any]:
-    """Re-run a scripted Pi run under its recorded responses; raise on any drift."""
+    """Re-run a scripted Pi run under its recorded responses; raise on any drift.
+
+    A VTE run (`case` a `LoadedVteCase`) replays with the broker in replay
+    mode: it serves the recorded outputs only, so nothing executes, and the
+    replay must be served the same jobs (id, status, input, output) in the
+    same order.
+    """
     run = store.run_record(run_id)
     cfg = run.config
     if cfg.get("mode") != "pi-scripted":
@@ -320,6 +777,9 @@ def replay_run_pi(
         )
     if cfg.get("case_id") != case.manifest.case_id:
         raise OnodaError(f"run {run_id} was recorded from case {cfg.get('case_id')!r}")
+    vte = cfg.get("task_kind") == "vte"
+    if vte != isinstance(case, LoadedVteCase):
+        raise OnodaError(f"run {run_id} is {'a' if vte else 'not a'} VTE run")
     task = store.get_record("task", run.task)
     docs = {}
     for k, d in task.inputs.items():
@@ -342,24 +802,35 @@ def replay_run_pi(
     )
     recorded = _recorded_requests(store, run_id)
     work_dir = Path(work_dir)
-    stage_bundle(
-        case,
-        work_dir / "bundle",
-        instruction=cfg["instruction"],
-        docs=docs,
-        ladder=ladder,
-        synthetic_ladder="synthetic" in ladder_labels,
-    )
+    staging = {
+        "instruction": cfg["instruction"],
+        "docs": docs,
+        "ladder": ladder,
+        "synthetic_ladder": "synthetic" in ladder_labels,
+    }
+    broker = None
+    if isinstance(case, LoadedVteCase):
+        stage_vte_bundle(case, work_dir / "bundle", max_executions=cfg["max_executions"], **staging)
+        _refuse_references(work_dir / "bundle", case)
+        broker = _replay_broker(store, run_id, cfg, work_dir)
+    else:
+        stage_bundle(case, work_dir / "bundle", **staging)
     prepared = build_launch(
         variant_id=cfg["variant"],
         bundle_dir=work_dir / "bundle",
         work_dir=work_dir / "pi",
         script=script,
         max_requests=cfg["max_requests"],
-        max_acquisitions=cfg["max_acquisitions"],
+        max_acquisitions=cfg.get("max_acquisitions", 0),
         candidate=candidate,
+        task_kind="vte" if broker is not None else "case",
+        broker_socket=work_dir / "pi" / BROKER_SOCKET if broker is not None else None,
     )
-    result = launch(prepared, timeout_s=timeout_s)
+    result = (
+        _launch_with_broker(prepared, broker, timeout_s)
+        if broker is not None
+        else launch(prepared, timeout_s=timeout_s)
+    )
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
         raise ReplayMismatch(f"replay of {run_id} wrote no spool: {result.stderr[-2000:]}")
     lines = _read_spool(result.spool_dir, result.spool_key).lines
@@ -387,7 +858,7 @@ def replay_run_pi(
     recorded_claim = recorded_claims[-1].payload_refs["claim"] if recorded_claims else None
     if replayed_claim != recorded_claim:
         raise ReplayMismatch(f"replay of {run_id}: the claim differs from the recording")
-    return {
+    report = {
         "run_id": run_id,
         "requests": len(actual),
         "reducer_requests": len(recorded["reducer"]),
@@ -396,3 +867,12 @@ def replay_run_pi(
         "claim": recorded_claim,
         "status": "match",
     }
+    if broker is not None:
+        replayed_jobs = read_journal(broker.journal_path)
+        if any(e.executed_here for e in replayed_jobs):  # replay mode cannot; checked anyway
+            raise ReplayMismatch(f"replay of {run_id} executed a job")
+        recorded_jobs = _journal_entries(store.get_bytes(cfg["broker_journal"]), run_id)
+        if _jobs_served(replayed_jobs) != _jobs_served(recorded_jobs):
+            raise ReplayMismatch(f"replay of {run_id}: the broker served different jobs")
+        report.update(jobs=len(_jobs_served(replayed_jobs)), executions=0)
+    return report
