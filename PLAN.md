@@ -376,3 +376,16 @@ flowchart TD
   gate's `tests/test_pi_contract.py` does not exist and was dropped. VTE
   manifests are named `<id>.vte.yaml` (`VTE_MANIFEST_SUFFIX`) so `case list`
   and the optimizer splits, which glob `*.case.yaml`, never pick them up.
+- VTE-008 (escalation): `build_launch` (runtime.py) and `run_case` (run.py)
+  record `SANDBOX_KIND` ("bwrap") even under Seatbelt. VTE-009 owns both call
+  sites already; it records `sandbox.kind` instead. Nested `sandbox-exec`
+  (inner wrapper under the outer profile) may be refused by macOS; the darwin
+  test `test_darwin_outer_layer_runs_the_inner_wrapper_and_hides_the_host`
+  decides it on the Mac before the experiment. If refused, a host-side
+  launcher is a follow-up slice, not this PR. Kernel socket paths must stay
+  under macOS's 104-byte limit; VTE-009's run.sh uses a short work root.
+- VTE-003 (notes for VTE-009): the gateway's `max_executions` and the
+  bundle's must be the same value; ingest treats a broker-journal job with no
+  `task.execute` line as a mismatch. RLM children copy the parent policy
+  without subtracting executions; VTE runs do not enable RLM in this slice,
+  and the broker's own per-run cap still bounds them.
