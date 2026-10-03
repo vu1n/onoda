@@ -187,12 +187,18 @@ def _nevpt2_transitions(lines: list[str]) -> tuple[Transition, ...]:
     except StopIteration:
         return ()
     found: list[Transition] = []
+    in_table = False
     for ln in lines[start + 1 :]:
+        if not in_table:
+            in_table = ln.lstrip().startswith("STATE")
+            continue
+        # The table ends at its first blank line, so a later table (the NEVPT2
+        # correction, also row-shaped) is never read, even when this one is empty.
+        if not ln.strip():
+            break
         if m := _TRANSITION.match(ln):
             root, mult, irrep, au, ev = m.group(1, 2, 3, 4, 5)
             found.append(Transition(int(mult), irrep, int(root), au, ev))
-        elif found and not ln.strip():
-            break
     return tuple(found)
 
 

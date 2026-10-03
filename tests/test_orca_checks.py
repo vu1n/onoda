@@ -94,6 +94,25 @@ def test_nevpt2_reordering_the_casscf_roots_is_flagged():
     assert not any("root order" in ln for ln in no_nevpt2)
 
 
+def test_only_the_transition_table_is_read():
+    log = (FIXTURES / "acetone_g_trah.out").read_bytes()
+    roots = [(t.root, t.ev) for t in job_facts(log).nevpt2_transitions]
+    assert roots == [(1, "4.614"), (0, "6.914")]  # not the correction table that follows
+    empty = (
+        b" NEVPT2 TRANSITION ENERGIES\n\nSTATE ROOT MULT IRREP  DE/a.u.     DE/eV    DE/cm**-1\n\n"
+        b"STATE  ROOT MULT IRREP  DE/a.u.       DE/eV     DE/cm**-1\n"
+        b"   1:    1    1   B2    -0.174037     -4.736  -38196.8\n"
+    )
+    assert job_facts(empty).nevpt2_transitions == ()
+
+
+def test_root_order_comes_from_the_printed_energies_not_the_listing_order():
+    acetone = facts("acetone_g_trah")  # listed by energy: root 1, then root 0
+    listed_by_root = replace(acetone, nevpt2_transitions=acetone.nevpt2_transitions[::-1])
+    lines = job_checks("j0001", listed_by_root, [])
+    assert any(ln.startswith("WARNING (root order)") for ln in lines)
+
+
 def test_the_input_echo_is_never_read():
     text = (FIXTURES / "ketene_a_rhf.out").read_bytes()
     echo = b"|  9> # LOWEST ROOT (ROOT 0, MULT 1) =   -999.000000000 Eh\n"
