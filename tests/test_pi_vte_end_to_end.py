@@ -23,6 +23,7 @@ from conftest import requires_pi
 from test_pi_sandbox import requires_bwrap
 
 from onoda.adapters.pi import run as pi_run
+from onoda.adapters.pi import vte as pi_vte
 from onoda.adapters.pi.contract import Script
 from onoda.adapters.pi.runtime import detect_sandbox
 from onoda.cli import main
@@ -195,7 +196,7 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert set(task.inputs) == {"structure", "targets", "case", "ladder"}
     assert_no_references(store)
 
-    ev = pi_run.evaluate_vte_run(store, evaluator, "vte", case())
+    ev = pi_vte.evaluate_vte_run(store, evaluator, "vte", case())
     m = ev.metrics
     assert ev.assignments["claim.01"] == "supported"
     assert ev.assignments["claim.01.identity"] == "identified"
@@ -204,7 +205,7 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert m["synthetic"] == "true"
     assert not store.list_record_ids("evaluation")  # grading stays in the evaluator store
 
-    report = pi_run.vte_report(store, evaluator, ["vte"])
+    report = pi_vte.vte_report(store, evaluator, ["vte"])
     assert report["synthetic"] is True and "not a chemistry" in report["note"]
     assert report["arms"]["S1"]["coverage"] == 1 and report["arms"]["S1"]["mae_ev"] == "0.002000"
 
@@ -322,7 +323,7 @@ def test_sandboxed_run_reaches_the_broker_and_bash_does_not(short):
     assert (short / "sb" / "pi" / "workspace" / "probe.txt").read_text() == "SOCK=hidden\n"
     assert store.run_record("sb").config["sandbox"] == "bwrap"
     assert runs(binary) == 1  # Pi reached the broker from inside the outer layer
-    assert pi_run.evaluate_vte_run(store, evaluator, "sb", case()).metrics["coverage"] == "1"
+    assert pi_vte.evaluate_vte_run(store, evaluator, "sb", case()).metrics["coverage"] == "1"
 
 
 def test_cli_run_evaluate_report(short, capsys):
@@ -368,4 +369,4 @@ def test_evaluate_refuses_a_run_that_is_not_vte(recorded):
     _, store, evaluator, _, _ = recorded
     with pytest.raises(OnodaError, match="recorded from case"):
         other = load_vte_case(vte_case_manifests(pi_run.VTE_CASES_ROOT)["questdb-acetone"])
-        pi_run.evaluate_vte_run(store, evaluator, "vte", other)
+        pi_vte.evaluate_vte_run(store, evaluator, "vte", other)

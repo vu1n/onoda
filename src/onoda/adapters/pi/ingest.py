@@ -1205,7 +1205,7 @@ class _Writer:
             {"input": inp},
             {"log": output},
             status="succeeded" if line.status == "completed" else "failed",
-            # `run._vte_jobs` reads job_id, executed_here and cache_hit back for grading.
+            # `vte._vte_jobs` reads job_id, executed_here and cache_hit back for grading.
             metadata={
                 "executed_here": line.executed_here,
                 "cache_hit": line.cache_hit,

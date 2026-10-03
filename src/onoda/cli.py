@@ -456,7 +456,7 @@ def cmd_pi_run_vte(a) -> Any:
 
 
 def cmd_pi_evaluate_vte(a) -> Any:
-    from onoda.adapters.pi.run import evaluate_vte_run
+    from onoda.adapters.pi.vte import evaluate_vte_run
 
     store = _store(a.store)
     run = store.run_record(a.run_id)
@@ -483,7 +483,7 @@ def cmd_pi_evaluate_vte(a) -> Any:
 
 
 def cmd_vte_report(a) -> Any:
-    from onoda.adapters.pi.run import vte_report
+    from onoda.adapters.pi.vte import vte_report
 
     if a.arm and len(a.arm) != 2:
         raise OnodaError("--arm names exactly two arms, or none")

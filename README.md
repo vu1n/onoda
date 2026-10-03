@@ -256,9 +256,9 @@ credential, caps and ORCA execution are each set explicitly.
 | `adapters.pi.runtime` | `doctor`, launch builder (isolated agent dir, extension load order, live-setting gate), process runner |
 | `adapters.pi.ingest` | Spool → run record: decision/tool/acquisition receipts, fused-call decomposition, ObservationPack handles as store digests, compactions, checkpoints |
 | `adapters.pi.task` | Task bundle staging and claim grading against the deterministic parser, in the evaluator store |
-| `adapters.pi.run` | One run end to end (case or VTE task), replay under recorded responses, VTE grading and the per-arm report |
+| `adapters.pi.run` | One run end to end (case or VTE task) and replay under recorded responses |
 | `adapters.pi.vte_contract` | VTE task bundle and claim; re-exports the broker wire protocol |
-| `adapters.pi.vte` | VTE bundle staging and identity grading against the deterministic parser, in the evaluator store |
+| `adapters.pi.vte` | VTE bundle staging, identity grading of a run against the deterministic parser (in the evaluator store) and the per-arm report |
 | `science.orca_broker` | Host-side ORCA broker for `orca_submit`: wire protocol, cache, attempt cap, journal, replay mode |
 | `science.vte` | VTE case manifests and evaluator-only reference rows |
 | `pi/extensions/` | onoda's Pi extensions (TypeScript): task tools, scripted provider, recorder writing the fsynced spool |
