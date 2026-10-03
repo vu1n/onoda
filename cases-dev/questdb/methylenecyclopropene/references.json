@@ -1,0 +1,67 @@
+{
+  "schema": "onoda.vte-references/1",
+  "case_id": "questdb-methylenecyclopropene",
+  "method": "SC-NEVPT2/aug-cc-pVTZ",
+  "source": {
+    "repository": "https://github.com/pfloos/QUESTDB",
+    "commit": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+    "path": "data/cas/json/methylenecyclopropene_mrpt.json",
+    "license": "CC BY-SA 4.0"
+  },
+  "rows": [
+    {
+      "label": "1B2(\uf070,\uf070*)",
+      "spin": 1,
+      "irrep": "B2",
+      "character": "pi,pi*",
+      "energy_ev": "4.400",
+      "active_space": "(0,3,0,1)",
+      "state_average": "(1,0,1,0)"
+    },
+    {
+      "label": "1B1(\uf070,3s)",
+      "spin": 1,
+      "irrep": "B1",
+      "character": "pi,3s",
+      "energy_ev": "5.486",
+      "active_space": "(1,3,0,1)",
+      "state_average": "(1,1,0,0)"
+    },
+    {
+      "label": "1A2(\uf070,3py)",
+      "spin": 1,
+      "irrep": "A2",
+      "character": "pi,3py",
+      "energy_ev": "6.000",
+      "active_space": "(0,3,1,1)",
+      "state_average": "(1,0,0,1)"
+    },
+    {
+      "label": "1A1(\uf070,3px)",
+      "spin": 1,
+      "irrep": "A1",
+      "character": "pi,3px",
+      "energy_ev": "6.365",
+      "active_space": "(0,6,0,1)",
+      "state_average": "(5,0,0,0)"
+    },
+    {
+      "label": "3B2(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "B2",
+      "character": "pi,pi*",
+      "energy_ev": "3.675",
+      "active_space": "(0,3,0,1)",
+      "state_average": "(1,0,1,0)"
+    },
+    {
+      "label": "3A1(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "A1",
+      "character": "pi,pi*",
+      "energy_ev": "4.888",
+      "active_space": "(0,5,0,1)",
+      "state_average": "(4,0,0,0)"
+    }
+  ]
+}

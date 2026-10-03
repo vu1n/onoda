@@ -1,0 +1,76 @@
+{
+  "schema": "onoda.vte-references/1",
+  "case_id": "questdb-acetone",
+  "method": "SC-NEVPT2/aug-cc-pVTZ",
+  "source": {
+    "repository": "https://github.com/pfloos/QUESTDB",
+    "commit": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+    "path": "data/cas/json/acetone_mrpt.json",
+    "license": "CC BY-SA 4.0"
+  },
+  "rows": [
+    {
+      "label": "1A2(n,\uf070*)",
+      "spin": 1,
+      "irrep": "A2",
+      "character": "n,pi*",
+      "energy_ev": "4.497",
+      "active_space": "(2,3,1,0)",
+      "state_average": "(1,0,0,2)"
+    },
+    {
+      "label": "1B2(n,3s)",
+      "spin": 1,
+      "irrep": "B2",
+      "character": "n,3s",
+      "energy_ev": "6.697",
+      "active_space": "(4,2,1,0)",
+      "state_average": "(1,0,2,0)"
+    },
+    {
+      "label": "1A2(n,3px)",
+      "spin": 1,
+      "irrep": "A2",
+      "character": "n,3px",
+      "energy_ev": "7.706",
+      "active_space": "(2,3,1,0)",
+      "state_average": "(1,0,0,2)"
+    },
+    {
+      "label": "1A1(n,3py)",
+      "spin": 1,
+      "irrep": "A1",
+      "character": "n,3py",
+      "energy_ev": "7.752",
+      "active_space": "(2,2,2,0)",
+      "state_average": "(2,0,0,0)"
+    },
+    {
+      "label": "1B2(n,3pz)",
+      "spin": 1,
+      "irrep": "B2",
+      "character": "n,3pz",
+      "energy_ev": "7.800",
+      "active_space": "(4,2,1,0)",
+      "state_average": "(1,0,2,0)"
+    },
+    {
+      "label": "3A2(n,\uf070*)",
+      "spin": 3,
+      "irrep": "A2",
+      "character": "n,pi*",
+      "energy_ev": "4.217",
+      "active_space": "(2,2,1,0)",
+      "state_average": "(1,0,0,1)"
+    },
+    {
+      "label": "3A1(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "A1",
+      "character": "pi,pi*",
+      "energy_ev": "6.277",
+      "active_space": "(2,2,0,0)",
+      "state_average": "(2,0,0,0)"
+    }
+  ]
+}

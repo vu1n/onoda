@@ -1,0 +1,67 @@
+{
+  "schema": "onoda.vte-references/1",
+  "case_id": "questdb-formamide",
+  "method": "SC-NEVPT2/aug-cc-pVTZ",
+  "source": {
+    "repository": "https://github.com/pfloos/QUESTDB",
+    "commit": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+    "path": "data/cas/json/formamide_mrpt.json",
+    "license": "CC BY-SA 4.0"
+  },
+  "rows": [
+    {
+      "label": "1A\u2019\u2019(n,\uf070*)",
+      "spin": 1,
+      "irrep": "A''",
+      "character": "n,pi*",
+      "energy_ev": "5.732",
+      "active_space": "(5,3)",
+      "state_average": "(1,1)"
+    },
+    {
+      "label": "1A\u2019(n,3s)",
+      "spin": 1,
+      "irrep": "A'",
+      "character": "n,3s",
+      "energy_ev": "6.916",
+      "active_space": "(7,3)",
+      "state_average": "(4,0)"
+    },
+    {
+      "label": "1A\u2019(n,3p)",
+      "spin": 1,
+      "irrep": "A'",
+      "character": "n,3p",
+      "energy_ev": "7.571",
+      "active_space": "(7,3)",
+      "state_average": "(4,0)"
+    },
+    {
+      "label": "1A\u2019(\uf070,\uf070*)",
+      "spin": 1,
+      "irrep": "A'",
+      "character": "pi,pi*",
+      "energy_ev": "8.107",
+      "active_space": "(7,3)",
+      "state_average": "(4,0)"
+    },
+    {
+      "label": "3A\u2019\u2019(n,\uf070*)",
+      "spin": 3,
+      "irrep": "A''",
+      "character": "n,pi*",
+      "energy_ev": "5.439",
+      "active_space": "(5,3)",
+      "state_average": "(1,1)"
+    },
+    {
+      "label": "3A\u2019(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "A'",
+      "character": "pi,pi*",
+      "energy_ev": "5.978",
+      "active_space": "(4,3)",
+      "state_average": "(2,0)"
+    }
+  ]
+}

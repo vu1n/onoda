@@ -1,0 +1,112 @@
+{
+  "schema": "onoda.vte-references/1",
+  "case_id": "questdb-cyclopropenone",
+  "method": "SC-NEVPT2/aug-cc-pVTZ",
+  "source": {
+    "repository": "https://github.com/pfloos/QUESTDB",
+    "commit": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+    "path": "data/cas/json/cyclopropenone_mrpt.json",
+    "license": "CC BY-SA 4.0"
+  },
+  "rows": [
+    {
+      "label": "1B1(n,\uf070*)",
+      "spin": 1,
+      "irrep": "B1",
+      "character": "n,pi*",
+      "energy_ev": "4.081",
+      "active_space": "(2,3,1,1)",
+      "state_average": "(1,3,0,0)"
+    },
+    {
+      "label": "1A2(n,\uf070*)",
+      "spin": 1,
+      "irrep": "A2",
+      "character": "n,pi*",
+      "energy_ev": "5.859",
+      "active_space": "(0,4,2,1)",
+      "state_average": "(1,0,0,3)"
+    },
+    {
+      "label": "1B2(n,3s)",
+      "spin": 1,
+      "irrep": "B2",
+      "character": "n,3s",
+      "energy_ev": "6.472",
+      "active_space": "(2,3,1,1)",
+      "state_average": "(1,0,3,0)"
+    },
+    {
+      "label": "1B2(\uf070,\uf070*)",
+      "spin": 1,
+      "irrep": "B2",
+      "character": "pi,pi*",
+      "energy_ev": "6.821",
+      "active_space": "(2,3,1,1)",
+      "state_average": "(1,0,3,0)"
+    },
+    {
+      "label": "1B2(n,3pz)",
+      "spin": 1,
+      "irrep": "B2",
+      "character": "n,3pz",
+      "energy_ev": "7.054",
+      "active_space": "(2,3,1,1)",
+      "state_average": "(1,0,3,0)"
+    },
+    {
+      "label": "1A1(n,3py)",
+      "spin": 1,
+      "irrep": "A1",
+      "character": "n,3py",
+      "energy_ev": "7.294",
+      "active_space": "(0,4,2,1)",
+      "state_average": "(4,0,0,0)"
+    },
+    {
+      "label": "1A1(\uf070,\uf070*)",
+      "spin": 1,
+      "irrep": "A1",
+      "character": "pi,pi*",
+      "energy_ev": "8.807",
+      "active_space": "(0,4,2,1)",
+      "state_average": "(4,0,0,0)"
+    },
+    {
+      "label": "3B1(n,\uf070*)",
+      "spin": 3,
+      "irrep": "B1",
+      "character": "n,pi*",
+      "energy_ev": "3.554",
+      "active_space": "(2,3,1,1)",
+      "state_average": "(1,3,0,0)"
+    },
+    {
+      "label": "3B2(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "B2",
+      "character": "pi,pi*",
+      "energy_ev": "5.070",
+      "active_space": "(2,3,1,1)",
+      "state_average": "(1,0,3,0)"
+    },
+    {
+      "label": "3A2(n,\uf070*)",
+      "spin": 3,
+      "irrep": "A2",
+      "character": "n,pi*",
+      "energy_ev": "5.599",
+      "active_space": "(0,4,2,1)",
+      "state_average": "(1,0,0,3)"
+    },
+    {
+      "label": "3A1(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "A1",
+      "character": "pi,pi*",
+      "energy_ev": "7.168",
+      "active_space": "(0,4,2,1)",
+      "state_average": "(4,0,0,0)"
+    }
+  ]
+}

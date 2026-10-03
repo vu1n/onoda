@@ -1,0 +1,76 @@
+{
+  "schema": "onoda.vte-references/1",
+  "case_id": "questdb-ketene",
+  "method": "SC-NEVPT2/aug-cc-pVTZ",
+  "source": {
+    "repository": "https://github.com/pfloos/QUESTDB",
+    "commit": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+    "path": "data/cas/json/ketene_mrpt.json",
+    "license": "CC BY-SA 4.0"
+  },
+  "rows": [
+    {
+      "label": "1A2(\uf070,\uf070*)",
+      "spin": 1,
+      "irrep": "A2",
+      "character": "pi,pi*",
+      "energy_ev": "3.968",
+      "active_space": "(4,3,2,0)",
+      "state_average": "(1,0,0,1)"
+    },
+    {
+      "label": "1B1(\uf070,3s)",
+      "spin": 1,
+      "irrep": "B1",
+      "character": "pi,3s",
+      "energy_ev": "6.067",
+      "active_space": "(5,3,2,0)",
+      "state_average": "(1,1,0,0)"
+    },
+    {
+      "label": "1A2(p,3p)",
+      "spin": 1,
+      "irrep": "A2",
+      "character": "p,3p",
+      "energy_ev": "7.262",
+      "active_space": "(4,3,3,0)",
+      "state_average": "(1,0,0,2)"
+    },
+    {
+      "label": "3A2(\uf070,\uf070*)",
+      "spin": 3,
+      "irrep": "A2",
+      "character": "pi,pi*",
+      "energy_ev": "3.850",
+      "active_space": "(4,3,2,0)",
+      "state_average": "(1,0,0,1)"
+    },
+    {
+      "label": "3A1(p,\uf070*)",
+      "spin": 3,
+      "irrep": "A1",
+      "character": "p,pi*",
+      "energy_ev": "5.693",
+      "active_space": "(4,3,2,0)",
+      "state_average": "(2,0,0,0)"
+    },
+    {
+      "label": "3B1(\uf070,3s)",
+      "spin": 3,
+      "irrep": "B1",
+      "character": "pi,3s",
+      "energy_ev": "5.866",
+      "active_space": "(5,3,2,0)",
+      "state_average": "(1,1,0,0)"
+    },
+    {
+      "label": "3A2(\uf070,3p)",
+      "spin": 3,
+      "irrep": "A2",
+      "character": "pi,3p",
+      "energy_ev": "7.224",
+      "active_space": "(4,3,3,0)",
+      "state_average": "(1,0,0,2)"
+    }
+  ]
+}

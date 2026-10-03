@@ -1,0 +1,43 @@
+case_id: questdb-acetaldehyde
+title: 'acetaldehyde: vertical excitation energies, SA-CASSCF/SC-NEVPT2 (QUESTDB)'
+molecule: acetaldehyde
+point_group: Cs
+method: SA-CASSCF/SC-NEVPT2/aug-cc-pVTZ
+split: development
+structure:
+  path: acetaldehyde.xyz
+  sha256: sha256:66dbc0e0810d95f6c820ac680de32ff3a82eddf7319f4e0b33e5959b6debaae7
+targets:
+- spin: 1
+  irrep: A''
+  count: 1
+- spin: 3
+  irrep: A''
+  count: 1
+references:
+  path: references.json
+  sha256: sha256:45c0761745804e3de59c90a4c91cf43fa3bd84edd9b0a8025e5e7d1762f11c0f
+provenance:
+  origin: QUESTDB (QUEST database of highly-accurate excitation energies)
+  repository: https://github.com/pfloos/QUESTDB
+  commit: 460482bcc6231dab41fe32188dc43959a7c2bdaa
+  upstream_path: geometries/xyz/acetaldehyde.xyz; data/cas/json/acetaldehyde_mrpt.json
+  license: CC BY-SA 4.0
+  license_file: ../README.md
+  retrieved: '2026-10-03'
+  executed_here: false
+  notes: CC3(Full)/aug-cc-pVTZ ground-state geometry, copied unchanged. Reference
+    rows are QUESTDB's SC-NEVPT2 values; fluorescence rows are dropped.
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only case; molecule choice is A62. Targets are the reference rows' counts
+    per spin and irrep. No human has reviewed this case. The split is provisional
+    until the 4 / 4 optimizer and held-out assignment.
+labels:
+- authentic
+- acquired
+- dev-only
+- questdb
+- cc-by-sa-4.0

@@ -1,0 +1,52 @@
+case_id: questdb-thioacetone
+title: 'thioacetone: vertical excitation energies, SA-CASSCF/SC-NEVPT2 (QUESTDB)'
+molecule: thioacetone
+point_group: C2v
+method: SA-CASSCF/SC-NEVPT2/aug-cc-pVTZ
+split: development
+structure:
+  path: thioacetone.xyz
+  sha256: sha256:579fea46c96d0fa44d479a0902c423409dd35e3a777347e01b566528f09f8030
+targets:
+- spin: 1
+  irrep: A1
+  count: 2
+- spin: 1
+  irrep: A2
+  count: 1
+- spin: 1
+  irrep: B2
+  count: 2
+- spin: 3
+  irrep: A1
+  count: 1
+- spin: 3
+  irrep: A2
+  count: 1
+references:
+  path: references.json
+  sha256: sha256:00ef866ed1ace85565550f95ed76833ff97e34ea86fc68d0c9ecc153ac2aedd4
+provenance:
+  origin: QUESTDB (QUEST database of highly-accurate excitation energies)
+  repository: https://github.com/pfloos/QUESTDB
+  commit: 460482bcc6231dab41fe32188dc43959a7c2bdaa
+  upstream_path: geometries/xyz/thioacetone.xyz; data/cas/json/thioacetone_mrpt.json
+  license: CC BY-SA 4.0
+  license_file: ../README.md
+  retrieved: '2026-10-03'
+  executed_here: false
+  notes: CC3(Full)/aug-cc-pVTZ ground-state geometry, copied unchanged. Reference
+    rows are QUESTDB's SC-NEVPT2 values; fluorescence rows are dropped.
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only case; molecule choice is A62. Targets are the reference rows' counts
+    per spin and irrep. No human has reviewed this case. The split is provisional
+    until the 4 / 4 optimizer and held-out assignment.
+labels:
+- authentic
+- acquired
+- dev-only
+- questdb
+- cc-by-sa-4.0

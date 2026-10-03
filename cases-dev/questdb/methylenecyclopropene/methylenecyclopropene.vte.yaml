@@ -1,0 +1,55 @@
+case_id: questdb-methylenecyclopropene
+title: 'methylenecyclopropene: vertical excitation energies, SA-CASSCF/SC-NEVPT2 (QUESTDB)'
+molecule: methylenecyclopropene
+point_group: C2v
+method: SA-CASSCF/SC-NEVPT2/aug-cc-pVTZ
+split: development
+structure:
+  path: methylenecyclopropene.xyz
+  sha256: sha256:6cb59c4a45aed2360e459f41d99413a90232d8324d818117d59c1a8daca50357
+targets:
+- spin: 1
+  irrep: A1
+  count: 1
+- spin: 1
+  irrep: A2
+  count: 1
+- spin: 1
+  irrep: B1
+  count: 1
+- spin: 1
+  irrep: B2
+  count: 1
+- spin: 3
+  irrep: A1
+  count: 1
+- spin: 3
+  irrep: B2
+  count: 1
+references:
+  path: references.json
+  sha256: sha256:9ad7a98664d32795db6c890957b2674c4d0b8ea37df5bcf426d37c2f2acc8317
+provenance:
+  origin: QUESTDB (QUEST database of highly-accurate excitation energies)
+  repository: https://github.com/pfloos/QUESTDB
+  commit: 460482bcc6231dab41fe32188dc43959a7c2bdaa
+  upstream_path: geometries/xyz/methylenecyclopropene.xyz; data/cas/json/methylenecyclopropene_mrpt.json
+  license: CC BY-SA 4.0
+  license_file: ../README.md
+  retrieved: '2026-10-03'
+  executed_here: false
+  notes: CC3(Full)/aug-cc-pVTZ ground-state geometry, copied unchanged. Reference
+    rows are QUESTDB's SC-NEVPT2 values; fluorescence rows are dropped.
+review:
+  status: pending-human-review
+  reviewer: null
+  date: null
+  notes: Dev-only case; molecule choice is A62. Targets are the reference rows' counts
+    per spin and irrep. No human has reviewed this case. The split is provisional
+    until the 4 / 4 optimizer and held-out assignment.
+labels:
+- authentic
+- acquired
+- dev-only
+- questdb
+- cc-by-sa-4.0

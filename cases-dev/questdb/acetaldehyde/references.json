@@ -1,0 +1,31 @@
+{
+  "schema": "onoda.vte-references/1",
+  "case_id": "questdb-acetaldehyde",
+  "method": "SC-NEVPT2/aug-cc-pVTZ",
+  "source": {
+    "repository": "https://github.com/pfloos/QUESTDB",
+    "commit": "460482bcc6231dab41fe32188dc43959a7c2bdaa",
+    "path": "data/cas/json/acetaldehyde_mrpt.json",
+    "license": "CC BY-SA 4.0"
+  },
+  "rows": [
+    {
+      "label": "1A\u2019\u2019(n,\uf070*)",
+      "spin": 1,
+      "irrep": "A''",
+      "character": "n,pi*",
+      "energy_ev": "4.418",
+      "active_space": "(3,2)",
+      "state_average": "(1,1)"
+    },
+    {
+      "label": "3A\u2019\u2019(n,\uf070*)",
+      "spin": 3,
+      "irrep": "A''",
+      "character": "n,pi*",
+      "energy_ev": "4.028",
+      "active_space": "(3,2)",
+      "state_average": "(1,1)"
+    }
+  ]
+}
