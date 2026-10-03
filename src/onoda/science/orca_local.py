@@ -34,7 +34,7 @@ import stat
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -48,6 +48,17 @@ _ORCA_LABELS = ["orca-local"]
 # protocol (`orca_broker`) uses the same rule for the file names it passes on.
 FILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _JOB_FILES = frozenset({"job.inp", "job.out", "job.err"})
+
+
+class JobWrapper(Protocol):
+    """Confines one job: an argv prefix and the environment it starts with (A65).
+
+    `orca_sandbox.JobSandbox` implements it; the scheduler names no backend.
+    """
+
+    kind: str
+
+    def wrap(self, job_dir: Path) -> tuple[list[str], dict[str, str]]: ...
 
 
 class OrcaSettings(BaseModel):
@@ -171,13 +182,21 @@ class OrcaLocalScheduler:
         os.replace(tmp, self._state_path)
 
     def submit(
-        self, key: str, program: str, inputs: dict[str, bytes], config: dict[str, Any]
+        self,
+        key: str,
+        program: str,
+        inputs: dict[str, bytes],
+        config: dict[str, Any],
+        *,
+        wrapper: JobWrapper | None = None,
     ) -> str:
         """Accept a job once per idempotency key; a repeated key never re-runs.
 
         `inputs["input"]` becomes `job.inp`; every other entry is written next
         to it under its own name (a plain file name, never one of the job's
         driver files), so the input can read it, e.g. `%moinp "j0001.gbw"`.
+        `wrapper` confines the job (the broker always passes its job sandbox,
+        A65); without one the job runs as this user, for trusted input only.
         """
         if program != "orca":
             raise OnodaError(f"unknown program {program!r}")
@@ -225,13 +244,17 @@ class OrcaLocalScheduler:
             "reason": None,
             "duration_ms": None,
             "extra_inputs": sorted(extra),
+            "sandbox": wrapper.kind if wrapper is not None else None,
         }
         state["by_key"][key] = job_id
         self._save(state)
 
         out_path = job_dir / "job.out"
         err_path = job_dir / "job.err"
+        prefix: list[str] = []
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+        if wrapper is not None:
+            prefix, env = wrapper.wrap(job_dir)
 
         start = time.monotonic()
         outcome: dict[str, Any]
@@ -240,8 +263,9 @@ class OrcaLocalScheduler:
                 # Own process group, so a timeout also stops ORCA's child
                 # programs (orca_scf, mpirun, ...) instead of only the driver.
                 proc = subprocess.Popen(
-                    command,
+                    [*prefix, *command],
                     cwd=job_dir,
+                    stdin=subprocess.DEVNULL,
                     stdout=out_f,
                     stderr=err_f,
                     env=env,
@@ -350,6 +374,7 @@ class OrcaLocalScheduler:
             "stand_in": job["stand_in"],
             "labels": job_labels(job["stand_in"]),
             "reason": job["reason"],
+            "sandbox": job.get("sandbox"),
         }
 
     @property

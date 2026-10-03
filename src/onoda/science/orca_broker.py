@@ -34,6 +34,13 @@ Each replayed reply repeats the recorded `cache_hit` and `reason`, so the
 agent is shown exactly what it was shown (a recorded execution replays with
 neither flag set); `executed_here` is always false.
 
+Every live job runs in a job sandbox (`orca_sandbox`, A65) that sees only its
+job directory, ORCA_HOME and the MPI prefix; the broker refuses to start for
+real ORCA without one that works. Before anything runs, `input_problem`
+refuses (`input_rejected`) inputs that name paths or files that are not
+attachments, write elsewhere, start other programs, or exceed the broker's
+`BrokerLimits`; that check is a tripwire, the sandbox is the boundary.
+
 Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
 so a cached output is not a converged one; that is for the parser and grader.
 
@@ -59,7 +66,7 @@ from typing import Annotated, BinaryIO, Literal
 from pydantic import AfterValidator, Field, ValidationError, model_validator
 
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
-from onoda.errors import IntegrityError, OnodaError
+from onoda.errors import CapabilityError, IntegrityError, OnodaError
 from onoda.records import Frozen as _Frozen
 from onoda.science.orca_local import (
     FILE_NAME_RE,
@@ -67,6 +74,7 @@ from onoda.science.orca_local import (
     read_produced,
     sha256_file,
 )
+from onoda.science.orca_sandbox import JobSandbox
 
 BROKER_PROTOCOL = "onoda.orca-broker/1"
 JOURNAL_NAME = "broker.jsonl"
@@ -106,6 +114,7 @@ PlainFileName = Annotated[str, AfterValidator(_plain_file_name)]
 RefusalReason = Literal[
     "max_executions",
     "invalid_request",
+    "input_rejected",
     "unknown_attachment",
     "duplicate_attachment",
     "attachment_changed",
@@ -113,6 +122,77 @@ RefusalReason = Literal[
     "replay_miss",
     "broker_failed",
 ]
+
+
+@dataclass(frozen=True)
+class BrokerLimits:
+    """Per-job resource caps the broker enforces on agent inputs (A65)."""
+
+    max_nprocs: int = 4  # `%pal nprocs` / `! PALn`
+    max_maxcore_mb: int = 4000  # `%maxcore`, MB per process
+
+    def __post_init__(self) -> None:
+        if self.max_nprocs < 1 or self.max_maxcore_mb < 1:
+            raise OnodaError("broker limits must be positive")
+
+
+DEFAULT_LIMITS = BrokerLimits()
+
+# Input tripwire (A65). The job sandbox (`orca_sandbox`) is the boundary; these
+# checks make an attempt to leave it visible as an `input_rejected` refusal in
+# the journal before ORCA starts, and keep ordinary inputs inside the job dir
+# when the sandbox would only have stopped them part-way. Matching is
+# case-insensitive over the whole text, comments included: ORCA ends a `#`
+# comment at the next `#`, so text after a comment marker may still be input.
+#
+# - `%base` names the output basename, which may be a path anywhere;
+#   `%compound` runs a script whose `Sys_Cmd` runs shell commands;
+#   `ExtOpt`/`ProgExt` run an external program as the optimizer or method;
+#   `$new_job` chains jobs that would bypass the per-job checks.
+_FORBIDDEN = re.compile(r"%base\b|%compound\b|sys_cmd|progext|extopt|\$new_job", re.I)
+# Any quoted string that looks like a path, whatever directive takes it.
+_QUOTED = re.compile(r'"([^"\n]*)"')
+_PATHLIKE = re.compile(r"[/\\]|\.\.")
+# Directives that read a file: the argument must name a file in the job dir,
+# i.e. an attachment (the job dir holds only the input and its attachments).
+_FILE_ARGS = re.compile(
+    r'%moinp\b[ \t]*("[^"\n]*"|\S*)'
+    r'|^[ \t]*\*[ \t]*(?:xyzfile|gzmtfile|pdbfile)\b[ \t]+\S+[ \t]+\S+[ \t]*("[^"\n]*"|\S*)'
+    r'|\binhessname\b[ \t]*("[^"\n]*"|\S*)',
+    re.I | re.M,
+)
+_NPROCS = re.compile(r"\bnprocs\b[ \t]*(\S*)", re.I)
+_SIMPLE_LINE = re.compile(r"^[ \t]*!.*$", re.M)
+_PAL_KEYWORD = re.compile(r"\bpal(\S*)", re.I)
+_MAXCORE = re.compile(r"%maxcore\b[ \t]*(\S*)", re.I)
+
+
+def input_problem(text: str, attached: Iterable[str], limits: BrokerLimits) -> str | None:
+    """Why the broker refuses this ORCA input (A65), or None when it passes.
+
+    `attached` are the names placed next to the input (`j0001.gbw`, ...).
+    """
+    if m := _FORBIDDEN.search(text):
+        return f"{m.group(0)!r} is not allowed"
+    for m in _QUOTED.finditer(text):
+        if _PATHLIKE.search(m.group(1)):
+            return f"quoted path {m.group(0)!r}"
+    names = set(attached)
+    for m in _FILE_ARGS.finditer(text):
+        arg = next(g for g in m.groups() if g is not None).strip('"')
+        if not FILE_NAME_RE.match(arg) or arg not in names:
+            return f"{m.group(0).strip()!r} does not name an attached file"
+    for m in _NPROCS.finditer(text):
+        if not m.group(1).isdigit() or int(m.group(1)) > limits.max_nprocs:
+            return f"{m.group(0).strip()!r}: at most {limits.max_nprocs} processes"
+    for line in _SIMPLE_LINE.finditer(text):
+        for m in _PAL_KEYWORD.finditer(line.group(0)):
+            if not m.group(1).isdigit() or int(m.group(1)) > limits.max_nprocs:
+                return f"{m.group(0)!r}: at most {limits.max_nprocs} processes"
+    for m in _MAXCORE.finditer(text):
+        if not m.group(1).isdigit() or int(m.group(1)) > limits.max_maxcore_mb:
+            return f"{m.group(0).strip()!r}: at most {limits.max_maxcore_mb} MB"
+    return None
 
 
 def _check_outcome(
@@ -212,6 +292,7 @@ class BrokerJournalEntry(_Frozen):
     stand_in: bool | None = None
     scheduler_job_id: str | None = None
     duration_ms: int | None = None
+    sandbox: str | None = None  # the job sandbox an executed job ran in (A65)
 
     @model_validator(mode="after")
     def _consistent(self) -> BrokerJournalEntry:
@@ -441,6 +522,25 @@ class _Refused(Exception):
         self.reason = reason
 
 
+def _check_confinement(
+    scheduler: OrcaLocalScheduler,
+    job_sandbox: JobSandbox | None,
+    limits: BrokerLimits | None,
+) -> None:
+    """Refuse a live broker that would run agent input unconfined (A65): fail closed.
+
+    Real ORCA needs a working job sandbox; only a labelled stand-in may run
+    without one (a host without bwrap/Seatbelt).
+    """
+    if limits is None:
+        raise OnodaError("a live broker checks every input against its limits")
+    if job_sandbox is None:
+        if not scheduler.settings.stand_in:
+            raise CapabilityError("the broker runs ORCA only inside a job sandbox (A65)")
+        return
+    job_sandbox.check(scheduler.root)
+
+
 class OrcaBroker:
     """Answers `BrokerSubmit`s for one run; see the module docstring.
 
@@ -458,10 +558,12 @@ class OrcaBroker:
         cache_dir: str | os.PathLike[str] | None = None,
         replay: BrokerReplay | None = None,
         max_executions: int = DEFAULT_MAX_EXECUTIONS,
+        job_sandbox: JobSandbox | None = None,
+        limits: BrokerLimits | None = DEFAULT_LIMITS,
     ):
         if (scheduler is None) == (replay is None):
             raise OnodaError("a broker runs either a scheduler or a replay, exactly one")
-        if replay is not None and cache_dir is not None:
+        if replay is not None and (cache_dir is not None or job_sandbox is not None):
             raise OnodaError("a replaying broker serves recorded outputs only, no cache")
         if not 0 < max_executions <= MAX_JOBS:
             raise OnodaError(f"max_executions must be in 1..{MAX_JOBS}")
@@ -470,7 +572,11 @@ class OrcaBroker:
         self._replay = replay
         self._cache = _Cache(Path(cache_dir)) if cache_dir is not None else None
         self.max_executions = max_executions
+        # None only when replaying a run recorded before the input checks (A65).
+        self.limits = limits
+        self.job_sandbox = job_sandbox
         if scheduler is not None:
+            _check_confinement(scheduler, job_sandbox, limits)
             self.binary_sha256 = sha256_file(scheduler.settings.binary)
             self.stand_in = scheduler.settings.stand_in
         else:
@@ -549,6 +655,8 @@ class OrcaBroker:
             if self._next_job >= self.max_executions:
                 raise _Refused("max_executions")
             attached = self._resolve(request.attach)
+            if self.limits is not None and input_problem(request.input, attached, self.limits):
+                raise _Refused("input_rejected")
             key = cache_key(
                 input_sha,
                 [(n, sha) for n, (sha, _) in attached.items()],
@@ -597,6 +705,7 @@ class OrcaBroker:
         scheduler_job_id: str | None = None,
         duration_ms: int | None = None,
         reason: str | None = None,
+        sandbox: str | None = None,
     ) -> BrokerReply:
         self._jobs[job_id] = _Job(files=files)
         output_sha = sha256_digest(log)
@@ -617,6 +726,7 @@ class OrcaBroker:
             stand_in=stand_in,
             scheduler_job_id=scheduler_job_id,
             duration_ms=duration_ms,
+            sandbox=sandbox,
         )
         return BrokerReply(
             status=status,
@@ -696,7 +806,9 @@ class OrcaBroker:
         sched = self._scheduler
         before = sched.executions
         # An exception up to here escapes and closes the broker: whether ORCA ran is unknown.
-        sid = sched.submit(f"orca-broker:{self._run}:{job_id}", "orca", inputs, {})
+        sid = sched.submit(
+            f"orca-broker:{self._run}:{job_id}", "orca", inputs, {}, wrapper=self.job_sandbox
+        )
         executed = sched.executions > before
         try:
             status = sched.status(sid)
@@ -729,6 +841,7 @@ class OrcaBroker:
                 stand_in=sched.settings.stand_in,
                 scheduler_job_id=sid,
                 reason="broker_error",
+                sandbox=self.job_sandbox.kind if self.job_sandbox is not None else None,
             )
         return self._reply(
             request,
@@ -744,6 +857,7 @@ class OrcaBroker:
             scheduler_job_id=sid,
             duration_ms=meta["duration_ms"],
             reason=meta["reason"],
+            sandbox=meta["sandbox"],
         )
 
     @property

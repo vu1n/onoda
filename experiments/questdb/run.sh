@@ -14,11 +14,15 @@
 #   CREDENTIAL_ENV=OPENROUTER_API_KEY MAX_REQUESTS=60 MAX_COST_USD=2.00 \
 #     experiments/questdb/run.sh
 #
-# Optional: REPEATS (2), CASES (all eight), ORCA_HOME, MPI_HOME, OUT (where the
-# stores and cache go), WORK (the Pi work root; keep it short: the broker
-# socket path must stay under 104 bytes on macOS), DOCS_DIR (*.md docs given to
-# both arms; the ORCA manual is not redistributable, so none by default),
-# MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (7200 per run).
+# Optional: REPEATS (2), CASES (all eight), ORCA_HOME, MPI_HOME, WORK (the short
+# work root, /tmp/qv: the broker socket and OpenMPI's sockets in each job dir
+# must stay under 104 bytes on macOS), OUT (stores, cache and reports;
+# $WORK/out), ORCA_WORK (ORCA job dirs; $WORK/jobs), DOCS_DIR (*.md docs given
+# to both arms; the ORCA manual is not redistributable, so none by default),
+# MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (7200 per
+# run). Every ORCA job runs in the job sandbox (A65), which sees ORCA_HOME,
+# MPI_HOME and its own job dir only, so none of these may sit inside ORCA_HOME
+# or MPI_HOME, and nothing here is written inside the repository.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -31,13 +35,14 @@ fi
 
 ORCA_HOME="${ORCA_HOME:-$HOME/code/onoda/orca-6.1.1}"
 MPI_HOME="${MPI_HOME:-$HOME/code/onoda/orca-openmpi}"
-OUT="${OUT:-$ROOT/questdb-out}"
 WORK="${WORK:-/tmp/qv}"
+OUT="${OUT:-$WORK/out}"
+ORCA_WORK="${ORCA_WORK:-$WORK/jobs}"
 REPEATS="${REPEATS:-2}"
 CASES="${CASES:-questdb-acetaldehyde questdb-formamide questdb-ketene questdb-diazomethane questdb-acetone questdb-thioacetone questdb-methylenecyclopropene questdb-cyclopropenone}"
 LADDER="$ROOT/experiments/questdb/ladder-from-paper.md"
 [ -x "$ORCA_HOME/orca" ] || { echo "run.sh: no ORCA at $ORCA_HOME/orca" >&2; exit 2; }
-export PATH="$MPI_HOME/bin:$PATH"
+[ -x "$MPI_HOME/bin/mpirun" ] || { echo "run.sh: no mpirun at $MPI_HOME/bin" >&2; exit 2; }
 
 DOCS=()
 if [ -n "${DOCS_DIR:-}" ]; then
@@ -45,7 +50,7 @@ if [ -n "${DOCS_DIR:-}" ]; then
 fi
 
 onoda() { (cd "$ROOT" && uv run onoda "$@"); }
-mkdir -p "$OUT" "$WORK"
+mkdir -p "$OUT" "$WORK" "$ORCA_WORK"
 RUNS=()
 for case_id in $CASES; do
   for arm in S0 S1; do
@@ -59,7 +64,8 @@ for case_id in $CASES; do
         --live --provider "$PROVIDER" --model "$MODEL" --credential-env "$CREDENTIAL_ENV" \
         --max-requests "$MAX_REQUESTS" --max-cost-usd "$MAX_COST_USD" \
         --enable-live-execution --orca-binary "$ORCA_HOME/orca" \
-        --orca-work-root "$OUT/orca-jobs" --orca-cache "$OUT/orca-cache" \
+        --orca-work-root "$ORCA_WORK" --orca-cache "$OUT/orca-cache" \
+        --orca-mpi-home "$MPI_HOME" \
         --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
         --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-7200}" \
         ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} > "$OUT/$run_id.run.json"

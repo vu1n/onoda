@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import re
 import socket
 import stat
 import sys
@@ -25,20 +26,24 @@ from onoda.errors import OnodaError
 from onoda.science import orca_broker
 from onoda.science.orca_broker import (
     JOURNAL_NAME,
+    BrokerLimits,
     BrokerReplay,
     OrcaBroker,
     cache_key,
+    input_problem,
     placed_name,
     read_journal,
 )
 from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
+from onoda.science.orca_sandbox import JobSandbox, host_job_sandbox
 
 STAND_IN_MARKER = "STAND-IN EXECUTABLE - NOT ORCA"
 
+# Counts its runs with a marker in its job dir: under the job sandbox (A65) the
+# job dir is the only place it can write.
 STAND_IN = f"""#!/usr/bin/env {sys.executable}
-import pathlib, re, sys
-counter = pathlib.Path(__file__).with_suffix(".runs")
-counter.write_text(str(int(counter.read_text()) + 1 if counter.exists() else 1))
+import os, re, sys
+open("ran.stand-in", "w").write(os.environ.get("HOME", ""))
 text = open(sys.argv[1]).read()
 print("{STAND_IN_MARKER}")
 print("input:", text)
@@ -49,19 +54,26 @@ open("job.gbw", "w").write("orbitals for " + text)
 sys.exit(1 if "FAIL" in text else 0)
 """
 
-INPUT = "! CASSCF aug-cc-pVTZ\n* xyzfile 0 1 structure.xyz\n"
+INPUT = "! CASSCF aug-cc-pVTZ\n* xyz 0 1\nH 0 0 0\nH 0 0 0.74\n*\n"
 
 
-def stand_in(tmp_path: Path) -> Path:
-    path = tmp_path / "orca_stand_in.py"
-    path.write_text(STAND_IN)
+def stand_in(tmp_path: Path, body: str = STAND_IN) -> Path:
+    """The stand-in in its own directory, which the job sandbox exposes as ORCA_HOME."""
+    home = tmp_path / "orca-home"
+    home.mkdir(exist_ok=True)
+    path = home / "orca_stand_in.py"
+    path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     return path
 
 
 def runs(binary: Path) -> int:
-    counter = binary.with_suffix(".runs")
-    return int(counter.read_text()) if counter.exists() else 0
+    return sum(1 for _ in binary.parent.parent.rglob("ran.stand-in"))
+
+
+def sandbox_for(binary: Path) -> JobSandbox | None:
+    """This host's job sandbox for a stand-in (its Python exposed), or None without one."""
+    return host_job_sandbox(binary, scratch=binary.parent.parent / "check", stand_in=True)
 
 
 def scheduler(tmp_path: Path, binary: Path, work: str = "work") -> OrcaLocalScheduler:
@@ -77,6 +89,9 @@ def scheduler(tmp_path: Path, binary: Path, work: str = "work") -> OrcaLocalSche
 
 
 def broker(tmp_path: Path, name: str = "run1", **kw) -> OrcaBroker:
+    """A broker; a live one runs its jobs in this host's job sandbox when there is one."""
+    if "scheduler" in kw and "job_sandbox" not in kw:
+        kw["job_sandbox"] = sandbox_for(Path(kw["scheduler"].settings.binary))
     return OrcaBroker(tmp_path / name / JOURNAL_NAME, **kw)
 
 
@@ -112,7 +127,8 @@ def test_scheduler_places_extra_files_and_lists_products(tmp_path):
     assert (sched.root / job / "j0001.gbw").read_bytes() == b"old orbitals"
     assert b"moinp: old orbitals" in sched.collect(job)["log"]
     produced = sched.produced_files(job)
-    assert set(produced) == {"job.gbw"}  # not job.inp/out/err, not the extra input
+    # Not job.inp/out/err, not the extra input; the stand-in's run marker is a product.
+    assert set(produced) == {"job.gbw", "ran.stand-in"}
     assert produced["job.gbw"].read_text().startswith("orbitals for")
 
 
@@ -562,3 +578,110 @@ def test_a_cached_file_that_became_a_link_is_refused(tmp_path, hard):
     _relink(entry / "files" / "job.gbw", hard=hard)
     r = b.submit(submit(call="c2"))
     assert r.status == "refused" and r.reason == "cache_corrupt"
+
+
+# --- input tripwire (A65) ------------------------------------------------------------
+
+FIXTURES = Path(__file__).parent / "fixtures" / "orca611-nevpt2"
+MOINP = re.compile(r'%moinp "([^"]+)"')
+
+REJECTED = [
+    '%base "/tmp/elsewhere/job"\n',
+    '%base "job2"\n',
+    "%BASE job2\n",
+    '%compound "steps.cmp"\n',
+    '%compound\n  Sys_Cmd("cat /etc/passwd");\nend\n',
+    "! ExtOpt\n",
+    '%method\n  ProgExt "/bin/sh"\nend\n',
+    "$new_job\n! HF\n",
+    '%moinp "../../secret.gbw"\n',
+    '%moinp "/etc/passwd"\n',
+    '%moinp "C:\\\\orbitals.gbw"\n',
+    '%moinp "j0002.gbw"\n',  # not attached
+    "%moinp j0002.gbw\n",
+    "%moinp\n",
+    "* xyzfile 0 1 /etc/hosts\n",
+    "* xyzfile 0 1 structure.xyz\n",  # not in the job dir
+    "*gzmtfile 0 1 molecule.gzmt\n",
+    '%geom\n  inhess read\n  inhessname "/home/user/old.hess"\nend\n',
+    '%geom\n  inhess read\n  inhessname "j0001.hess"\nend\n',
+    '%tddft\n  dosoc true\n  sfile "../out.txt"\nend\n',
+    "%pal nprocs 64 end\n",
+    "%pal\n  nprocs four\nend\n",
+    "! HF PAL16\n",
+    "! PAL8 HF\n",
+    "%maxcore 100000\n",
+    "%maxcore 4e3\n",
+    '# comment # %base "x"\n',
+]
+
+
+@pytest.mark.parametrize("bad", REJECTED)
+def test_inputs_that_leave_the_job_dir_are_refused_and_journaled(tmp_path, bad):
+    binary = stand_in(tmp_path)
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary))
+    r = b.submit(submit(bad + INPUT))
+    assert (r.status, r.reason, r.job_id) == ("refused", "input_rejected", None)
+    assert not r.executed_here and not r.cache_hit
+    request, answer = read_journal(b.journal_path)
+    assert request.input_sha256 == sha256_digest((bad + INPUT).encode())
+    assert (answer.status, answer.reason, answer.tool_call_id) == (
+        "refused",
+        "input_rejected",
+        "c1",
+    )
+    assert runs(binary) == 0 and b.jobs == 0
+
+
+def fixture_inputs() -> dict[str, str]:
+    return {p.stem: p.read_text() for p in sorted(FIXTURES.glob("*.inp"))}
+
+
+@pytest.mark.parametrize("job", sorted(fixture_inputs()))
+def test_the_real_casscf_nevpt2_inputs_pass(job):
+    text = fixture_inputs()[job]
+    attached = set(MOINP.findall(text))
+    assert input_problem(text, attached, BrokerLimits()) is None
+    if attached:  # the same input without its attachment is refused
+        assert input_problem(text, set(), BrokerLimits()) is not None
+
+
+def test_the_fixture_inputs_are_the_inputs_orca_echoed():
+    """The `.inp` files are what ORCA ran: each matches its `.out` file's input echo."""
+    for job, text in fixture_inputs().items():
+        out = (FIXTURES / f"{job}.out").read_text()
+        echoed = [m.group(1) for m in re.finditer(r"^\|\s*\d+> ?(.*)$", out, re.M)]
+        assert echoed[: len(text.splitlines())] == text.splitlines(), job
+
+
+def test_a_real_input_chain_runs_through_the_broker(tmp_path):
+    binary = stand_in(tmp_path)
+    b = broker(tmp_path, scheduler=scheduler(tmp_path, binary))
+    inputs = fixture_inputs()
+    first = b.submit(submit(inputs["ketene_a_rhf"]))
+    assert first.status == "completed" and first.executed_here
+    for n, job in enumerate(["ketene_b_valence_dz", "ketene_f_target", "acetone_g_trah"], 2):
+        text = MOINP.sub('%moinp "j0001.gbw"', inputs[job])
+        r = b.submit(submit(text, f"c{n}", (BrokerAttach(job_id="j0001", name="job.gbw"),)))
+        assert r.status == "completed" and r.executed_here, (job, r.reason)
+    assert runs(binary) == 4
+
+
+def test_limits_are_broker_settings(tmp_path):
+    binary = stand_in(tmp_path)
+    b = broker(
+        tmp_path,
+        scheduler=scheduler(tmp_path, binary),
+        limits=BrokerLimits(max_nprocs=2, max_maxcore_mb=1000),
+    )
+    assert b.submit(submit("%pal nprocs 4 end\n" + INPUT)).reason == "input_rejected"
+    assert b.submit(submit("%maxcore 2000\n" + INPUT)).reason == "input_rejected"
+    ok = b.submit(submit("%pal nprocs 2 end\n%maxcore 1000\n" + INPUT))
+    assert ok.status == "completed" and runs(binary) == 1
+    with pytest.raises(OnodaError, match="positive"):
+        BrokerLimits(max_nprocs=0)
+
+
+def test_a_live_broker_always_checks_inputs(tmp_path):
+    with pytest.raises(OnodaError, match="limits"):
+        broker(tmp_path, scheduler=scheduler(tmp_path, stand_in(tmp_path)), limits=None)

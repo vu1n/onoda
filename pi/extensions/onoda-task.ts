@@ -425,6 +425,9 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			'placed next to the input as <job_id><suffix> (j0001 + job.gbw -> j0001.gbw), so read it with %moinp "j0001.gbw". ' +
 			"An input identical to an earlier one (with the same attachments) returns that job's output from the cache " +
 			"under a new job id. " +
+			"The job directory holds only the input and its attachments: give the geometry inline (* xyz ... *), name " +
+			"files only by their attached names, and keep %pal nprocs and %maxcore within the host's caps; an input that " +
+			"names a path, sets %base, or starts other programs (%compound, ExtOpt, ProgExt) is refused (input_rejected). " +
 			"Every call counts against the run's job limit. Cite the job id when you report a value from its output.",
 		promptSnippet: "Run an ORCA input on the host and read its output",
 		parameters: SubmitParams,

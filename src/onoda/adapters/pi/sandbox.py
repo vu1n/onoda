@@ -41,19 +41,31 @@ import json
 import shlex
 import shutil
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
 from onoda.errors import CapabilityError
+from onoda.sandbox_util import (
+    DARWIN_DEV_RW,
+    DARWIN_SYSTEM,
+    LINUX_SYSTEM_DIRS,
+    SYSTEM_PATH,
+    bwrap_ro,
+    existing,
+    resolved,
+    sb_ancestors,
+    sb_rule,
+    sb_str,
+    sb_sysctl_rules,
+)
 
 # The bwrap backend's kind, as runs record it; each backend also carries `kind`.
 SANDBOX_KIND = "bwrap"
 
-# Read-only system paths both layers need; each is mounted only if it exists.
-# /etc is mounted file by file: the whole directory is not needed and may hold secrets.
-_SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
+# Read-only system paths both layers need (`LINUX_SYSTEM_DIRS`, each mounted only if
+# it exists). /etc is mounted file by file: the whole directory is not needed
+# and may hold secrets.
 _ETC = (
     "/etc/ssl",
     "/etc/ca-certificates",
@@ -66,21 +78,6 @@ _ETC = (
     "/etc/localtime",
     "/etc/alternatives",
 )
-_INNER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-
-def _covering(paths: Iterable[Path]) -> list[Path]:
-    """Paths deduplicated, dropping any already covered by another."""
-    out: list[Path] = []
-    for p in sorted({Path(x) for x in paths}, key=lambda q: (len(q.parts), str(q))):
-        if not any(p == q or q in p.parents for q in out):
-            out.append(p)
-    return out
-
-
-def _existing(paths: list[Path]) -> list[Path]:
-    """Existing paths, deduplicated, dropping any already covered by another."""
-    return _covering(Path(x) for x in paths if Path(x).exists())
 
 
 def _host_paths(runtime_dir: Path, kernel_dir: Path, extra_ro: tuple[Path, ...]) -> dict[str, Any]:
@@ -96,10 +93,6 @@ def _host_paths(runtime_dir: Path, kernel_dir: Path, extra_ro: tuple[Path, ...])
         "kernel_dir": Path(kernel_dir).resolve(),
         "extra_ro": tuple(Path(p).resolve() for p in extra_ro),
     }
-
-
-def _ro(paths: list[Path]) -> list[str]:
-    return [a for p in paths for a in ("--ro-bind", str(p), str(p))]
 
 
 @dataclass(frozen=True)
@@ -128,14 +121,14 @@ class Sandbox:
         return cls(bwrap=bwrap, **_host_paths(runtime_dir, kernel_dir, extra_ro))
 
     def _system(self) -> list[Path]:
-        return [Path(p) for p in (*_SYSTEM_DIRS, *_ETC)]
+        return [Path(p) for p in (*LINUX_SYSTEM_DIRS, *_ETC)]
 
     def _common(self) -> list[str]:
         return ["--die-with-parent", "--dev", "/dev", "--tmpfs", "/tmp"]
 
     def outer_argv(self, *, pi_work_dir: Path, bundle_dir: Path) -> list[str]:
         """The `bwrap` prefix for the Pi process; the Pi argv follows it."""
-        ro = _existing(
+        ro = existing(
             [
                 *self._system(),
                 *self.runtime_dirs,
@@ -154,7 +147,7 @@ class Sandbox:
             *self._common(),
             "--proc",
             "/proc",
-            *_ro(ro),
+            *bwrap_ro(ro),
             "--bind",
             str(pi_work_dir),
             str(pi_work_dir),
@@ -175,14 +168,14 @@ class Sandbox:
         ]
 
     def _inner(self, *, workspace: Path, bundle_dir: Path, extra: list[str]) -> list[str]:
-        ro = _existing([*self._system(), *self.python_dirs, self.kernel_dir])
+        ro = existing([*self._system(), *self.python_dirs, self.kernel_dir])
         return [
             self.bwrap,
             "--unshare-all",
             "--clearenv",
             "--setenv",
             "PATH",
-            _INNER_PATH,
+            SYSTEM_PATH,
             "--setenv",
             "HOME",
             "/tmp",
@@ -194,7 +187,7 @@ class Sandbox:
             # one would show Pi's process (and its environment) to the agent.
             "--tmpfs",
             "/proc",
-            *_ro(ro),
+            *bwrap_ro(ro),
             "--bind",
             str(workspace),
             str(workspace),
@@ -248,10 +241,7 @@ def write_settings(agent_dir: Path, settings: dict[str, str]) -> None:
 
 SEATBELT_KIND = "seatbelt"
 
-# Read-only system paths both Seatbelt layers need (symlinks resolved when the
-# profile is written: /etc, /tmp and /var are links into /private on macOS).
-# /System also holds the dyld shared cache (under /System/Volumes/Preboot).
-_DARWIN_SYSTEM = ("/usr", "/bin", "/sbin", "/System", "/private/var/select")
+# Read-only paths both Seatbelt layers need besides `DARWIN_SYSTEM`.
 _DARWIN_ETC = (
     "/etc/ssl",
     "/etc/hosts",
@@ -263,7 +253,6 @@ _DARWIN_ETC = (
     "/etc/localtime",
     "/private/var/db/timezone",
 )
-_DARWIN_DEV_RW = ("/dev/null", "/dev/zero", "/dev/tty", "/dev/dtracehelper")
 # Only the outer layer looks anything up over Mach: user and DNS lookups,
 # notifications and logging that node needs to start and reach its provider.
 # The inner layer gets none, so no system service can carry its traffic out.
@@ -276,55 +265,7 @@ _OUTER_MACH = (
     "com.apple.dnssd.service",
     "com.apple.SystemConfiguration.configd",
 )
-# The sysctls a sandboxed process may read: what python, bash and node ask at
-# start-up (CPU, memory, OS release, host name, boot time, load). A blanket
-# `sysctl-read` would include KERN_PROCARGS2 (`kern.procargs2`, what `ps -E`
-# reads), which shows any same-uid process's argv and environment, credentials
-# included; nothing under `kern.proc` is listed.
-_DARWIN_SYSCTL_PREFIXES = ("hw.", "machdep.cpu.", "sysctl.proc_")
-_DARWIN_SYSCTL_NAMES = (
-    "kern.argmax",
-    "kern.boottime",
-    "kern.hostname",
-    "kern.maxfiles",
-    "kern.maxfilesperproc",
-    "kern.maxproc",
-    "kern.ngroups",
-    "kern.osproductversion",
-    "kern.osproductversioncompat",
-    "kern.osrelease",
-    "kern.ostype",
-    "kern.osvariant_status",
-    "kern.osversion",
-    "kern.secure_kernel",
-    "kern.usrstack64",
-    "kern.version",
-    "vm.loadavg",
-    "vm.swapusage",
-)
 _DARWIN_LANG = "en_US.UTF-8"  # macOS has no C.UTF-8 locale on every release
-
-
-def _sb_str(value: str | Path) -> str:
-    """`value` as an SBPL string literal; a control character is refused, not escaped."""
-    text = str(value)
-    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
-        raise CapabilityError(f"a Seatbelt profile path holds a control character: {text!r}")
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _resolved(paths: Iterable[str | Path]) -> list[Path]:
-    """Each path and, if it is a symlink somewhere, its target too (both are named)."""
-    out: list[Path] = []
-    for p in paths:
-        out += [Path(p), Path(p).resolve()]
-    return _covering(out)
-
-
-def _rule(action: str, filt: str, values: Iterable[str | Path]) -> str:
-    """`(action (filt "v1") ...)`, or nothing when there are no values."""
-    items = [f"({filt} {_sb_str(v)})" for v in values]
-    return f"({action}\n  " + "\n  ".join(items) + ")" if items else ""
 
 
 @dataclass(frozen=True)
@@ -399,10 +340,10 @@ class SeatbeltSandbox:
 
     def _profile(self, *, layer: str, read: list[Path], write: list[Path], tail: list[str]) -> str:
         """A deny-default profile reading `read` (and system paths), writing `write`."""
-        read = _resolved([*_DARWIN_SYSTEM, *_DARWIN_ETC, *read, *write])
-        write = _resolved(write)
+        read = resolved([*DARWIN_SYSTEM, *_DARWIN_ETC, *read, *write])
+        write = resolved(write)
         # Resolving a path (node's realpath, exec) stats each of its ancestors.
-        ancestors = sorted({a for p in read for a in p.parents} - set(read))
+        ancestors = sb_ancestors(read)
         rules = [
             f";; onoda Pi sandbox, {layer} layer (A50); generated, do not edit",
             "(version 1)",
@@ -410,14 +351,13 @@ class SeatbeltSandbox:
             "(allow process-exec process-fork)",
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
-            _rule("allow sysctl-read", "sysctl-name-prefix", _DARWIN_SYSCTL_PREFIXES),
-            _rule("allow sysctl-read", "sysctl-name", _DARWIN_SYSCTL_NAMES),
-            _rule("allow file-read-metadata", "literal", ancestors),
-            _rule("allow file-read*", "subpath", read),
+            *sb_sysctl_rules(),
+            sb_rule("allow file-read-metadata", "literal", ancestors),
+            sb_rule("allow file-read*", "subpath", read),
             '(allow file-read* (subpath "/dev"))',
-            _rule("allow file-write* file-ioctl", "literal", _DARWIN_DEV_RW),
+            sb_rule("allow file-write* file-ioctl", "literal", DARWIN_DEV_RW),
             '(allow file-write* (regex #"^/dev/fd/"))',
-            _rule("allow file-write*", "subpath", write),
+            sb_rule("allow file-write*", "subpath", write),
             *tail,
         ]
         return "\n".join(r for r in rules if r) + "\n"
@@ -435,10 +375,10 @@ class SeatbeltSandbox:
         ]
         tail = [
             # The wrappers and profiles are the inner boundary: Pi must not rewrite them.
-            f"(deny file-write* (subpath {_sb_str(pi_work_dir / 'sandbox')}))",
+            f"(deny file-write* (subpath {sb_str(pi_work_dir / 'sandbox')}))",
             "(allow network*)",
             "(allow system-socket)",
-            _rule("allow mach-lookup", "global-name", _OUTER_MACH),
+            sb_rule("allow mach-lookup", "global-name", _OUTER_MACH),
         ]
         return self._profile(layer="outer", read=read, write=[pi_work_dir], tail=tail)
 
@@ -453,7 +393,7 @@ class SeatbeltSandbox:
             outer_tmp = self.tmp_dir(pi_work_dir)
             write.append(outer_tmp)
             # Last match wins: after the deny, only unix sockets under the outer tmp.
-            tail.append(f"(allow network-outbound (subpath {_sb_str(outer_tmp)}))")
+            tail.append(f"(allow network-outbound (subpath {sb_str(outer_tmp)}))")
         read = [*self.python_dirs, self.kernel_dir, bundle_dir]
         return self._profile(layer="inner", read=read, write=write, tail=tail)
 
@@ -469,7 +409,7 @@ class SeatbeltSandbox:
         return [
             self.env,
             "-i",
-            f"PATH={_INNER_PATH}",
+            f"PATH={SYSTEM_PATH}",
             f"HOME={home}",
             f"TMPDIR={home}",
             f"LANG={_DARWIN_LANG}",

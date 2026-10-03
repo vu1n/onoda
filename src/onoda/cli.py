@@ -414,6 +414,7 @@ def cmd_pi_run_vte(a) -> Any:
     from onoda.adapters.pi.contract import Script
     from onoda.adapters.pi.run import VTE_INSTRUCTION, run_vte_case
     from onoda.adapters.pi.runtime import detect_sandbox
+    from onoda.science.orca_broker import BrokerLimits
     from onoda.science.orca_local import OrcaSettings
 
     if bool(a.script) == bool(a.live):
@@ -451,6 +452,8 @@ def cmd_pi_run_vte(a) -> Any:
         reducer=(a.reducer_provider, a.reducer_model) if a.reducer_provider else None,
         timeout_s=a.timeout,
         sandbox=detect_sandbox() if (a.live or a.sandbox) else None,
+        orca_mpi_home=Path(a.orca_mpi_home) if a.orca_mpi_home else None,
+        limits=BrokerLimits(max_nprocs=a.orca_max_nprocs, max_maxcore_mb=a.orca_max_maxcore_mb),
     )
     return _pi_run_summary(pi)
 
@@ -860,6 +863,7 @@ def cmd_ablation_show(a) -> Any:
 
 def build_parser() -> argparse.ArgumentParser:
     from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS
+    from onoda.science.orca_broker import DEFAULT_LIMITS
 
     p = argparse.ArgumentParser(prog="onoda", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -1037,6 +1041,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="orca_submit calls per run, cache hits included (A59)",
     )
     rv.add_argument("--orca-cache", help="shared broker cache directory (A59)")
+    rv.add_argument("--orca-mpi-home", help="MPI prefix the ORCA job sandbox exposes (A65)")
+    rv.add_argument(
+        "--orca-max-nprocs",
+        type=int,
+        default=DEFAULT_LIMITS.max_nprocs,
+        help="largest %%pal nprocs / PALn the broker accepts (A65)",
+    )
+    rv.add_argument(
+        "--orca-max-maxcore-mb",
+        type=int,
+        default=DEFAULT_LIMITS.max_maxcore_mb,
+        help="largest %%maxcore the broker accepts, MB per process (A65)",
+    )
     rv.add_argument("--doc", action="append", default=[], help="allowed documentation (.md)")
     rv.add_argument("--ladder", help="advisory ladder document (required from S1 on)")
     rv.add_argument("--synthetic-ladder", action="store_true")

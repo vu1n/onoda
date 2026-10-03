@@ -26,9 +26,9 @@ from onoda.adapters.pi.sandbox import (
     SANDBOX_KIND,
     Sandbox,
     SeatbeltSandbox,
-    _sb_str,
 )
 from onoda.errors import CapabilityError
+from onoda.sandbox_util import sb_str as _sb_str
 
 on_darwin = pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS only")
 

@@ -40,14 +40,16 @@ CASE_ID = "questdb-ketene"
 FIXTURE = Path(__file__).parent / "fixtures" / "orca611-nevpt2" / "ketene_f_target.out"
 STAND_IN_MARKER = "STAND-IN EXECUTABLE - NOT ORCA"
 LADDER = b"# Synthetic advisory ladder (test fixture, no scientific content)\n"
-INPUT = "! CASSCF NEVPT2 aug-cc-pVTZ\n* xyzfile 0 1 ketene.xyz\n"
+INPUT = "! CASSCF NEVPT2 aug-cc-pVTZ\n* xyz 0 1\nC 0 0 -1.295\nC 0 0 0.019\nO 0 0 1.184\n*\n"
 
+# Under the ORCA job sandbox (A65) a job reads only ORCA_HOME (the stand-in's own
+# directory, which holds a copy of the fixture) and writes only its job dir, where
+# it leaves the marker `runs` counts.
 STAND_IN = f"""#!/usr/bin/env {sys.executable}
-import pathlib, sys
-counter = pathlib.Path(__file__).with_suffix(".runs")
-counter.write_text(str(int(counter.read_text()) + 1 if counter.exists() else 1))
+import os, sys
+open("ran.stand-in", "w").write("")
 sys.stdout.write("{STAND_IN_MARKER}\\n")
-sys.stdout.write(open({str(FIXTURE)!r}).read())
+sys.stdout.write(open(os.path.join(os.path.dirname(__file__), "fixture.out")).read())
 open("job.gbw", "w").write("stand-in orbitals\\n")
 """
 
@@ -64,16 +66,18 @@ def short(tmp_path):
     shutil.rmtree(d, ignore_errors=True)
 
 
-def stand_in(root: Path) -> Path:
-    path = root / "orca_stand_in.py"
-    path.write_text(STAND_IN)
+def stand_in(root: Path, name: str = "orca_stand_in.py", body: str = STAND_IN) -> Path:
+    home = root / "orca-home"
+    home.mkdir(exist_ok=True)
+    shutil.copyfile(FIXTURE, home / "fixture.out")
+    path = home / name
+    path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     return path
 
 
 def runs(binary: Path) -> int:
-    counter = binary.with_suffix(".runs")
-    return int(counter.read_text()) if counter.exists() else 0
+    return sum(1 for _ in binary.parent.parent.rglob("ran.stand-in"))
 
 
 def orca(root: Path, binary: Path) -> OrcaSettings:
@@ -259,9 +263,8 @@ def test_replay_of_cache_hits_matches_and_executes_nothing(recorded):
 def test_replay_of_a_run_with_an_unspooled_job_fails_closed(short, monkeypatch):
     """A job the broker journaled but no `task.execute` cites has no output in the store."""
     store, _ = stores(short)
-    binary = short / "orca_echo_stand_in.py"
-    binary.write_text(STAND_IN + "sys.stdout.write(open(sys.argv[1]).read())\n")
-    binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+    echo = STAND_IN + "sys.stdout.write(open(sys.argv[1]).read())\n"
+    binary = stand_in(short, "orca_echo_stand_in.py", echo)
     real_send = OrcaBroker._send
 
     def drop_j0002(self, wfile, reply):  # the extension never gets this reply to spool
@@ -364,7 +367,13 @@ def test_sandboxed_run_reaches_the_broker_and_bash_does_not(short):
     pi = run(store, short, "sb", binary, s, sandbox=detect_sandbox(), variant_id="S0")
     assert (pi.ingest.status, pi.ingest.complete) == ("settled", True), pi.stderr_tail
     assert (short / "sb" / "pi" / "workspace" / "probe.txt").read_text() == "SOCK=hidden\n"
-    assert store.run_record("sb").config["sandbox"] == "bwrap"
+    config = store.run_record("sb").config
+    assert config["sandbox"] == "bwrap"
+    # The stand-in's job ran in the ORCA job sandbox too (A65).
+    assert config["orca"]["job_sandbox"] == "bwrap"
+    assert config["orca"]["limits"] == {"max_nprocs": 4, "max_maxcore_mb": 4000}
+    journal = read_journal(short / "sb" / "broker" / "broker.jsonl")
+    assert [e.sandbox for e in journal if e.executed_here] == ["bwrap"]
     assert runs(binary) == 1  # Pi reached the broker from inside the outer layer
     assert pi_vte.evaluate_vte_run(store, evaluator, "sb", case()).metrics["coverage"] == "1"
 

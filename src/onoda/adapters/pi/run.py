@@ -32,6 +32,7 @@ The spool HMAC key of each launch stays in memory and is handed to ingest
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,14 +64,17 @@ from onoda.portability import imported_runs
 from onoda.records import TaskManifest
 from onoda.science.contract import CASES_ROOT, LoadedCase
 from onoda.science.orca_broker import (
+    DEFAULT_LIMITS,
     JOURNAL_NAME,
     BrokerJournalEntry,
+    BrokerLimits,
     BrokerReplay,
     OrcaBroker,
     parse_journal,
     read_journal,
 )
 from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
+from onoda.science.orca_sandbox import host_job_sandbox
 from onoda.science.vte import REFERENCES_SCHEMA, LoadedVteCase
 from onoda.store import Store, check_safe_id
 
@@ -441,6 +445,8 @@ def run_vte_case(
     reducer: tuple[str, str] | None = None,
     timeout_s: float = 3600,
     sandbox: PiSandbox | None = None,
+    orca_mpi_home: Path | None = None,
+    limits: BrokerLimits = DEFAULT_LIMITS,
 ) -> PiRun:
     """Run one variant on one VTE case, its ORCA jobs through a host broker; ingest it.
 
@@ -453,10 +459,21 @@ def run_vte_case(
     broker socket sits in it, so `work_dir` must be short enough for AF_UNIX
     (checked before anything is committed). RLM variants are refused here.
     Request caps, `reducer` and `sandbox` are as for `run_case`.
+
+    Every ORCA job runs in this host's job sandbox (A65; `orca_mpi_home` is
+    the MPI prefix it exposes), and real ORCA is refused without one; only a
+    labelled stand-in runs unconfined on a host that has none. `limits` are
+    the broker's input caps.
     """
     _check_new_run(store, run_id, variant_id)
     max_requests = _request_cap(live, max_requests)
     scheduler = OrcaLocalScheduler(orca)  # resolves the settings; fails closed
+    job_sandbox = host_job_sandbox(
+        scheduler.settings.binary,
+        scratch=scheduler.root,
+        stand_in=scheduler.settings.stand_in,
+        mpi_home=orca_mpi_home,
+    )
     work_dir = Path(work_dir)
     bundle_dir = work_dir / "bundle"
     bundle = stage_vte_bundle(
@@ -488,6 +505,8 @@ def run_vte_case(
         scheduler=scheduler,
         cache_dir=cache_dir,
         max_executions=bundle.max_executions,
+        job_sandbox=job_sandbox,
+        limits=limits,
     )
     # Refusals happen above; only a launchable run commits anything.
     task = _commit_vte_task(
@@ -513,6 +532,8 @@ def run_vte_case(
             "stand_in": scheduler.settings.stand_in,
             "max_wall_seconds": scheduler.settings.max_wall_seconds,
             "shared_cache": cache_dir is not None,
+            "job_sandbox": job_sandbox.kind if job_sandbox is not None else None,
+            "limits": dataclasses.asdict(limits),
         },
     }
     if sandbox is not None:
@@ -619,10 +640,13 @@ def _replay_broker(
     cited = _cited_jobs(store, run_id)
     servable = [e for e in recorded if e.event == "reply" and e.job_id in cited]
     outputs = {e.output_sha256: store.get_bytes(e.output_sha256) for e in servable}
+    # The recorded input caps; a run recorded before them (A65) replays unchecked.
+    limits = cfg.get("orca", {}).get("limits")
     broker = OrcaBroker(
         work_dir / "broker" / JOURNAL_NAME,
         replay=BrokerReplay.from_journal(servable, outputs),
         max_executions=cfg["max_executions"],
+        limits=BrokerLimits(**limits) if limits is not None else None,
     )
     return broker, recorded
 
