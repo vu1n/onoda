@@ -37,6 +37,7 @@ per connection) is defined here and mirrored by `pi/extensions/lib/spool.ts`;
 from __future__ import annotations
 
 import base64
+import io
 import os
 import re
 import socketserver
@@ -50,7 +51,7 @@ from typing import BinaryIO, Literal
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
-from onoda.errors import OnodaError
+from onoda.errors import IntegrityError, OnodaError
 from onoda.records import Frozen as _Frozen
 from onoda.science.orca_local import FILE_NAME_RE, OrcaLocalScheduler, _sha256_file
 
@@ -212,19 +213,27 @@ class BrokerJournalEntry(_Frozen):
         return self
 
 
-def read_journal(path: str | os.PathLike[str]) -> tuple[BrokerJournalEntry, ...]:
-    """Parse a broker journal; refuses a malformed line or a gap in `seq`."""
+def parse_journal(data: bytes, where: str) -> tuple[BrokerJournalEntry, ...]:
+    """Parse broker journal bytes; refuses a malformed line or a gap in `seq`.
+
+    `where` names the journal in errors (a path or a store digest).
+    """
     entries = []
-    with open(path, "rb") as fh:
-        for n, line in enumerate(fh, start=1):
-            try:
-                entry = BrokerJournalEntry.model_validate_json(line)
-            except ValidationError as exc:
-                raise OnodaError(f"{path}: line {n} is not a broker journal entry: {exc}") from exc
-            if entry.seq != n:
-                raise OnodaError(f"{path}: line {n} has seq {entry.seq}")
-            entries.append(entry)
+    for n, line in enumerate(io.BytesIO(data), start=1):
+        try:
+            entry = BrokerJournalEntry.model_validate_json(line)
+        except ValidationError as exc:
+            raise IntegrityError(f"{where}: line {n} is not a broker journal entry: {exc}") from exc
+        if entry.seq != n:
+            raise IntegrityError(f"{where}: line {n} has seq {entry.seq}")
+        entries.append(entry)
     return tuple(entries)
+
+
+def read_journal(path: str | os.PathLike[str]) -> tuple[BrokerJournalEntry, ...]:
+    """`parse_journal` over the file at `path`."""
+    with open(path, "rb") as fh:
+        return parse_journal(fh.read(), str(path))
 
 
 def attachable(name: str) -> bool:

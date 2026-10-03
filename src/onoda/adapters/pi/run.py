@@ -58,7 +58,7 @@ from onoda.adapters.pi.vte import stage_vte_bundle
 from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS, ENV_BROKER, VteTaskBundle
 from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
-from onoda.errors import CapabilityError, IntegrityError, OnodaError, ReplayMismatch
+from onoda.errors import CapabilityError, OnodaError, ReplayMismatch
 from onoda.portability import imported_runs
 from onoda.records import TaskManifest
 from onoda.science.contract import CASES_ROOT, LoadedCase
@@ -67,6 +67,7 @@ from onoda.science.orca_broker import (
     BrokerJournalEntry,
     BrokerReplay,
     OrcaBroker,
+    parse_journal,
     read_journal,
 )
 from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
@@ -589,29 +590,28 @@ def _check_children(store: Store, run_id: str, spool_dir: Path, key: bytes) -> N
         _check_children(store, child, child_dir, child_key)
 
 
-def _replay_broker(store: Store, run_id: str, cfg: dict[str, Any], work_dir: Path) -> OrcaBroker:
-    """A replay-mode broker serving exactly the recorded outputs of a VTE run (A59)."""
+def _replay_broker(
+    store: Store, run_id: str, cfg: dict[str, Any], work_dir: Path
+) -> tuple[OrcaBroker, tuple[BrokerJournalEntry, ...]]:
+    """A replay-mode broker serving exactly the recorded outputs of a VTE run (A59).
+
+    Also returns the recorded journal, which the replay's served jobs are checked against.
+    """
     digest = cfg.get("broker_journal")
     if not isinstance(digest, str):
         raise CapabilityError(f"run {run_id} recorded no broker journal")
-    recorded = _journal_entries(store.get_bytes(digest), digest)
+    recorded = parse_journal(store.get_bytes(digest), f"broker journal {digest}")
     outputs = {
         e.output_sha256: store.get_bytes(e.output_sha256)
         for e in recorded
         if e.event == "reply" and e.output_sha256 is not None
     }
-    return OrcaBroker(
+    broker = OrcaBroker(
         work_dir / "broker" / JOURNAL_NAME,
         replay=BrokerReplay.from_journal(recorded, outputs),
         max_executions=cfg["max_executions"],
     )
-
-
-def _journal_entries(data: bytes, what: str) -> list[BrokerJournalEntry]:
-    entries = [BrokerJournalEntry.model_validate_json(line) for line in data.splitlines()]
-    if [e.seq for e in entries] != list(range(1, len(entries) + 1)):
-        raise IntegrityError(f"broker journal {what} has a gap in seq")
-    return entries
+    return broker, recorded
 
 
 def _jobs_served(entries: Iterable[BrokerJournalEntry]) -> list[tuple[Any, ...]]:
@@ -681,10 +681,11 @@ def replay_run_pi(
         "synthetic_ladder": "synthetic" in ladder_labels,
     }
     broker = None
+    recorded_jobs: tuple[BrokerJournalEntry, ...] = ()
     if isinstance(case, LoadedVteCase):
         stage_vte_bundle(case, work_dir / "bundle", max_executions=cfg["max_executions"], **staging)
         _refuse_references(work_dir / "bundle", case)
-        broker = _replay_broker(store, run_id, cfg, work_dir)
+        broker, recorded_jobs = _replay_broker(store, run_id, cfg, work_dir)
     else:
         stage_bundle(case, work_dir / "bundle", **staging)
     prepared = build_launch(
@@ -743,7 +744,6 @@ def replay_run_pi(
         replayed_jobs = read_journal(broker.journal_path)
         if any(e.executed_here for e in replayed_jobs):  # replay mode cannot; checked anyway
             raise ReplayMismatch(f"replay of {run_id} executed a job")
-        recorded_jobs = _journal_entries(store.get_bytes(cfg["broker_journal"]), run_id)
         if _jobs_served(replayed_jobs) != _jobs_served(recorded_jobs):
             raise ReplayMismatch(f"replay of {run_id}: the broker served different jobs")
         report.update(jobs=len(_jobs_served(replayed_jobs)), executions=0)
