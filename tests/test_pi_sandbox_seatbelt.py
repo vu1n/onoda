@@ -183,6 +183,46 @@ def test_a_seatbelt_launch_routes_tools_into_the_inner_layer(tmp_path):
     }
 
 
+SECRET_SYSCTLS = ("kern.procargs2", "kern.procargs", "kern.proc.pid.1", "kern.proc.all")
+
+
+def sysctl_filters(profile: str) -> list[tuple[str, str]]:
+    """Every (filter, value) under an `(allow sysctl-read ...)` rule."""
+    out = []
+    for body in re.findall(r"\(allow sysctl-read((?:\n?\s*\(sysctl-name[^)]*\))*)\)", profile):
+        out += re.findall(r'\((sysctl-name(?:-prefix)?) "([^"]*)"\)', body)
+    return out
+
+
+def test_profiles_read_only_allowlisted_sysctls(tmp_path):
+    """No blanket sysctl-read: KERN_PROCARGS2 shows another process's environment."""
+    sb, work, workspace, bundle, _, _ = staged(tmp_path)
+    profiles = [
+        sb.outer_profile(pi_work_dir=work, bundle_dir=bundle),
+        (work / "sandbox" / "shell.sb").read_text(),
+        (work / "sandbox" / "python.sb").read_text(),
+    ]
+    for profile in profiles:
+        assert balanced(profile)
+        assert "(allow sysctl-read)" not in profile
+        assert "sysctl*" not in profile and "sysctl-write" not in profile
+        filters = sysctl_filters(profile)
+        # Every line that mentions a sysctl is one of the allowlist rules.
+        for line in profile.splitlines():
+            if "sysctl" in line:
+                assert re.fullmatch(
+                    r'\(allow sysctl-read|\s+\(sysctl-name(-prefix)? "[^"]*"\)\)?', line
+                ), line
+        names = {v for f, v in filters if f == "sysctl-name"}
+        prefixes = {v for f, v in filters if f == "sysctl-name-prefix"}
+        assert {"hw.", "machdep.cpu."} <= prefixes
+        assert {"kern.ostype", "kern.osrelease", "kern.osversion", "kern.version"} <= names
+        assert "kern.hostname" in names
+        for secret in SECRET_SYSCTLS:
+            assert secret not in names
+            assert not any(secret.startswith(p) for p in prefixes), secret
+
+
 # ------------------------------------------------------------ darwin only
 
 
@@ -286,3 +326,17 @@ def test_darwin_outer_layer_runs_the_inner_wrapper_and_hides_the_host(mac, tmp_p
     )  # fmt: skip
     assert nested.returncode == 0, nested.stderr
     assert (workspace / "n.txt").read_text() == "nested\n"
+
+
+@on_darwin
+def test_darwin_inner_shell_cannot_read_another_process_environment(mac):
+    """KERN_PROCARGS2 (what `ps -E` reads) is not on the sysctl allowlist."""
+    _, _, workspace, _, shell, _ = mac
+    marker = "sandbox-procargs-probe-secret"
+    host = subprocess.Popen(["/bin/sleep", "60"], env={**os.environ, "ONODA_PROBE_SECRET": marker})
+    try:
+        seen = inner(shell, workspace, f"ps -Eww -p {host.pid}; ps -Eww -ax")
+        assert marker not in seen.stdout and marker not in seen.stderr
+    finally:
+        host.kill()
+        host.wait()

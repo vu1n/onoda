@@ -276,6 +276,32 @@ _OUTER_MACH = (
     "com.apple.dnssd.service",
     "com.apple.SystemConfiguration.configd",
 )
+# The sysctls a sandboxed process may read: what python, bash and node ask at
+# start-up (CPU, memory, OS release, host name, boot time, load). A blanket
+# `sysctl-read` would include KERN_PROCARGS2 (`kern.procargs2`, what `ps -E`
+# reads), which shows any same-uid process's argv and environment, credentials
+# included; nothing under `kern.proc` is listed.
+_DARWIN_SYSCTL_PREFIXES = ("hw.", "machdep.cpu.", "sysctl.proc_")
+_DARWIN_SYSCTL_NAMES = (
+    "kern.argmax",
+    "kern.boottime",
+    "kern.hostname",
+    "kern.maxfiles",
+    "kern.maxfilesperproc",
+    "kern.maxproc",
+    "kern.ngroups",
+    "kern.osproductversion",
+    "kern.osproductversioncompat",
+    "kern.osrelease",
+    "kern.ostype",
+    "kern.osvariant_status",
+    "kern.osversion",
+    "kern.secure_kernel",
+    "kern.usrstack64",
+    "kern.version",
+    "vm.loadavg",
+    "vm.swapusage",
+)
 _DARWIN_LANG = "en_US.UTF-8"  # macOS has no C.UTF-8 locale on every release
 
 
@@ -331,7 +357,8 @@ class SeatbeltSandbox:
     namespace, so both layers see the host's process list (`ps`), though
     signals reach only processes of the same sandbox; macOS has no `/proc`, so
     there is no `/proc` to empty, and a process's environment is readable only
-    through `sysctl` (which shows it for same-uid processes); nothing is hidden
+    through `sysctl` (`kern.procargs2`, which shows it for same-uid processes),
+    so both layers read only an allowlist of sysctls without it; nothing is hidden
     by mounts, so a path's *existence* is visible on its ancestors' metadata
     (the profile allows metadata reads of each allowed path's ancestors only).
     `sandbox-exec` is deprecated by Apple but still functional; if a macOS
@@ -383,7 +410,8 @@ class SeatbeltSandbox:
             "(allow process-exec process-fork)",
             "(allow signal (target same-sandbox))",
             "(allow process-info* (target same-sandbox))",
-            "(allow sysctl-read)",
+            _rule("allow sysctl-read", "sysctl-name-prefix", _DARWIN_SYSCTL_PREFIXES),
+            _rule("allow sysctl-read", "sysctl-name", _DARWIN_SYSCTL_NAMES),
             _rule("allow file-read-metadata", "literal", ancestors),
             _rule("allow file-read*", "subpath", read),
             '(allow file-read* (subpath "/dev"))',
