@@ -41,6 +41,10 @@ refuses (`input_rejected`) inputs that name paths or files that are not
 attachments, write elsewhere, start other programs, or exceed the broker's
 `BrokerLimits`; that check is a tripwire, the sandbox is the boundary.
 
+Every reply also carries `checks` (A66): advisory lines `orca_checks` reads
+from the job's output, using earlier jobs of this broker where a check needs
+them (a Hartree-Fock energy). Replays recompute them from the same bytes.
+
 Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
 so a cached output is not a converged one; that is for the parser and grader.
 
@@ -68,6 +72,7 @@ from pydantic import AfterValidator, Field, ValidationError, model_validator
 from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import CapabilityError, IntegrityError, OnodaError
 from onoda.records import Frozen as _Frozen
+from onoda.science.orca_checks import JobFacts, job_checks, job_facts
 from onoda.science.orca_local import (
     FILE_NAME_RE,
     OrcaLocalScheduler,
@@ -245,6 +250,7 @@ class BrokerReply(_Frozen):
     output_b64: str = ""
     files: tuple[str, ...] = ()  # names this job produced that a later submit may attach
     reason: str | None = None
+    checks: tuple[str, ...] = ()  # advisory ladder checks read from the output (A66)
 
     @model_validator(mode="after")
     def _consistent(self) -> BrokerReply:
@@ -296,6 +302,7 @@ class BrokerJournalEntry(_Frozen):
     scheduler_job_id: str | None = None
     duration_ms: int | None = None
     sandbox: str | None = None  # the job sandbox an executed job ran in (A65)
+    checks: tuple[str, ...] = ()  # what the reply told the agent about its output (A66)
 
     @model_validator(mode="after")
     def _consistent(self) -> BrokerJournalEntry:
@@ -601,6 +608,8 @@ class OrcaBroker:
             )
         self._run = uuid.uuid4().hex  # scheduler keys are per execution, never the cache key
         self._jobs: dict[str, _Job] = {}
+        # Every job's facts in job order, so a check can use an earlier job's HF energy.
+        self._facts: list[tuple[str, JobFacts]] = []
         # Job ids come from this counter, advanced the moment an id is assigned, so an
         # id (and with it the scheduler key `orca-broker:<run>:<job id>`) is never reused.
         self._next_job = 0
@@ -719,6 +728,9 @@ class OrcaBroker:
     ) -> BrokerReply:
         self._jobs[job_id] = _Job(files=files)
         output_sha = sha256_digest(log)
+        facts = job_facts(log)
+        checks = job_checks(job_id, facts, self._facts)
+        self._facts.append((job_id, facts))
         self._append(
             event="reply",
             tool_call_id=request.tool_call_id,
@@ -737,6 +749,7 @@ class OrcaBroker:
             scheduler_job_id=scheduler_job_id,
             duration_ms=duration_ms,
             sandbox=sandbox,
+            checks=checks,
         )
         return BrokerReply(
             status=status,
@@ -748,6 +761,7 @@ class OrcaBroker:
             output_b64=base64.b64encode(log).decode("ascii"),
             files=tuple(sorted(files)),
             reason=reason,
+            checks=checks,
         )
 
     def _serve_replay(self, request: BrokerSubmit, key: str, input_sha: str) -> BrokerReply:

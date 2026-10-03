@@ -59,7 +59,8 @@ def fake_output(job_id: str, pad: int = 0) -> bytes:
 class FakeBroker(socketserver.UnixStreamServer):
     """One reply per connection. Inputs containing REFUSE are refused, TAMPER
     gets an output that does not match its pin, PAD pads the output past
-    ObservationPack's threshold. A repeated (input, attach) is a cache hit."""
+    ObservationPack's threshold, CHECKS gets one synthetic check line (A66).
+    A repeated (input, attach) is a cache hit."""
 
     def __init__(self, path: str):
         self.submits: list[V.BrokerSubmit] = []
@@ -88,6 +89,9 @@ class FakeBroker(socketserver.UnixStreamServer):
             output_sha256="sha256:" + pin,
             output_b64=base64.b64encode(output).decode(),
             files=("job.gbw",),
+            checks=("SYNTHETIC check line, not a chemistry result",)
+            if "CHECKS" in req.input
+            else (),
         )
 
 
@@ -295,6 +299,22 @@ def test_vte_run_submits_spools_execute_and_reports_a_claim(tmp_path, broker):
     assert {t["name"] for t in first["tools"]} >= set(V.VTE_TASK_TOOLS)
     assert not {t["name"] for t in first["tools"]} & set(C.TASK_TOOLS)
     assert "onoda-vte-ladder-marker" in first["systemPrompt"]  # S1 gets the ladder
+
+
+def test_broker_checks_are_shown_between_the_header_and_the_output(tmp_path, broker):
+    turns = [
+        turn(
+            call("x1", "orca_submit", input=INPUT + "CHECKS\n"),
+            call("x2", "orca_submit", input=INPUT),
+        ),
+        turn(text("Synthetic scripted run complete.")),
+    ]
+    run = run_vte(tmp_path, turns, broker, variant="S0")
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    checked, plain = shown(run, "x1"), shown(run, "x2")
+    assert "Host checks on this output (advisory):\n- SYNTHETIC check line" in checked
+    assert checked.endswith(broker.jobs["j0001"].decode())
+    assert "Host checks" not in plain
 
 
 def test_orca_submit_past_max_executions_is_blocked(tmp_path, broker):

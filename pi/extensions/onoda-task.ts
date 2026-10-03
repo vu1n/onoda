@@ -89,6 +89,7 @@ interface BrokerReply {
 	output_b64: string;
 	files: string[];
 	reason: string | null;
+	checks: string[]; // advisory ladder checks the broker read from the output (A66)
 }
 
 const DECIMAL_RE = /^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$/;
@@ -356,6 +357,7 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 		output_b64: r.output_b64 ?? "",
 		files: r.files ?? [],
 		reason: r.reason ?? null,
+		checks: r.checks ?? [],
 	};
 	if (reply.cache_hit && reply.executed_here) throw new Error("orca_submit: broker reply is a cache hit and an execution");
 	if (reply.status === "refused") {
@@ -375,6 +377,9 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 	}
 	if (!Array.isArray(reply.files) || !reply.files.every((f) => typeof f === "string" && FILE_NAME_RE.test(f))) {
 		throw new Error("orca_submit: the broker's file list is malformed");
+	}
+	if (!Array.isArray(reply.checks) || !reply.checks.every((c) => typeof c === "string")) {
+		throw new Error("orca_submit: the broker's checks are malformed");
 	}
 	const output = Buffer.from(reply.output_b64, "base64");
 	if (typeof reply.output_sha256 !== "string" || bareHex(reply.output_sha256) !== sha256Hex(output)) {
@@ -428,7 +433,10 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			"The job directory holds only the input and its attachments: give the geometry inline (* xyz ... *), name " +
 			"files only by their attached names, and keep %pal nprocs and %maxcore within the host's caps; an input that " +
 			"names a path, sets %base, or starts other programs (%compound, ExtOpt, ProgExt) is refused (input_rejected). " +
-			"Every call counts against the run's job limit. Cite the job id when you report a value from its output.",
+			"Every call counts against the run's job limit. Cite the job id when you report a value from its output. " +
+			"For a CASSCF job the reply also lists host checks read from its output: the lowest CASSCF root against " +
+			"the Hartree-Fock energy of the same basis and geometry from this run, the active orbitals per irrep, and " +
+			"whether every state-averaged root has the same weight.",
 		promptSnippet: "Run an ORCA input on the host and read its output",
 		parameters: SubmitParams,
 		executionMode: "sequential",
@@ -471,6 +479,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			const header = [
 				`ORCA job ${reply.job_id}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`,
 				`Files for attach: ${reply.files.length ? reply.files.join(", ") : "none"}`,
+				...(reply.checks.length ? ["Host checks on this output (advisory):", ...reply.checks.map((c) => `- ${c}`)] : []),
 			].join("\n");
 			return {
 				content: [
@@ -485,6 +494,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 					input_sha256: inputHex,
 					output_sha256: sha256Hex(output),
 					files: reply.files,
+					checks: reply.checks,
 				},
 			};
 		},

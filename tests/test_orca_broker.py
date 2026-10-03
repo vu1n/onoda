@@ -741,3 +741,36 @@ def test_an_output_past_the_cap_is_a_failed_job_with_no_output(tmp_path):
     assert runs(binary) == 2
     with pytest.raises(OnodaError, match="positive"):
         BrokerLimits(max_output_bytes=0)
+
+
+# --- advisory ladder checks (A66) -----------------------------------------------------
+
+FIXTURES = Path(__file__).parent / "fixtures" / "orca611-nevpt2"
+
+# Prints the authentic ORCA output named on the input's first line, copied next to it.
+FIXTURE_STAND_IN = f"""#!/usr/bin/env {sys.executable}
+import os, sys
+open("ran.stand-in", "w").write("")
+name = open(sys.argv[1]).readline().strip().lstrip("# ")
+sys.stdout.write(open(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), name)).read())
+"""
+
+
+def test_replies_carry_checks_that_use_earlier_jobs_and_replay_identically(tmp_path):
+    binary = stand_in(tmp_path, FIXTURE_STAND_IN)
+    for name in ("ketene_a_rhf.out", "ketene_b_valence_dz.out"):
+        (binary.parent / name).write_bytes((FIXTURES / name).read_bytes())
+    live = broker(tmp_path, "live", scheduler=scheduler(tmp_path, binary))
+    inputs = ["# ketene_a_rhf.out\n" + INPUT, "# ketene_b_valence_dz.out\n" + INPUT]
+    recorded = [live.submit(submit(text, f"c{i}")) for i, text in enumerate(inputs)]
+    assert recorded[0].checks == ()  # an RHF job: no CASSCF to check
+    (hf, irreps) = recorded[1].checks
+    assert hf.startswith("ok (criterion 1)") and "(job j0001, same basis and geometry)" in hf
+    assert irreps.endswith("A1 4, B1 3, B2 2")
+    journaled = [e.checks for e in read_journal(live.journal_path) if e.event == "reply"]
+    assert journaled == [r.checks for r in recorded]
+
+    replay = BrokerReplay.from_journal(read_journal(live.journal_path), _outputs(recorded))
+    again = broker(tmp_path, "replay", replay=replay)
+    replayed = [again.submit(submit(text, f"c{i}")) for i, text in enumerate(inputs)]
+    assert [r.checks for r in replayed] == [r.checks for r in recorded]
