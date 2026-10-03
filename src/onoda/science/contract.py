@@ -73,9 +73,15 @@ class ExcitedState(_Frozen):
 
     `root` is the program's own root number. `multiplicity` and `symmetry`
     are only set when the output states them; they are never inferred.
+    `method` names the listing a multireference state came from (`CASSCF`,
+    or the PT2 method ORCA names, e.g. `SC-NEVPT2`); it is None in
+    `excited_states`, whose method is the observation's `method_family`.
+    For multireference states the energies are transition energies from the
+    listing's lowest root, as ORCA printed them.
     """
 
     root: int
+    method: str | None = None
     multiplicity: int | None = None
     symmetry: str | None = None
     energy_au: Quantity
@@ -96,6 +102,11 @@ class OrcaObservation(_Frozen):
     method_family: str | None = None
     excited_states_status: StatesStatus
     excited_states: list[ExcitedState] = Field(default_factory=list)
+    # SA-CASSCF / NEVPT2 transition energies (orca-parser@3). `casscf_converged`
+    # is None when no CASSCF ran or its outcome was not printed unambiguously;
+    # any `mr_states` or `casscf_converged` Problem makes these untrustworthy.
+    casscf_converged: bool | None = None
+    mr_states: list[ExcitedState] = Field(default_factory=list)
     warnings: list[Evidence] = Field(default_factory=list)
     problems: list[Problem] = Field(default_factory=list)
 

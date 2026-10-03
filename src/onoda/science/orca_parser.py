@@ -33,6 +33,22 @@ two `EOM-CCSD RESULTS (RHS)` listings preceded by `EOM type ... IP-EOM` and
 then `STEOM-CCSD RESULTS (SINGLETS)`. The parser drops IP/EA listings whenever
 their `EOM type` line says so, and drops `CIS RESULTS` when a STEOM listing is
 present, reporting only the STEOM roots. Any other mix of methods is ambiguous.
+
+Multireference jobs (checked against real ORCA 6.1.1 output; graded per A58) fill
+`mr_states` from two listings, each a `LOWEST ROOT (...)` line, a column
+header and `n: ROOT MULT [IRREP] DE/a.u. DE/eV DE/cm**-1` rows, whose bare
+numbers take their units from that exact header:
+`SA-CASSCF TRANSITION ENERGIES` (method `CASSCF`) and `NEVPT2 TRANSITION
+ENERGIES`, whose method is the one ORCA names in `(PT2 = SC-NEVPT2)`. The
+IRREP column is printed only when symmetry is on; without it `symmetry` is
+None. A state is keyed by (method, multiplicity, irrep, root), never by its
+position or energy order (ORCA 6.1.1 prints NEVPT2 roots by energy, which
+can reorder them against CASSCF). A listing without a `LOWEST ROOT` line, with
+an unexpected column header, or (for NEVPT2) without a PT2 method line is
+dropped with an `error` Problem. When CASSCF did not converge (including
+when ORCA still printed normal termination) or its convergence is not
+printed, no state is reported and `mr_states` carries an `unresolved` Problem.
+`casscf_converged` is read from ORCA's own convergence lines.
 """
 
 from __future__ import annotations
@@ -50,8 +66,9 @@ from onoda.science.contract import (
 )
 
 # @2 reads the `<S**2> = value` suffix ORCA 6.1.1 prints on STEOM `IROOT` lines
-# (A56), which @1 reported as an error. Records written by @1 keep that id.
-PARSER_ID = "orca-parser@2"
+# (A56), which @1 reported as an error. @3 adds `casscf_converged` and
+# `mr_states` from the same bytes. Records written by @1/@2 keep their id.
+PARSER_ID = "orca-parser@3"
 
 _NUMBER = re.compile(r"-?\d+\.\d+")
 _VERSION = re.compile(r"^\s*Program Version (\d+\.\d+\.\d+)\b")
@@ -71,6 +88,18 @@ _STATE_REST = re.compile(
 )
 _IROOT = re.compile(r"^IROOT=\s*(\d+):(.*)$")
 _STATE_ROOT = re.compile(r"^STATE\s+(\d+):")
+_CASSCF_BANNER = "ORCA-CASSCF"
+_CASSCF_FAIL = re.compile(
+    r"ERROR \(ORCA_CASSCF\): Convergence Failure|\bCAS-?SCF\b.*\bNOT CONVERGED\b"
+)
+_CASSCF_OK = re.compile(r"\bCAS-SCF\b.*\bHAS CONVERGED\b|\bCASSCF CONVERGED AFTER\s+\d+\s+CYCLES\b")
+_PT2 = re.compile(r"\(PT2 = (\S+?)\)")
+_MR_HEADERS = {"SA-CASSCF TRANSITION ENERGIES": "CASSCF", "NEVPT2 TRANSITION ENERGIES": None}
+_MR_LOWEST = re.compile(
+    r"^LOWEST ROOT \(ROOT\s+(\d+)\s*,\s*MULT\s+(\d+)(?:\s*,\s*IRREP\s+(\S+))?\)\s+="
+)
+_MR_COLUMNS = ["STATE", "ROOT", "MULT", "DE/a.u.", "DE/eV", "DE/cm**-1"]
+_MR_ROW = re.compile(r"^\s*(\d+):(.*)$")
 
 _SPIN = {"SINGLETS": 1, "TRIPLETS": 3}
 _UNITS = (("au", "au"), ("eV", "eV"), ("cm**-1", "cm-1"))  # printed token -> recorded unit
@@ -91,6 +120,17 @@ class _Section:
     multiplicity: int | None
     eom_type: str | None
     evidence: Evidence | None
+
+
+@dataclass
+class _MrListing:
+    """An open SA-CASSCF or NEVPT2 transition-energy listing."""
+
+    method: str | None
+    header: int
+    lowest: bool = False
+    irrep: bool | None = None  # None until the column header is read
+    bad: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,9 +213,34 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
     eom_type: str | None = None
     parsed: list[_Parsed] = []
     unreadable: list[tuple[tuple, _Section]] = []  # ((multiplicity, root), section)
+    casscf_ran = False
+    casscf_ok: list[int] = []
+    casscf_fail: list[int] = []
+    pt2: str | None = None
+    listing: _MrListing | None = None
+    mr: list[tuple[ExcitedState, int, _MrListing]] = []  # (state, line, its listing)
+    mr_unreadable: set[tuple] = set()
 
     for n, line in enumerate(r.lines, start=1):
         stripped = line.strip()
+        if listing is not None:
+            if _mr_line(r, listing, line, n, mr, mr_unreadable):
+                continue
+            listing = None
+        if stripped in _MR_HEADERS:
+            listing = _MrListing(_MR_HEADERS[stripped] or pt2, n)
+            if listing.method is None:
+                listing.bad = True
+                r.problem("mr_states", "error", "NEVPT2 listing but no '(PT2 = ...)' line", n)
+            continue
+        if stripped == _CASSCF_BANNER:
+            casscf_ran = True
+        if _CASSCF_FAIL.search(line):
+            casscf_fail.append(n)
+        elif _CASSCF_OK.search(line):
+            casscf_ok.append(n)
+        if m := _PT2.search(line):
+            pt2 = m.group(1)
         if line.startswith("WARNING"):
             warnings.append(r.ev(n))
         if m := _VERSION.match(line):
@@ -210,7 +275,7 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
             section = _Section(m.group(1), _SPIN.get(m.group(2) or ""), None, r.ev(n))
             sections_seen += 1
             continue
-        if m := _MDCI_HEADER.match(stripped):
+        if (m := _MDCI_HEADER.match(stripped)) and m.group(1) != "CASSCF":
             section = _Section(m.group(1), _SPIN.get(m.group(2) or ""), eom_type, r.ev(n))
             eom_type = None
             sections_seen += 1
@@ -264,6 +329,12 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
         r.problem(
             "excited_states", "unresolved", "no normal termination; listing may be incomplete"
         )
+    if listing is not None and listing.irrep is None and not listing.bad:
+        r.problem("mr_states", "error", "listing ends before its column header", listing.header)
+    converged = _casscf_converged(r, casscf_ran, casscf_ok, casscf_fail, termination)
+    mr_states = _resolve_mr(r, mr, mr_unreadable, converged)
+    if termination != "normal" and mr_states:
+        r.problem("mr_states", "unresolved", "no normal termination; listing may be incomplete")
 
     return OrcaObservation(
         parser=PARSER_ID,
@@ -277,6 +348,8 @@ def parse_orca_output(data: bytes, *, synthetic: bool = False) -> OrcaObservatio
         method_family=family,
         excited_states_status=status,
         excited_states=states,
+        casscf_converged=converged,
+        mr_states=mr_states,
         warnings=warnings,
         problems=r.problems,
     )
@@ -402,3 +475,145 @@ def _resolve_states(
     else:
         status = "absent"
     return states, status, family
+
+
+def _mr_line(
+    r: _Reader,
+    listing: _MrListing,
+    line: str,
+    n: int,
+    mr: list[tuple[ExcitedState, int, _MrListing]],
+    unreadable: set[tuple],
+) -> bool:
+    """Feed one line to an open transition-energy listing; False once it has ended.
+
+    Units come from the column header, which must be exactly ORCA's
+    (`DE/a.u. DE/eV DE/cm**-1`); the rows print bare numbers.
+    """
+    stripped = line.strip()
+    if listing.irrep is None:  # before the column header
+        if not stripped or set(stripped) == {"-"}:
+            return True
+        if m := _MR_LOWEST.match(stripped):
+            listing.lowest = True
+            if (m.group(1), m.group(2)) != ("0", "1"):
+                r.problem(
+                    "mr_states",
+                    "unresolved",
+                    f"transition energies are from ROOT {m.group(1)} MULT {m.group(2)}, "
+                    "not a singlet ground state",
+                    n,
+                )
+            return True
+        tokens = stripped.split()
+        if tokens[:1] != ["STATE"]:
+            if not listing.bad:
+                listing.bad = True
+                r.problem("mr_states", "error", "listing ends before its column header", n)
+            return False
+        listing.irrep = tokens[3:4] == ["IRREP"]
+        if tokens != _MR_COLUMNS[:3] + ["IRREP"] * listing.irrep + _MR_COLUMNS[3:]:
+            listing.bad = True
+            r.problem("mr_states", "error", "unexpected column header", n)
+        elif not listing.lowest:
+            listing.bad = True
+            r.problem("mr_states", "error", "no LOWEST ROOT line before the listing", n)
+        return True
+    m = _MR_ROW.match(line)
+    if m is None:
+        return False
+    if listing.bad:
+        return True
+    if r.cut("mr_states", n):
+        listing.bad = True
+        return True
+    tokens = m.group(2).split()
+    width = 6 if listing.irrep else 5
+    if len(tokens) != width or not all(t.isdigit() for t in tokens[:2]):
+        listing.bad = True
+        r.problem("mr_states", "error", f"row does not have {width} columns", n)
+        return True
+    root, mult = int(tokens[0]), int(tokens[1])
+    irrep = tokens[2] if listing.irrep else None
+    energies = [
+        r.quantity("mr_states", value, units, n)
+        for value, (_, units) in zip(tokens[-3:], _UNITS, strict=True)
+    ]
+    key = (listing.method, mult, irrep, root)
+    if None in energies:
+        unreadable.add(key)
+        return True
+    au, ev, cm = energies
+    state = ExcitedState(
+        root=root,
+        method=listing.method,
+        multiplicity=mult,
+        symmetry=irrep,
+        energy_au=au,
+        energy_ev=ev,
+        energy_cm=cm,
+    )
+    mr.append((state, n, listing))
+    return True
+
+
+def _casscf_converged(
+    r: _Reader, ran: bool, ok: list[int], fail: list[int], termination: str
+) -> bool | None:
+    """ORCA's own verdict; None when no CASSCF ran or the verdict is missing or mixed."""
+    if fail and ok:
+        r.problem(
+            "casscf_converged", "ambiguous", "CASSCF printed both converged and failed", fail[0]
+        )
+        return None
+    if fail:
+        detail = "CASSCF did not converge"
+        if termination == "normal":
+            detail += " although ORCA printed normal termination"
+        r.problem("casscf_converged", "error", detail, fail[0])
+        return False
+    if ok:
+        return True
+    if ran:
+        r.problem("casscf_converged", "missing", "CASSCF ran but printed no convergence line")
+    return None
+
+
+def _resolve_mr(
+    r: _Reader,
+    mr: list[tuple[ExcitedState, int, _MrListing]],
+    unreadable: set[tuple],
+    converged: bool | None,
+) -> list[ExcitedState]:
+    """Keep rows of well-formed listings from a converged CASSCF; flag conflicts.
+
+    A key is (method, multiplicity, irrep, root). Identical reprints are
+    deduplicated; a conflicting reprint or an unreadable row drops the key.
+    """
+    kept = [(s, n) for s, n, listing in mr if not listing.bad]
+    if kept and converged is not True:
+        r.problem(
+            "mr_states",
+            "unresolved",
+            "CASSCF convergence is not established; transition energies not reported",
+            kept[0][1],
+        )
+        return []
+    first: dict[tuple, tuple[ExcitedState, int]] = {}
+    conflicts: set[tuple] = set()
+    for s, n in kept:
+        key = (s.method, s.multiplicity, s.symmetry, s.root)
+        earlier, line = first.setdefault(key, (s, n))
+        if earlier is not s and _printed(earlier) != _printed(s):
+            conflicts.add(key)
+            r.problem(
+                "mr_states",
+                "ambiguous",
+                f"{s.method} root {s.root} reprinted with different values than line {line}",
+                n,
+            )
+    return [s for key, (s, _) in first.items() if key not in conflicts | unreadable]
+
+
+def _printed(s: ExcitedState) -> tuple:
+    return tuple(q.value if q else None for q in (s.energy_au, s.energy_ev, s.energy_cm))
