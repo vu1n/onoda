@@ -92,6 +92,9 @@ def test_the_seatbelt_profile_confines_exec_files_and_network(tmp_path):
     profile = sb.profile(job)
     assert balanced(profile)
     assert profile.splitlines()[1:3] == ["(version 1)", "(deny default)"]
+    # macOS 27's bash aborts without listing "/"; nothing under it comes with that.
+    assert '(allow file-read-data (literal "/"))' in profile.splitlines()
+    assert '(subpath "/")' not in profile
     # Exec only under ORCA_HOME and MPI_HOME, and the shell.
     execs = re.findall(r"\(allow process-exec\n((?:  \((?:subpath|literal) \"[^\"]*\"\)\n?)+)\)",
                        profile)  # fmt: skip

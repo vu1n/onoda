@@ -62,6 +62,7 @@ def test_a_live_run_is_refused_without_the_sandbox(tmp_path, monkeypatch):
 
 def test_detect_refuses_a_host_without_bwrap(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(sys, "platform", "linux")
     with pytest.raises(CapabilityError, match="bubblewrap"):
         Sandbox.detect(runtime_dir=tmp_path, kernel_dir=tmp_path)
     monkeypatch.setattr(sys, "platform", "darwin")

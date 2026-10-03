@@ -22,6 +22,11 @@ SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 DARWIN_SYSTEM = ("/usr", "/bin", "/sbin", "/System", "/private/var/select")
 DARWIN_DEV_RW = ("/dev/null", "/dev/zero", "/dev/tty", "/dev/dtracehelper")
 
+# Listing "/" itself (its entry names, not anything under it). macOS 27's
+# /bin/bash aborts at start-up (SIGABRT, no output) without it; seen on Vu's
+# Mac 2026-10-03, where metadata-only access to "/" was not enough.
+SB_ROOT_LISTING = '(allow file-read-data (literal "/"))'
+
 # The sysctls a Seatbelt-sandboxed process may read: what python, bash and node
 # ask at start-up (CPU, memory, OS release, host name, boot time, load). A
 # blanket `sysctl-read` would include KERN_PROCARGS2 (`kern.procargs2`, what

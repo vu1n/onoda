@@ -223,6 +223,26 @@ def test_profiles_read_only_allowlisted_sysctls(tmp_path):
             assert not any(secret.startswith(p) for p in prefixes), secret
 
 
+def root_reads(profile: str) -> list[str]:
+    """Every rule that names "/" itself or everything under it."""
+    return [ln for ln in profile.splitlines() if '"/"' in ln or "(subpath \"/\")" in ln]
+
+
+def test_profiles_list_the_root_directory_and_read_nothing_else_there(tmp_path):
+    """macOS 27's bash aborts without listing "/"; that is all "/" itself grants."""
+    sb, work, workspace, bundle, _, _ = staged(tmp_path)
+    profiles = [
+        sb.outer_profile(pi_work_dir=work, bundle_dir=bundle),
+        (work / "sandbox" / "shell.sb").read_text(),
+        (work / "sandbox" / "python.sb").read_text(),
+    ]
+    for profile in profiles:
+        assert '(allow file-read-data (literal "/"))' in profile.splitlines()
+        assert '(subpath "/")' not in profile
+        for line in root_reads(profile):
+            assert line.strip() in ('(allow file-read-data (literal "/"))', '(literal "/")'), line
+
+
 # ------------------------------------------------------------ darwin only
 
 
