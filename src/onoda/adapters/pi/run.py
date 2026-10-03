@@ -273,7 +273,7 @@ def _ingest_launch(
     run_id: str,
     task: TaskManifest,
     config: dict[str, Any],
-    journal_path: Path | None = None,
+    broker_journal: tuple[BrokerJournalEntry, ...] | None = None,
 ) -> PiRun:
     """Ingest a finished launch's spool as `run_id`, against the broker journal if given."""
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
@@ -281,7 +281,7 @@ def _ingest_launch(
             f"pi exited {result.exit_code} before writing a spool: {result.stderr[-2000:]}"
         )
     # A case run's ingest call stays exactly as M3 made it (no `broker_journal` keyword).
-    journal = {} if journal_path is None else {"broker_journal": read_journal(journal_path)}
+    journal = {} if broker_journal is None else {"broker_journal": broker_journal}
     ingested = ingest_spool(
         store,
         result.spool_dir,
@@ -521,9 +521,10 @@ def run_vte_case(
         config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
     _record_driver(store, config, script, live)
     result = _launch_with_broker(prepared, broker, timeout_s)
-    journal_path = broker.journal_path
+    # Read once: the bytes committed are exactly the bytes ingest checks the spool against.
+    journal = broker.journal_path.read_bytes()
     config["broker_journal"] = store.put_bytes(
-        journal_path.read_bytes(), media_type="application/jsonl", labels=["broker-journal"]
+        journal, media_type="application/jsonl", labels=["broker-journal"]
     ).digest
     return _ingest_launch(
         store,
@@ -532,7 +533,7 @@ def run_vte_case(
         run_id=run_id,
         task=task,
         config=config,
-        journal_path=journal_path,
+        broker_journal=parse_journal(journal, str(broker.journal_path)),
     )
 
 
