@@ -52,7 +52,7 @@ from onoda.adapters.pi.ingest import (
     recorded_script,
 )
 from onoda.adapters.pi.runtime import Launch, LaunchResult, LiveSettings, build_launch, launch
-from onoda.adapters.pi.sandbox import Sandbox, SeatbeltSandbox
+from onoda.adapters.pi.sandbox import PiSandbox
 from onoda.adapters.pi.task import check_doc_name, stage_bundle
 from onoda.adapters.pi.vte import stage_vte_bundle
 from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS, ENV_BROKER, VteTaskBundle
@@ -173,7 +173,7 @@ def run_case(
     reducer: tuple[str, str] | None = None,
     timeout_s: float = 300,
     candidate: HarnessCandidate | None = None,
-    sandbox: Sandbox | SeatbeltSandbox | None = None,
+    sandbox: PiSandbox | None = None,
 ) -> PiRun:
     """Run one variant on one case and ingest it as `run_id`.
 
@@ -440,7 +440,7 @@ def run_vte_case(
     max_executions: int = DEFAULT_MAX_EXECUTIONS,
     reducer: tuple[str, str] | None = None,
     timeout_s: float = 3600,
-    sandbox: Sandbox | SeatbeltSandbox | None = None,
+    sandbox: PiSandbox | None = None,
 ) -> PiRun:
     """Run one variant on one VTE case, its ORCA jobs through a host broker; ingest it.
 

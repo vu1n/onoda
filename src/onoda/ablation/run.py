@@ -44,7 +44,7 @@ from onoda.adapters.pi.contract import SEED_CANDIDATE, VARIANTS, HarnessCandidat
 from onoda.adapters.pi.ingest import run_claim
 from onoda.adapters.pi.run import run_case
 from onoda.adapters.pi.runtime import LiveSettings
-from onoda.adapters.pi.sandbox import Sandbox
+from onoda.adapters.pi.sandbox import PiSandbox
 from onoda.adapters.pi.task import evaluate_claims
 from onoda.errors import OnodaError
 from onoda.science.contract import CASES_ROOT, LoadedCase, case_manifests, load_case
@@ -159,7 +159,7 @@ def _check_mode(
     cases: dict[str, tuple[LoadedCase, Script | None]],
     live: LiveSettings | None,
     reducer: tuple[str, str] | None,
-    sandbox: Sandbox | None,
+    sandbox: PiSandbox | None,
     max_cost_usd: Decimal | None,
 ) -> None:
     """Scripted and live ablations each get exactly their own inputs; refused before any run."""
@@ -231,7 +231,7 @@ def run_ablation(
     timeout_s: float = 300,
     live: LiveSettings | None = None,
     reducer: tuple[str, str] | None = None,
-    sandbox: Sandbox | None = None,
+    sandbox: PiSandbox | None = None,
     max_cost_usd: Decimal | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Run every arm on every case, then write the report; returns (report digest, report).

@@ -81,7 +81,7 @@ from onoda.adapters.pi.contract import (
     candidate_for,
     with_mechanisms,
 )
-from onoda.adapters.pi.sandbox import Sandbox, SeatbeltSandbox, write_settings
+from onoda.adapters.pi.sandbox import PiSandbox, Sandbox, SeatbeltSandbox, write_settings
 from onoda.adapters.pi.vte_contract import ENV_BROKER, VteTaskBundle
 from onoda.errors import CapabilityError, OnodaError
 
@@ -284,7 +284,7 @@ class RlmStage:
         }
 
 
-def detect_sandbox() -> Sandbox | SeatbeltSandbox:
+def detect_sandbox() -> PiSandbox:
     """This host's Pi sandbox (A50), or `CapabilityError` saying why there is none.
 
     Linux gets the bwrap backend, macOS the Seatbelt one; any other platform
@@ -321,7 +321,7 @@ def build_launch(
     max_acquisitions: int,
     reducer: tuple[str, str] | None = None,
     candidate: HarnessCandidate | None = None,
-    sandbox: Sandbox | SeatbeltSandbox | None = None,
+    sandbox: PiSandbox | None = None,
     task_kind: TaskKind = "case",
     broker_socket: Path | None = None,
 ) -> Launch:

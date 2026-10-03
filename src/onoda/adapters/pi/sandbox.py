@@ -482,3 +482,7 @@ class SeatbeltSandbox:
     def pi_settings(shell_path: Path) -> dict[str, str]:
         """The settings.json entries that route tool commands into the inner layer."""
         return Sandbox.pi_settings(shell_path)
+
+
+# Either backend; `runtime.detect_sandbox` picks the one this host supports.
+PiSandbox = Sandbox | SeatbeltSandbox
