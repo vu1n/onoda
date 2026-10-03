@@ -522,6 +522,9 @@ def test_an_uncertain_scheduler_failure_closes_the_broker(tmp_path, monkeypatch)
 
 def test_stand_in_and_orca_jobs_never_share_a_cache_entry(tmp_path):
     binary = stand_in(tmp_path)
+    if sandbox_for(binary) is None:
+        # A non-stand-in broker refuses to run without a job sandbox (A65).
+        pytest.skip("no working job sandbox on this host (bwrap or Seatbelt)")
     cache = tmp_path / "cache"
     first = broker(tmp_path, "run1", scheduler=scheduler(tmp_path, binary), cache_dir=cache)
     assert first.submit(submit()).executed_here
