@@ -16,10 +16,12 @@ journal event that cites them:
 - `task.acquire` is an acquisition `read` receipt citing the pinned output
   with `executed_here: false`, followed by a `job-collected` checkpoint.
 - `task.execute` (VTE tasks, A59) is an `execution` receipt labelled
-  `orca-local` (`executed_here: true`) or, for a broker cache hit, an
-  acquisition `read` receipt (`executed_here: false`, `cache_hit: true`);
-  both cite the submitted input and the job's log and are followed by a
-  `job-collected` checkpoint whose `visible` names the job (`job.<job id>`).
+  `orca-local` only when `executed_here` is true. A broker cache hit is an
+  acquisition `read` receipt (`cache_hit: true`); a job nothing ran for that
+  is not a hit (launch error, replay) is an acquisition `read` receipt
+  labelled `not-executed`, never an execution. All cite the submitted input
+  and the job's log and are followed by a `job-collected` checkpoint whose
+  `visible` names the job (`job.<job id>`).
   Every line must agree with the broker's journal (job id, status, input and
   output sha256, `executed_here`, `cache_hit`); a spool with any
   `task.execute` is refused without that journal. Broker jobs no line cites
@@ -142,6 +144,9 @@ ACTOR = "pi-ingest"
 ACQUIRE = "acquire:orca-output"  # same operation name as the M2 case runner's acquisition
 EXECUTE = "execute:orca-job"  # a broker job ORCA ran for this submission
 ACQUIRE_CACHED = "acquire:orca-cache"  # a broker cache hit: an earlier job's bytes
+# A broker job nothing ran for that is not a cache hit (the binary failed to
+# launch, or a replay served a recorded output): the broker's bytes, acquired.
+ACQUIRE_UNEXECUTED = "acquire:orca-broker"
 BROKER_CODE_REF = "onoda.science.orca_broker"
 # `orca_submit`'s tool receipt records what the agent saw; the ORCA job itself
 # is the receipt its `task.execute` line becomes, so the job is never counted twice.
@@ -1178,18 +1183,25 @@ class _Writer:
         self.checkpoint(f"checkpoint:job-collected:{line.seq}", "job-collected", "agent")
 
     def on_execute(self, line: TaskExecute) -> None:
-        """A broker job: executed here, or an earlier job's bytes served from the cache."""
+        """A broker job: executed here, an earlier job's bytes served from the cache,
+        or a job nothing ran for (only `executed_here` makes an execution receipt)."""
         stand_in = bool(getattr(self.broker[line.job_id], "stand_in", False))
-        # The scheduler's own job labels; a cache hit of a real ORCA job adds none.
-        job_labels = ["acquired", "cache-hit"] if line.cache_hit else []
-        if stand_in or not line.cache_hit:
+        if line.executed_here:
+            operation, kind, job_labels = EXECUTE, "execution", []
+        elif line.cache_hit:
+            operation, kind, job_labels = ACQUIRE_CACHED, "read", ["acquired", "cache-hit"]
+        else:
+            operation, kind, job_labels = ACQUIRE_UNEXECUTED, "read", ["acquired", "not-executed"]
+        # The scheduler's own job labels (`orca-local` only for a job ORCA ran);
+        # a stand-in's say "not ORCA" however the bytes were obtained.
+        if stand_in or line.executed_here:
             job_labels += scheduler_job_labels(stand_in)
         if stand_in:  # a stand-in's observations are synthetic, executed or cached
             job_labels.append("synthetic")
         inp = self.obj(line.input, "text/plain", ["orca-input", *self.synthetic], encoding="utf-8")
         output = self.obj(line.output, "text/plain", ["job-output", *job_labels])
         spec = StepSpec.new(
-            operation=ACQUIRE_CACHED if line.cache_hit else EXECUTE,
+            operation=operation,
             inputs={"input": inp},
             code_ref=BROKER_CODE_REF,
             determinism="external",
@@ -1197,7 +1209,7 @@ class _Writer:
         inv_id = self.invocation(
             f"execute:{line.seq}",
             spec,
-            "read" if line.cache_hit else "execution",
+            kind,
             {"input": inp},
             {"log": output},
             status="succeeded" if line.status == "completed" else "failed",

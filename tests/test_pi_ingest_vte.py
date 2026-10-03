@@ -10,7 +10,8 @@ import pytest
 from test_pi_ingest import SpoolBuilder
 
 from onoda.adapters.pi.ingest import ingest_spool, run_claim, run_vte_claim
-from onoda.adapters.pi.vte_contract import BrokerReply, VteClaim
+from onoda.adapters.pi.vte import _grade_value, _vte_jobs
+from onoda.adapters.pi.vte_contract import BrokerReply, ClaimedVte, VteClaim
 from onoda.canonical import sha256_digest
 from onoda.clock import LogicalClock
 from onoda.errors import IntegrityError, OnodaError
@@ -295,6 +296,42 @@ def test_failed_job_is_a_failed_execution(tmp_path):
     result = ingest(store, task, sb.dir, journal=journal)
     receipt = _jobs(store, result)["j0001"]
     assert receipt.invocation_kind == "execution" and receipt.status == "failed"
+
+
+def test_a_job_that_never_ran_is_never_an_execution_receipt(tmp_path):
+    """`executed_here: false` without a cache hit (the binary failed to launch)."""
+    sb = SpoolBuilder(tmp_path / "w").start()
+    sb.call("c1", "orca_submit", {"input": INPUT_B})
+    sb.line(
+        "task.execute",
+        tool_call_id="c1",
+        job_id="j0001",
+        status="failed",
+        input=sb.put(INPUT_B.encode()),
+        output=sb.put(b""),
+        cache_hit=False,
+        executed_here=False,
+    )
+    sb.result("c1", "orca_submit", "")
+    sb.end()
+    sb.write()
+    store, task = make_store(tmp_path / "store")
+    launch_error = reply("j0001", INPUT_B, b"", status="failed").model_copy(
+        update={"executed_here": False}
+    )
+    result = ingest(store, task, sb.dir, journal=[launch_error])
+    receipt = _jobs(store, result)["j0001"]
+    assert receipt.invocation_kind == "read" and receipt.status == "failed"
+    assert receipt.metadata["executed_here"] is False and receipt.metadata["cache_hit"] is False
+    assert "orca-local" not in receipt.labels and "cache-hit" not in receipt.labels
+    assert {"acquired", "not-executed"} <= set(receipt.labels)
+    # Grading still refuses to read a value from it.
+    jobs = _vte_jobs(store, "pi-run")
+    cs = ClaimedVte.model_validate(CLAIM["states"][0])
+    assert _grade_value(cs, jobs, "SC-NEVPT2", True) == (
+        "unsupported",
+        {"reason": "job_not_executed"},
+    )
 
 
 # ----------------------------------------------------------- refusals
