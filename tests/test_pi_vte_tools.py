@@ -416,3 +416,28 @@ def test_long_output_passes_through_for_observation_pack(tmp_path, broker):
     assert run.shown_result(1, "x1").endswith(output.decode())
     later = run.shown_result(3, "x1")  # ObservationPack's handle once it ages
     assert "obs_" in later and len(later) < len(output) // 4
+
+
+def test_orca_output_rereads_an_earlier_job_without_spending_a_job(tmp_path, broker):
+    """A72: job files are host-side, so the agent re-reads them through this tool."""
+    turns = [
+        turn(call("x1", "orca_submit", input=INPUT)),
+        turn(
+            call("r1", "orca_output", job_id="j0001"),
+            call("r2", "orca_output", job_id="j0001", find="fake-broker", context=0),
+            call("r3", "orca_output", job_id="j0001", find="no such text"),
+            call("r4", "orca_output", job_id="j0009"),
+        ),
+        turn(text("Synthetic scripted run complete.")),
+    ]
+    run = run_vte(tmp_path, turns, broker, max_executions=1)
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    output = broker.jobs["j0001"].decode()
+    assert shown(run, "r1") == "ORCA job j0001: whole output\n" + output
+    found = shown(run, "r2")
+    assert found.startswith('ORCA job j0001: 1 line(s) containing "fake-broker"\n')
+    assert "fake-broker output for j0001" in found and found.count("\n") == 1
+    assert shown(run, "r3") == 'ORCA job j0001: 0 line(s) containing "no such text"'
+    (missing,) = run.results("r4", "visible")
+    assert missing.is_error and "no job" in shown(run, "r4") and "j0001" in shown(run, "r4")
+    assert len(broker.submits) == 1 and len(run.of("task.execute")) == 1

@@ -108,6 +108,7 @@ def script(source: str, *submits: str, claim_job: str = "j0001") -> Script:
     turns = [
         [tool("s1", "structure")],
         [tool(f"x{i}", "orca_submit", input=text) for i, text in enumerate(submits, start=1)],
+        [tool("o1", "orca_output", job_id="j0001", find="NEVPT2")],  # a read: ingested, no job
         [tool("r1", "report_vtes", states=[state(claim_job)], notes="synthetic scripted claim")],
         [{"type": "text", "text": "reported"}],
     ]

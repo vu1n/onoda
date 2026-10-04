@@ -80,7 +80,7 @@ def test_target_irrep_must_be_normalized():
 
 def test_variant_tools_by_task_kind():
     assert VARIANTS["S1"].tools()[:3] == TASK_TOOLS
-    assert VARIANTS["S1"].tools("vte")[:3] == VTE_TASK_TOOLS
+    assert VARIANTS["S1"].tools("vte")[: len(VTE_TASK_TOOLS)] == VTE_TASK_TOOLS
     assert "orca_run" not in VARIANTS["S0"].tools("vte")
     assert (
         GatewayPolicy(allowed_tools=("read",), max_requests=1, max_acquisitions=0).max_executions
