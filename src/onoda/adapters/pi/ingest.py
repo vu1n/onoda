@@ -137,7 +137,16 @@ from onoda.budgets import child_links
 from onoda.canonical import DIGEST_PREFIX, canonical_bytes, sha256_digest
 from onoda.context import decompose_fused_call, record_compaction
 from onoda.errors import CapabilityError, IntegrityError, MissingObjectError, OnodaError
-from onoda.records import Checkpoint, Event, InvocationReceipt, Run, StepSpec, TaskManifest, Usage
+from onoda.records import (
+    Checkpoint,
+    Event,
+    ForkDeclaration,
+    InvocationReceipt,
+    Run,
+    StepSpec,
+    TaskManifest,
+    Usage,
+)
 from onoda.science.orca_local import job_labels as scheduler_job_labels
 from onoda.store import Store, check_safe_id, record_ref
 
@@ -733,8 +742,10 @@ class _Writer:
         ingest_child: Callable[[_Plan], None] | None = None,
         broker: dict[str, BrokerJournalRecord] | None = None,
         unspooled: tuple[str, ...] = (),
+        fork: ForkDeclaration | None = None,
     ):
         self.store, self.run, self.task = store, run, task
+        self.fork = fork
         self.spool, self.archive, self.a = spool, archive, analysis
         self.sol_pi_config = sol_pi_config
         self.children = children or {}
@@ -862,6 +873,7 @@ class _Writer:
             context=context,
             jobs=list(self.jobs),
             quiescent=True,
+            ancestry_cut=dict(self.fork.visibility_cut) if self.fork is not None else {},
             capabilities=dict(PI_CAPABILITIES),
         )
         digest = self.store.put_record(cp)
@@ -896,6 +908,19 @@ class _Writer:
                 "spool": spool_desc.digest,
             },
         )
+        if self.fork is not None:
+            assert self.run.parent is not None and self.run.fork is not None
+            self.emit(
+                "fork.created",
+                "fork.created",
+                payload={"intervention": self.fork.intervention["kind"], "invalidated": []},
+                refs={
+                    "run": record_ref("run", self.run.run_id),
+                    "fork": record_ref("fork", self.run.fork),
+                    "parent_checkpoint": record_ref("checkpoint", self.run.parent.checkpoint),
+                    "task": record_ref("task", self.task.task_id),
+                },
+            )
         self.checkpoint("checkpoint:initialized", "initialized", "agent")
         handlers = {
             ProviderRequest: self.on_request,
@@ -1620,6 +1645,8 @@ def _write(
     task: TaskManifest,
     labels: tuple[str, ...],
     unspooled: tuple[str, ...] = (),
+    fork: ForkDeclaration | None = None,
+    fork_digest: str | None = None,
 ) -> None:
     """Ingest a prepared spool; children are written when the parent reaches them."""
     if plan.noop:
@@ -1633,6 +1660,7 @@ def _write(
             cfg["variant"],
             *(["synthetic"] if scripted else []),
             *(["rlm-child"] if "parent_run" in cfg else []),
+            *(["forked"] if fork is not None else []),
             *labels,
         ]
         run = Run.new(
@@ -1640,6 +1668,8 @@ def _write(
             experiment_id=PI_EXPERIMENT,
             task=task.task_id,
             config={**cfg, "spool": plan.spool.digest},
+            parent=fork.parent if fork is not None else None,
+            fork=fork_digest,
             quota_id=f"{PI_EXPERIMENT}-unbudgeted",
             created_at=store.clock.now(),
             labels=list(dict.fromkeys(run_labels)),
@@ -1658,6 +1688,7 @@ def _write(
         lambda child: _write(store, child, task, labels),
         plan.broker,
         unspooled,
+        fork,
     ).ingest()
 
 
@@ -1672,6 +1703,7 @@ def ingest_spool(
     key: bytes | None = None,
     expected_session_dir: str | Path | None = None,
     broker_journal: Iterable[BrokerJournalRecord] | None = None,
+    fork: str | None = None,
 ) -> IngestResult:
     """Turn one Pi spool into a run record; see the module docstring for the mapping.
 
@@ -1688,9 +1720,21 @@ def ingest_spool(
     `broker_journal` (the host broker's journal, A59) is required when any
     spool in the tree records `task.execute`; every such line must agree with
     it, and broker jobs no line cites are recorded as unspooled.
+    `fork` (a committed `ForkDeclaration` digest, from `adapters.pi.fork`)
+    makes the run a fork: the Run cites its parent and declaration, a
+    `fork.created` event follows `run.created`, and every checkpoint carries
+    the declaration's visibility cut.
     """
     check_safe_id(run_id, "run id")
     cfg = _run_config(config)
+    decl = None
+    if fork is not None:
+        decl = store.get_record("fork", fork)
+        assert isinstance(decl, ForkDeclaration)
+        if decl.new_run_id != run_id:
+            raise OnodaError(f"fork declaration {fork} is for run {decl.new_run_id}, not {run_id}")
+        if store.has_record("run", run_id) and store.run_record(run_id).fork != fork:
+            raise OnodaError(f"run {run_id} was ingested with a different fork declaration")
     if reserved := sorted(k for k in CHILD_CONFIG_KEYS if k in cfg):
         raise OnodaError(f"config keys {reserved} are set by ingest for RLM child runs")
     broker_jobs = _broker_jobs(broker_journal) if broker_journal is not None else None
@@ -1713,7 +1757,7 @@ def ingest_spool(
             raise MissingObjectError(digest, f"task input {name!r} -> {digest} is not committed")
     store.put_record(task)
     unspooled = tuple(sorted(set(broker_jobs or ()) - _cited_jobs(plan)))
-    _write(store, plan, task, tuple(labels), unspooled)
+    _write(store, plan, task, tuple(labels), unspooled, decl, fork)
     return _result(store, run_id, noop=False)
 
 

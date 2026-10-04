@@ -42,7 +42,7 @@ def _fixture_only(store: Store, run_id: str, command: str) -> None:
     if store.run_record(run_id).config.get("case_id") is not None:
         raise OnodaError(
             f"run {run_id} is an ORCA case run; `onoda {command}` handles fixture runs only "
-            "(see `onoda case --help`)"
+            "(see `onoda case --help`, and `onoda pi fork` to fork a Pi run)"
         )
 
 
@@ -460,6 +460,44 @@ def cmd_pi_run_vte(a) -> Any:
         ),
     )
     return _pi_run_summary(pi)
+
+
+def cmd_pi_fork(a) -> Any:
+    from onoda.adapters.pi.contract import Script
+    from onoda.adapters.pi.fork import fork_pi_run
+    from onoda.adapters.pi.runtime import detect_sandbox
+    from onoda.science.orca_local import OrcaSettings
+
+    store = _store(a.store)
+    cfg = store.run_record(a.run_id).config
+    vte = cfg.get("task_kind") == "vte"
+    pi = fork_pi_run(
+        store,
+        a.run_id,
+        a.checkpoint,
+        _vte_case(cfg.get("case_id"), a.cases_root)
+        if vte
+        else _case(cfg.get("case_id"), a.cases_root),
+        new_run_id=a.new_run,
+        continuation=Script.model_validate_json(Path(a.script).read_text()),
+        reason=a.reason,
+        work_dir=Path(a.work_dir),
+        budget_treatment="fresh-allowance" if a.fresh_allowance else "inherit-remaining",
+        # Every field defaults off; OrcaLocalScheduler refuses unresolved settings.
+        orca=OrcaSettings(
+            enabled=a.enable_live_execution,
+            binary=a.orca_binary,
+            work_root=a.orca_work_root,
+            max_wall_seconds=a.max_wall_seconds,
+            stand_in=a.stand_in,
+        )
+        if vte
+        else None,
+        cache_dir=Path(a.orca_cache) if a.orca_cache else None,
+        sandbox=detect_sandbox() if a.sandbox else None,
+        timeout_s=a.timeout,
+    )
+    return {**_pi_run_summary(pi), "parent": a.run_id, "checkpoint": a.checkpoint}
 
 
 def cmd_pi_evaluate_vte(a) -> Any:
@@ -1094,6 +1132,34 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--timeout", type=float, default=3600, help="seconds for the whole Pi run")
     rv.add_argument("--cases-root", help="VTE cases (default cases-dev/questdb)")
     rv.set_defaults(func=cmd_pi_run_vte)
+    pf = pi.add_parser(
+        "fork",
+        help="fork a recorded Pi run at a checkpoint: replay it there, then continue on a script",
+    )
+    pf.add_argument("run_id", help="the parent run")
+    pf.add_argument("--checkpoint", required=True, help="see `onoda checkpoint list`")
+    pf.add_argument("--new-run", required=True)
+    pf.add_argument("--store", required=True)
+    pf.add_argument("--work-dir", required=True, help="short for a VTE run: the broker socket")
+    pf.add_argument("--script", required=True, help="the continuation (offline; synthetic)")
+    pf.add_argument("--reason", required=True, help="why this fork, recorded with it")
+    pf.add_argument(
+        "--fresh-allowance",
+        action="store_true",
+        help="give the fork the parent's caps again on top of the replayed prefix",
+    )
+    pf.add_argument("--sandbox", action="store_true", help="run Pi in the sandbox")
+    pf.add_argument(
+        "--enable-live-execution", action="store_true", help="VTE: let the broker run ORCA"
+    )
+    pf.add_argument("--orca-binary", help="VTE: the parent's ORCA binary (or stand-in)")
+    pf.add_argument("--orca-work-root")
+    pf.add_argument("--max-wall-seconds", type=int, help="per ORCA job")
+    pf.add_argument("--stand-in", action="store_true", help="the binary is a test stand-in")
+    pf.add_argument("--orca-cache", help="shared broker cache directory (A59)")
+    pf.add_argument("--timeout", type=float, default=300)
+    pf.add_argument("--cases-root")
+    pf.set_defaults(func=cmd_pi_fork)
     rp2 = pi.add_parser("replay", help="re-run a scripted run; fails closed on any drift")
     rp2.add_argument("run_id")
     rp2.add_argument("--store", required=True)

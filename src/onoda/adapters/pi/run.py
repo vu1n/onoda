@@ -61,7 +61,7 @@ from onoda.budgets import child_links
 from onoda.canonical import canonical_bytes, sha256_digest
 from onoda.errors import CapabilityError, OnodaError, ReplayMismatch
 from onoda.portability import imported_runs
-from onoda.records import TaskManifest
+from onoda.records import ForkDeclaration, TaskManifest
 from onoda.science.contract import CASES_ROOT, LoadedCase
 from onoda.science.orca_broker import (
     DEFAULT_LIMITS,
@@ -106,6 +106,30 @@ class PiRun:
     ingest: IngestResult
     exit_code: int
     stderr_tail: str
+
+
+@dataclass(frozen=True)
+class ForkLaunch:
+    """What makes a launch a fork (built by `adapters.pi.fork`, never by hand).
+
+    `declaration` is committed with the task, once the launch is staged;
+    `config` is recorded as the run's `config["fork"]`; `task_id` is the
+    parent's task, which the fork must reproduce exactly; `broker_prefix`
+    serves a VTE parent's jobs before the fork point.
+    """
+
+    declaration: ForkDeclaration
+    config: dict[str, Any]
+    task_id: str
+    broker_prefix: BrokerReplay | None = None
+
+
+def _commit_fork(store: Store, fork: ForkLaunch, task: TaskManifest, config: dict[str, Any]) -> str:
+    """Commit the declaration and record the fork in `config`; refuse a task that differs."""
+    if task.task_id != fork.task_id:
+        raise OnodaError(f"the fork staged task {task.task_id}, not its parent's {fork.task_id}")
+    config["fork"] = fork.config
+    return store.put_record(fork.declaration)
 
 
 def _commit_task(
@@ -183,8 +207,13 @@ def run_case(
     timeout_s: float = 300,
     candidate: HarnessCandidate | None = None,
     sandbox: PiSandbox | None = None,
+    fork: ForkLaunch | None = None,
 ) -> PiRun:
     """Run one variant on one case and ingest it as `run_id`.
+
+    `fork` (from `adapters.pi.fork.fork_pi_run`) makes the run a fork of a
+    recorded run: its declaration is committed with the task and the run
+    cites its parent.
 
     `sandbox` runs Pi inside the sandbox (A50; bwrap or Seatbelt, recorded as
     its `kind`); a live run needs one.
@@ -261,9 +290,12 @@ def run_case(
         sol_pi_override = candidate.sol_pi_override()
         if sol_pi_override is not None:
             config["sol_pi_config_override"] = sol_pi_override
+    fork_digest = _commit_fork(store, fork, task, config) if fork is not None else None
     _record_driver(store, config, script, live)
     result = launch(prepared, timeout_s=timeout_s)
-    return _ingest_launch(store, prepared, result, run_id=run_id, task=task, config=config)
+    return _ingest_launch(
+        store, prepared, result, run_id=run_id, task=task, config=config, fork=fork_digest
+    )
 
 
 def _check_new_run(store: Store, run_id: str, variant_id: str) -> None:
@@ -283,6 +315,7 @@ def _ingest_launch(
     task: TaskManifest,
     config: dict[str, Any],
     broker_journal: tuple[BrokerJournalEntry, ...] | None = None,
+    fork: str | None = None,
 ) -> PiRun:
     """Ingest a finished launch's spool as `run_id`, against the broker journal if given."""
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
@@ -291,6 +324,8 @@ def _ingest_launch(
         )
     # A case run's ingest call stays exactly as M3 made it (no `broker_journal` keyword).
     journal = {} if broker_journal is None else {"broker_journal": broker_journal}
+    if fork is not None:
+        journal["fork"] = fork
     ingested = ingest_spool(
         store,
         result.spool_dir,
@@ -453,6 +488,7 @@ def run_vte_case(
     sandbox: PiSandbox | None = None,
     orca_mpi_home: Path | None = None,
     limits: BrokerLimits = DEFAULT_LIMITS,
+    fork: ForkLaunch | None = None,
 ) -> PiRun:
     """Run one variant on one VTE case, its ORCA jobs through a host broker; ingest it.
 
@@ -469,7 +505,8 @@ def run_vte_case(
     Every ORCA job runs in this host's job sandbox (A65; `orca_mpi_home` is
     the MPI prefix it exposes), and real ORCA is refused without one; only a
     labelled stand-in runs unconfined on a host that has none. `limits` are
-    the broker's input caps.
+    the broker's input caps. `fork` is as for `run_case`; its broker prefix
+    serves the parent's jobs before the fork point, then the broker runs live.
     """
     _check_new_run(store, run_id, variant_id)
     max_requests = _request_cap(live, max_requests)
@@ -510,6 +547,7 @@ def run_vte_case(
         work_dir / "broker" / JOURNAL_NAME,
         scheduler=scheduler,
         cache_dir=cache_dir,
+        prefix=fork.broker_prefix if fork is not None else None,
         max_executions=bundle.max_executions,
         job_sandbox=job_sandbox,
         limits=limits,
@@ -546,6 +584,7 @@ def run_vte_case(
         config["sandbox"] = sandbox.kind
     if reducer is not None:
         config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
+    fork_digest = _commit_fork(store, fork, task, config) if fork is not None else None
     _record_driver(store, config, script, live)
     result = _launch_with_broker(prepared, broker, timeout_s)
     # Read once: the bytes committed are exactly the bytes ingest checks the spool against.
@@ -561,6 +600,7 @@ def run_vte_case(
         task=task,
         config=config,
         broker_journal=parse_journal(journal, str(broker.journal_path)),
+        fork=fork_digest,
     )
 
 
@@ -666,6 +706,25 @@ def _jobs_served(entries: Iterable[BrokerJournalEntry]) -> list[tuple[Any, ...]]
     ]
 
 
+def recorded_staging(store: Store, run_id: str) -> dict[str, Any]:
+    """The bundle a recorded run was staged with: instruction, docs and ladder, from its task."""
+    run = store.run_record(run_id)
+    task = store.get_record("task", run.task)
+    docs = {}
+    for k, d in task.inputs.items():
+        if k.startswith("doc:"):
+            check_doc_name(k.removeprefix("doc:"))
+            docs[k.removeprefix("doc:")] = store.get_bytes(d)
+    ladder = store.get_bytes(task.inputs["ladder"]) if "ladder" in task.inputs else None
+    ladder_labels = store.descriptor(task.inputs["ladder"]).labels if ladder else []
+    return {
+        "instruction": run.config["instruction"],
+        "docs": docs,
+        "ladder": ladder,
+        "synthetic_ladder": "synthetic" in ladder_labels,
+    }
+
+
 def replay_run_pi(
     store: Store,
     run_id: str,
@@ -695,18 +754,10 @@ def replay_run_pi(
     vte = cfg.get("task_kind") == "vte"
     if vte != isinstance(case, LoadedVteCase):
         raise OnodaError(f"run {run_id} is {'a' if vte else 'not a'} VTE run")
-    task = store.get_record("task", run.task)
-    docs = {}
-    for k, d in task.inputs.items():
-        if k.startswith("doc:"):
-            check_doc_name(k.removeprefix("doc:"))
-            docs[k.removeprefix("doc:")] = store.get_bytes(d)
     ends = [e for e in store.events(run_id) if e.type == "pi.spool-end"]
     if not ends:
         raise CapabilityError(f"run {run_id} has no spool.end; an incomplete run is not replayed")
     recorded_status = ends[-1].payload["status"]
-    ladder = store.get_bytes(task.inputs["ladder"]) if "ladder" in task.inputs else None
-    ladder_labels = store.descriptor(task.inputs["ladder"]).labels if ladder else []
     script = recorded_script(store, run_id)
     if _unkeyed_turn(script):
         raise CapabilityError(f"run {run_id} has a recorded turn without a replay key")
@@ -717,12 +768,7 @@ def replay_run_pi(
     )
     recorded = _recorded_requests(store, run_id)
     work_dir = Path(work_dir)
-    staging = {
-        "instruction": cfg["instruction"],
-        "docs": docs,
-        "ladder": ladder,
-        "synthetic_ladder": "synthetic" in ladder_labels,
-    }
+    staging = recorded_staging(store, run_id)
     broker = None
     recorded_jobs: tuple[BrokerJournalEntry, ...] = ()
     if isinstance(case, LoadedVteCase):

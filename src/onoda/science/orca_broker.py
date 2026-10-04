@@ -34,6 +34,14 @@ Each replayed reply repeats the recorded `cache_hit` and `reason`, so the
 agent is shown exactly what it was shown (a recorded execution replays with
 neither flag set); `executed_here` is always false.
 
+A forked run's broker (`prefix`, with a scheduler) does both: it serves the
+parent's recorded jobs, as a replay, until every one of them was served, and
+only then runs new submissions live. The prefix must come from the same ORCA
+binary and stand-in flag, so its cache keys are this broker's. A replayed
+job's files are attachable to a live job only when the shared cache holds
+them under that job's key (checked by sha256); otherwise attaching one is
+refused as `unknown_attachment`. The prefix jobs count toward `max_executions`.
+
 Every live job runs in a job sandbox (`orca_sandbox`, A65) that sees only its
 job directory, ORCA_HOME and the MPI prefix; the broker refuses to start for
 real ORCA without one that works. Before anything runs, `input_problem`
@@ -432,6 +440,13 @@ class BrokerReplay:
         )
 
 
+def _consumable(replay: BrokerReplay) -> BrokerReplay:
+    """A copy whose queues are consumed as served; the caller's replay stays as given."""
+    return BrokerReplay(
+        replay.binary_sha256, {k: list(v) for k, v in replay.jobs.items()}, replay.stand_in
+    )
+
+
 @dataclass(frozen=True)
 class _Job:
     """A job of this broker: its produced files, with a host path unless replayed."""
@@ -575,12 +590,15 @@ class OrcaBroker:
         scheduler: OrcaLocalScheduler | None = None,
         cache_dir: str | os.PathLike[str] | None = None,
         replay: BrokerReplay | None = None,
+        prefix: BrokerReplay | None = None,
         max_executions: int = DEFAULT_MAX_EXECUTIONS,
         job_sandbox: JobSandbox | None = None,
         limits: BrokerLimits | None = DEFAULT_LIMITS,
     ):
         if (scheduler is None) == (replay is None):
             raise OnodaError("a broker runs either a scheduler or a replay, exactly one")
+        if prefix is not None and scheduler is None:
+            raise OnodaError("a replay prefix needs a scheduler to continue with")
         if replay is not None and (cache_dir is not None or job_sandbox is not None):
             raise OnodaError("a replaying broker serves recorded outputs only, no cache")
         if not 0 < max_executions <= MAX_JOBS:
@@ -597,16 +615,17 @@ class OrcaBroker:
             _check_confinement(scheduler, job_sandbox, cache_dir, limits)
             self.binary_sha256 = sha256_file(scheduler.settings.binary)
             self.stand_in = scheduler.settings.stand_in
+            if prefix is not None and prefix.jobs:
+                if (prefix.binary_sha256, prefix.stand_in) != (self.binary_sha256, self.stand_in):
+                    raise OnodaError(
+                        "a replay prefix must come from this broker's ORCA binary and stand-in flag"
+                    )
+                self._replay = _consumable(prefix)
         else:
             assert replay is not None
             self.binary_sha256 = replay.binary_sha256
             self.stand_in = replay.stand_in
-            # Consumed as served; the caller's replay stays as given.
-            self._replay = BrokerReplay(
-                replay.binary_sha256,
-                {k: list(v) for k, v in replay.jobs.items()},
-                replay.stand_in,
-            )
+            self._replay = _consumable(replay)
         self._run = uuid.uuid4().hex  # scheduler keys are per execution, never the cache key
         self._jobs: dict[str, _Job] = {}
         # Every job's facts in job order, so a check can use an earlier job's HF energy.
@@ -685,7 +704,10 @@ class OrcaBroker:
                 self.stand_in,
             )
             if self._replay is not None:
-                return self._serve_replay(request, key, input_sha)
+                reply = self._serve_replay(request, key, input_sha)
+                if self._scheduler is not None and not any(self._replay.jobs.values()):
+                    self._replay = None  # the prefix is served; later submissions run live
+                return reply
             return self._serve_live(request, key, input_sha, input_bytes, attached)
         except _Refused as r:
             return self._refuse(request.tool_call_id, r.reason)
@@ -772,6 +794,17 @@ class OrcaBroker:
         if not queue:
             raise _Refused("replay_miss")
         rec = queue.pop(0)
+        files: dict[str, tuple[str, Path | None]] = {f.name: (f.sha256, None) for f in rec.files}
+        if self._cache is not None and files:
+            # A fork's later live jobs may attach these: take the host paths from
+            # the shared cache, but only for files whose bytes match the record.
+            try:
+                hit = self._cache.get(key)
+            except _CacheCorrupt:
+                hit = None
+            for name, (sha, path) in (hit[1] if hit is not None else {}).items():
+                if files.get(name, (None,))[0] == sha:
+                    files[name] = (sha, path)
         return self._reply(
             request,
             job_id=self._allocate(),
@@ -779,7 +812,7 @@ class OrcaBroker:
             status=rec.status,
             input_sha=input_sha,
             log=rec.output,
-            files={f.name: (f.sha256, None) for f in rec.files},
+            files=files,
             executed_here=False,
             cache_hit=rec.cache_hit,
             stand_in=rec.stand_in,
@@ -819,7 +852,8 @@ class OrcaBroker:
 
         inputs = {"input": input_bytes}
         for name, (sha, path) in attached.items():
-            assert path is not None  # live jobs always hold host paths
+            if path is None:  # a replayed prefix job whose file the cache does not hold
+                raise _Refused("unknown_attachment")
             try:
                 data = read_produced(path)
             except OnodaError as exc:

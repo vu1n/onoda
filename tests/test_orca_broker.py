@@ -419,6 +419,68 @@ def test_replay_needs_the_recorded_bytes(tmp_path):
         BrokerReplay.from_journal(read_journal(live.journal_path), outputs)
 
 
+# --- fork prefix: replay the parent's jobs, then run live ----------------------------
+
+
+def _parent(tmp_path: Path, binary: Path, cache: Path | None = None) -> BrokerReplay:
+    """A parent run with one completed job; its replay is a fork's prefix."""
+    b = broker(tmp_path, "parent", scheduler=scheduler(tmp_path, binary), cache_dir=cache)
+    r = b.submit(submit())
+    return BrokerReplay.from_journal(read_journal(b.journal_path), _outputs([r]))
+
+
+def test_a_fork_broker_replays_the_prefix_then_runs_live(tmp_path):
+    binary = stand_in(tmp_path)
+    prefix = _parent(tmp_path, binary)
+    b = broker(tmp_path, "fork", scheduler=scheduler(tmp_path, binary, "w2"), prefix=prefix)
+    first = b.submit(submit())
+    assert first.status == "completed" and not first.executed_here and runs(binary) == 1
+    new = b.submit(submit("! a new input\n", "c2"))
+    assert new.executed_here and new.job_id == "j0002" and runs(binary) == 2
+    entries = [e for e in read_journal(b.journal_path) if e.event == "reply"]
+    assert [e.replay for e in entries] == [True, False]
+    # The prefix job's file is not on this host, so it cannot be attached.
+    gbw = (BrokerAttach(job_id="j0001", name="job.gbw"),)
+    assert b.submit(submit('%moinp "j0001.gbw"\n' + INPUT, "c3", gbw)).reason == (
+        "unknown_attachment"
+    )
+
+
+def test_a_fork_broker_attaches_prefix_files_from_the_shared_cache(tmp_path):
+    binary = stand_in(tmp_path)
+    cache = tmp_path / "cache"
+    prefix = _parent(tmp_path, binary, cache)
+    b = broker(
+        tmp_path, "fork", scheduler=scheduler(tmp_path, binary, "w2"), prefix=prefix,
+        cache_dir=cache,
+    )  # fmt: skip
+    assert not b.submit(submit()).executed_here
+    gbw = (BrokerAttach(job_id="j0001", name="job.gbw"),)
+    r = b.submit(submit('%moinp "j0001.gbw"\n' + INPUT, "c2", gbw))
+    assert r.executed_here and "moinp: orbitals for " + INPUT in log(r)
+
+
+def test_a_fork_broker_fails_closed_on_the_prefix(tmp_path):
+    binary = stand_in(tmp_path)
+    prefix = _parent(tmp_path, binary)
+    b = broker(tmp_path, "fork", scheduler=scheduler(tmp_path, binary, "w2"), prefix=prefix)
+    # Until the prefix is served, anything else is a miss, never a live job.
+    assert b.submit(submit("! not the parent's input\n")).reason == "replay_miss"
+    assert runs(binary) == 1
+    capped = broker(
+        tmp_path, "capped", scheduler=scheduler(tmp_path, binary, "w3"), prefix=prefix,
+        max_executions=1,
+    )  # fmt: skip
+    capped.submit(submit())
+    assert capped.submit(submit("! more\n", "c2")).reason == "max_executions"
+    (tmp_path / "other").mkdir()
+    other = stand_in(tmp_path / "other", STAND_IN + "\n# another binary\n")
+    with pytest.raises(OnodaError, match="same ORCA binary|this broker's ORCA binary"):
+        broker(tmp_path, "mixed", scheduler=scheduler(tmp_path, other, "w4"), prefix=prefix)
+    with pytest.raises(OnodaError, match="needs a scheduler"):
+        broker(tmp_path, "noscheduler", replay=prefix, prefix=prefix)
+
+
 def test_broker_mode_settings_fail_closed(tmp_path):
     binary = stand_in(tmp_path)
     with pytest.raises(OnodaError, match="exactly one"):
