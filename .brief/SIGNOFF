@@ -1,0 +1,11 @@
+pinned-acquired-cases conforms: runner.py change is a docstring correction (parser id @2 -> @3), no behavior change
+immutable-single-writer-records conforms: ratified @0002 (vu1n) adds signoff: required only; code unchanged by the amendment, refs re-pinned
+references-never-agent-visible conforms: ratified @0002 (vu1n) adds signoff: required only; code unchanged by the amendment, refs re-pinned
+sandbox-or-refuse conforms: ratified @0002 (vu1n) adds signoff: required only; code unchanged by the amendment, refs re-pinned
+broker-owns-orca conforms: ratified @0002 (vu1n) adds signoff: required only; code unchanged by the amendment, refs re-pinned
+live-settings-explicit conforms: ratified @0002 (vu1n) adds signoff: required only; code unchanged by the amendment, refs re-pinned
+seed-by-promotion-only conforms: ratified @0002 (vu1n); loop/compare spend checks now meet A51/A54, refs re-pinned
+pinned-acquired-cases conforms: ratified @0002 (vu1n); pi-claims and vte-claims now record case.review, refs re-pinned
+pi-pinned conforms: ratified @0002 (vu1n); build_launch refuses Pi/SoL-Pi off the pins (check_pins), refs re-pinned
+broker-owns-orca conforms: replies add a parser summary and orca_output lists a run's jobs (draft orca-reply-summary, A74); ORCA still runs only in the broker under one max_executions, and refusals still spend nothing
+live-settings-explicit conforms: run.sh adds memory-*.md tiers as --doc inputs (draft memory-tiers, A75); every live setting is still explicit and ORCA execution still needs ENABLE_LIVE_EXECUTION=1

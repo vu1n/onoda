@@ -168,6 +168,7 @@ def _p(value: Any) -> str:
     return format(Decimal(str(value)).quantize(Decimal("0.000001"), ROUND_HALF_EVEN), "f")
 
 
+# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — shadow answers go to the evaluator store only; the agent never sees them
 def shadow_run(
     store: Store,
     evaluator_store: Store,

@@ -179,6 +179,19 @@ def test_search_refuses_a_seed_evaluation_the_cap_cannot_cover(tmp_path):
     assert runner.calls == []
 
 
+def test_the_seed_evaluation_check_counts_repeats(tmp_path):
+    # 3 cases x 2 repeats at the 0.60 reserve need 3.60; one pass alone would fit in 3.00.
+    runner = SpyRunner()
+    result = optimize(
+        tmp_path, runner, ScriptedReflection([]), spend=cap("3.00", "0.60"), repeats=2
+    )
+    assert result.stop_reason == "spend cap cannot cover the seed evaluation"
+    assert runner.calls == []
+    result = optimize(tmp_path / "t", runner, ScriptedReflection([]), max_trials=5, repeats=2)
+    assert result.stop_reason == "trial budget cannot cover the seed evaluation"
+    assert runner.calls == []
+
+
 # ------------------------------------------------------------ recording
 
 

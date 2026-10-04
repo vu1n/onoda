@@ -183,6 +183,7 @@ def test_supported_unique_irrep_is_identified(evaluator_store):
     assert e.metrics["coverage"] == "1" and e.metrics["coverage.total"] == "7"
     assert e.metrics["count.reference.missing"] == "6"
     assert e.metrics["false_success_claims"] == "0"
+    assert e.metrics["case.review"] == "pending-human-review"
     assert e.metrics["claim.01.irrep_printed"] == "true"
     assert e.metrics["parser"] == PARSER_ID
     assert e.output_refs["job.j0001"] == sha256_digest(_out("ketene_f_target"))

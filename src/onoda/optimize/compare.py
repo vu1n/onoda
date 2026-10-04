@@ -42,7 +42,9 @@ def compare_candidates(
     """Run both candidates on `cases` and judge `candidate` against `baseline`.
 
     `max_cost_usd` caps the whole check; a round is skipped when `spent` plus
-    two runs at `run_reserve_usd` would pass it. Returns the check body.
+    two runs at `run_reserve_usd` would pass it. Under a cap, a failed run is
+    charged its reserve and a run that reports no cost stops the check and
+    rejects the candidate, as a live ablation does. Returns the check body.
     """
     if repeats < 1:
         raise OnodaError("repeats must be positive")
@@ -55,6 +57,7 @@ def compare_candidates(
     failed: list[dict[str, str]] = []
     spent = Decimal(0)
     stopped: str | None = None
+    unpriced: str | None = None
     rounds = 0
     for repeat in range(1, repeats + 1):
         for case_id in cases:
@@ -68,10 +71,19 @@ def compare_candidates(
                     trial = runner.run(harness[side], case_id, trial_id=run_id)
                 except Exception as exc:  # recorded, never fatal; the verdict goes unresolved
                     failed.append({"run": run_id, "error": type(exc).__name__})
+                    if run_reserve_usd is not None:  # it may have spent up to its reserve
+                        spent += run_reserve_usd
                     continue
                 vectors[side].append(trial.outcome)
-                spent += Decimal(trial.outcome.efficiency.get("cost_usd") or "0")
+                cost = trial.outcome.efficiency.get("cost_usd")
+                if cost is not None:
+                    spent += Decimal(cost)
+                elif max_cost_usd is not None:  # an unknown cost cannot be held to the cap
+                    unpriced = run_id
             rounds += 1
+            if unpriced:
+                stopped = f"run {unpriced} reported no cost; the check stops"
+                break
         if stopped:
             break
 
@@ -82,6 +94,9 @@ def compare_candidates(
     if failed:
         accepted = False
         reasons = (f"failed runs: {', '.join(f['run'] for f in failed)}", *reasons)
+    if unpriced:
+        accepted = False
+        reasons = (f"run {unpriced} reported no cost under a spend cap", *reasons)
     synthetic = any(v.synthetic for vs in vectors.values() for v in vs)
     return {
         "schema": CHECK_SCHEMA,

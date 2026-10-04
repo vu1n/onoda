@@ -171,6 +171,7 @@ def test_supported_claim_matches_every_requested_state(evaluator_store):
     assert set(e.assignments.values()) == {"supported"}
     assert e.metrics["count.supported"] == str(len(obs.excited_states) + 1)
     assert e.metrics["false_success_claims"] == "0"
+    assert e.metrics["case.review"] == "pending-human-review"
     assert e.unresolved == []
     assert e.output_refs["claim"] == "sha256:" + "0" * 64
     assert evaluator_store.has_record("evaluation", e.evaluation_id)

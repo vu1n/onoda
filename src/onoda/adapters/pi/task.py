@@ -251,6 +251,7 @@ def evaluate_claims(
     metrics.update({f"count.{v}": str(counts[v]) for v in VERDICTS})
     metrics["false_success_claims"] = str(counts["contradicted"] + counts["unsupported"])
     metrics["case.id"] = m.case_id
+    metrics["case.review"] = m.review.status  # an unreviewed case never reads as reviewed (A26)
     metrics["claim.present"] = "true" if claim is not None else "false"
     metrics["parser"] = PARSER_ID
     metrics["output.name"] = output_key

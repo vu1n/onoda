@@ -265,6 +265,7 @@ _DARWIN_ETC = (
 _DARWIN_LANG = "en_US.UTF-8"  # macOS has no C.UTF-8 locale on every release
 
 
+# Context: doc://onoda/agent-sandbox@0002#sandbox-or-refuse — one layer on macOS: inner commands confined, Pi's node process is not
 @dataclass(frozen=True)
 class SeatbeltSandbox:
     """The macOS backend: `Sandbox`'s inner layer as Seatbelt profiles; no outer layer.
