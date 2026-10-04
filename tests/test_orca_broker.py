@@ -36,6 +36,7 @@ from onoda.science.orca_broker import (
 )
 from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
 from onoda.science.orca_sandbox import JobSandbox, host_job_sandbox
+from onoda.science.orca_summary import job_summary
 
 STAND_IN_MARKER = "STAND-IN EXECUTABLE - NOT ORCA"
 
@@ -774,3 +775,10 @@ def test_replies_carry_checks_that_use_earlier_jobs_and_replay_identically(tmp_p
     again = broker(tmp_path, "replay", replay=replay)
     replayed = [again.submit(submit(text, f"c{i}")) for i, text in enumerate(inputs)]
     assert [r.checks for r in replayed] == [r.checks for r in recorded]
+    # A74: the parser summary travels the same way.
+    assert recorded[1].summary == job_summary((FIXTURES / "ketene_b_valence_dz.out").read_bytes())
+    assert recorded[1].summary[0] == "termination: normal"
+    assert [e.summary for e in read_journal(live.journal_path) if e.event == "reply"] == [
+        r.summary for r in recorded
+    ]
+    assert [r.summary for r in replayed] == [r.summary for r in recorded]
