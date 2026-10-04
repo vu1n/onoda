@@ -1,1 +1,9 @@
 pinned-acquired-cases conforms: runner.py change is a docstring correction (parser id @2 -> @3), no behavior change
+immutable-single-writer-records amend-proposed: mark signoff: required (brief v0.3.0 upgrade step)
+references-never-agent-visible amend-proposed: mark signoff: required (brief v0.3.0 upgrade step)
+sandbox-or-refuse amend-proposed: mark signoff: required (brief v0.3.0 upgrade step)
+broker-owns-orca amend-proposed: mark signoff: required (brief v0.3.0 upgrade step)
+live-settings-explicit amend-proposed: mark signoff: required (brief v0.3.0 upgrade step)
+seed-by-promotion-only amend-proposed: drop the Known gaps note this PR fixes
+pinned-acquired-cases amend-proposed: drop the Known gaps note this PR fixes
+pi-pinned amend-proposed: drop the Known gaps note this PR fixes
