@@ -754,6 +754,7 @@ def replay_run_pi(
     vte = cfg.get("task_kind") == "vte"
     if vte != isinstance(case, LoadedVteCase):
         raise OnodaError(f"run {run_id} is {'a' if vte else 'not a'} VTE run")
+    staging = recorded_staging(store, run_id)  # checks every doc name first
     ends = [e for e in store.events(run_id) if e.type == "pi.spool-end"]
     if not ends:
         raise CapabilityError(f"run {run_id} has no spool.end; an incomplete run is not replayed")
@@ -768,7 +769,6 @@ def replay_run_pi(
     )
     recorded = _recorded_requests(store, run_id)
     work_dir = Path(work_dir)
-    staging = recorded_staging(store, run_id)
     broker = None
     recorded_jobs: tuple[BrokerJournalEntry, ...] = ()
     if isinstance(case, LoadedVteCase):
