@@ -8,7 +8,6 @@ related_code:
   - "src/onoda/science/orca_local.py"
   - "src/onoda/adapters/pi/runtime.py"
   - "src/onoda/systemone.py"
-  - "src/onoda/budgets.py"
   - "src/onoda/records.py"
   - "experiments/questdb/run.sh"
 carries: [A7, A9, A11, A20, A35]  # rows of the former docs/ASSUMPTIONS.md register

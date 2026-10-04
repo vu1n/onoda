@@ -9,7 +9,6 @@ related_code:
   - "src/onoda/portability.py"
   - "src/onoda/science/evaluator.py"
   - "src/onoda/adapters/pi/run.py"
-  - "src/onoda/adapters/pi/vte.py"
 carries: [A3, A12]  # rows of the former docs/ASSUMPTIONS.md register
 ---
 

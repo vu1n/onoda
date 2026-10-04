@@ -8,7 +8,8 @@ related_code:
   - "src/onoda/adapters/pi/sandbox.py"
   - "src/onoda/adapters/pi/runtime.py"
   - "pi/extensions/onoda-recorder.ts"
-  - "src/onoda/adapters/tb/**"
+  - "src/onoda/adapters/tb/proxy.py"
+  - "src/onoda/adapters/tb/container.py"
   - "src/onoda/ablation/run.py"
   - "src/onoda/optimize/pi_runner.py"
 carries: [A38, A50, A60, A69, A72]  # rows of the former docs/ASSUMPTIONS.md register

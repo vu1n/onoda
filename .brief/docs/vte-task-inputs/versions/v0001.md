@@ -7,7 +7,6 @@ title: "What a VTE agent is given: geometry, point group and target counts; no e
 related_code:
   - "src/onoda/science/vte.py"
   - "src/onoda/adapters/pi/runtime.py"
-  - "src/onoda/adapters/pi/run.py"
   - "src/onoda/ablation/contract.py"
 carries: [A2, A33, A57, A61]  # rows of the former docs/ASSUMPTIONS.md register
 ---

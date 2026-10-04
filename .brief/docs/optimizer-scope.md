@@ -5,7 +5,10 @@ type: decision
 status: active
 title: "The optimizer changes only allowlisted components, sees verdict classes only, and the seed moves only by promotion"
 related_code:
-  - "src/onoda/optimize/**"
+  - "src/onoda/optimize/adapter.py"
+  - "src/onoda/optimize/loop.py"
+  - "src/onoda/optimize/compare.py"
+  - "src/onoda/optimize/reflection.py"
   - "src/onoda/adapters/pi/contract.py"
   - "src/onoda/adapters/pi/seed_candidate.json"
 carries: [A44, A45, A46, A48, A51, A53, A54, A55]  # rows of the former docs/ASSUMPTIONS.md register

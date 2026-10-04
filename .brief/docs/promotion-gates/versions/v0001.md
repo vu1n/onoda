@@ -5,7 +5,9 @@ type: decision
 status: active
 title: "Gates allow zero capability worsening and zero false-success increase; a missing tolerance is unresolved"
 related_code:
-  - "src/onoda/ablation/**"
+  - "src/onoda/ablation/contract.py"
+  - "src/onoda/ablation/gates.py"
+  - "src/onoda/ablation/run.py"
   - "src/onoda/optimize/gates.py"
   - "src/onoda/optimize/contract.py"
 carries: [A14, A16, A18, A39, A40, A41, A42, A47, A49, A52]  # rows of the former docs/ASSUMPTIONS.md register

@@ -45,64 +45,35 @@ VCS is plain git. No project board; work items come from issues or goals.
 
 ## Invariants a review must verify
 
-- Objects and records are immutable. Nothing overwrites a committed file; a
-  migration or reanalysis writes a new record that cites the old one.
-- Commit before visible: bytes, then records, then the journal event that
-  references them. `Store.append_event` refuses uncommitted refs.
-- No floats in canonical records; exact values are decimal strings with units.
-- A specification digest is not an execution id. Identical specs produce
-  distinct receipts.
-- Offline replay fails closed (`ReplayMismatch`) on any request change; no
-  nearest-match or live fallback.
-- A fork never inherits outputs of a changed node or anything after its
-  visibility cut, including via memory, search, or content-hash lookup.
-- Evaluator references and credentials never enter the agent store or an
-  agent-visible export.
-- Import is data-only: no code execution, pickle, network, or installs.
-- Synthetic fixture output is labelled synthetic and never described as a
-  solver or chemistry result.
-- Acquired solver outputs are recorded as acquired (`executed_here: false`),
-  never as executions; stand-in executables are labelled and their
-  observations are synthetic.
-- Parsed values are the printed decimal text with units and line evidence;
-  anything unreadable is an explicit problem, never a default. Evaluation
-  never matches states by nearest energy, and a missing tolerance makes a
-  comparison `unresolved`, not `pass`.
-- Every live-execution setting defaults off and unresolved live settings fail
-  closed.
-- Pi runs: every byte the model sees is spooled (fsynced) before Pi hands it
-  over, the store is written only by ingest, the recorder loads last, fused
-  `then_run` never reaches a solver, scripted runs are labelled synthetic, and
-  the evaluator grades claims from the deterministic parser, never from
-  reducer receipts.
-- Ablations: reports live in the evaluator store only; a capability metric
-  without a declared tolerance is `unresolved`; the false-success tolerance is
-  zero; cases outside `development`/`acceptance` splits are refused; reports
-  over scripted runs say they are synthetic and not a mechanism verdict.
-- VTE runs: ORCA runs only in the host broker, never in the sandbox; its
-  journal (outside the Pi work dir) is committed with the run and ingest
-  refuses a spool that disagrees with it; a cache hit or a replayed job is
-  acquired (`executed_here: false`), never an execution; the bundle's,
-  gateway's and broker's `max_executions` are one number; a staged bundle
-  holding the references is refused before anything runs; claims are graded
-  from the parser over the cited job's bytes and paired with references by
-  (spin, irrep, character), never by energy order.
-- Shadow decisions (A67): live calls default off; the state holds agent-visible
-  data only; answers go to the evaluator store, are never shown to the agent and
-  never read by the grader or gates.
-- RLM: kernel state enters the record only through `commit_state` (JSON,
-  spooled as the exact bytes before the kernel gets its digest); every child
-  Pi run is ingested as its own run before the parent cites it, and its
-  requests and cost are charged to the parent's budget and metrics.
-- Optimizer: trials run on acceptance cases only, never the final split;
-  reflection sees agent traces plus verdict words and reason classes (A53),
-  never reducer receipts or evaluator references; a candidate is accepted on an
-  `eligible` gate verdict or, with `capability_gain` (A52), on a passing
-  capability gate with a strict capability gain, so an unresolved capability
-  gate never accepts; candidates change only the allowlisted components (A45).
-  The seed changes only by promotion (A54): `onoda optimize compare` passes
-  the gates against the current seed, and `seed_candidate.json` holds exactly
-  the bytes it measured.
+Each invariant is a governed decision in `.brief/docs/` (read it with `brief resolve`);
+this list is only the index. A review checks the change against every decision whose
+`related_code` it touches.
+
+- `record-integrity`: records are immutable, committed before visible (bytes, records,
+  event), float-free, one writer per run; fork/restart only from semantic checkpoints.
+- `replay-fails-closed`: offline replay matches exact digests or raises `ReplayMismatch`.
+- `evaluator-isolation`: references and credentials never reach the agent store or an
+  export; import is data-only.
+- `orca-parser-authoritative`: graded values come only from the deterministic parser;
+  ORCA's exit code is not trusted.
+- `match-by-identity`: never pair states by energy; no tolerance means `unresolved`.
+- `vte-grading-contract`: a claim counts only if the one cited job printed it, with irreps.
+- `vte-task-inputs`: the agent gets structure and target counts, never energies.
+- `live-off-by-default`: every live setting defaults off and fails closed.
+- `agent-sandbox`: live agent commands run sandboxed or the run is refused.
+- `orca-broker-boundary`: ORCA runs only in the host broker; one `max_executions`.
+- `promotion-gates`: zero capability worsening; false-success tolerance is zero.
+- `optimizer-scope`: allowlisted components only; the seed moves only by promotion.
+- `decision-models-shadow-only`: Jev/Clef and ladder checks never grade.
+- `pi-first-pinned-stack`: stock Pi 0.85.1 + SoL-Pi 1559b5c.
+- `case-data-provenance`: case bytes pinned by sha256; acquired is never an execution.
+
+Not yet captured as decisions (still check them):
+- Synthetic fixture output is labelled synthetic and never described as a solver or
+  chemistry result; stand-in executables are labelled and their observations synthetic.
+- Pi runs: every byte the model sees is spooled (fsynced) before Pi hands it over, the
+  recorder loads last, and fused `then_run` never reaches a solver.
+- RLM: every child Pi run is ingested as its own run before the parent cites it.
 
 Read the decisions in `.brief/docs/` before changing scientific behavior, and
 record new assumptions there (as a draft decision) instead of inventing

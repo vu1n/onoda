@@ -8,7 +8,6 @@ related_code:
   - "src/onoda/science/contract.py"
   - "src/onoda/science/runner.py"
   - "scripts/questdb_cases.py"
-  - "src/onoda/adapters/pi/run.py"
   - "src/onoda/science/evaluator.py"
 carries: [A1, A25, A26, A62]  # rows of the former docs/ASSUMPTIONS.md register
 ---
