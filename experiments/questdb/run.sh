@@ -36,6 +36,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 need() { [ -n "${!1:-}" ] || { echo "run.sh: $1 must be set explicitly (no default)" >&2; exit 2; }; }
 for v in PROVIDER MODEL CREDENTIAL_ENV MAX_REQUESTS MAX_COST_USD; do need "$v"; done
+# Context: doc://onoda/live-off-by-default@0002#live-settings-explicit — no live run without ENABLE_LIVE_EXECUTION=1 and every provider setting
 if [ "${ENABLE_LIVE_EXECUTION:-}" != 1 ]; then
   echo "run.sh: ORCA execution is off; set ENABLE_LIVE_EXECUTION=1 to run ORCA on this host" >&2
   exit 2

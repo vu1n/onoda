@@ -50,6 +50,7 @@ from onoda.records import Frozen as _Frozen
 # ------------------------------------------------------------------ runtime pins
 
 PI_PACKAGE = "@earendil-works/pi-coding-agent"
+# Context: doc://onoda/pi-first-pinned-stack@0002#pi-pinned — stock Pi 0.85.1 and SoL-Pi 1559b5c; re-verify the extension points before moving either
 PI_VERSION = "0.85.1"  # provenance/sources.json S14
 SOL_PI_PACKAGE = "sol-pi"
 SOL_PI_COMMIT = "1559b5cb12c72da4a485bc50fe326586b216fb19"  # provenance/sources.json S13
@@ -851,6 +852,7 @@ def _check_sol_pi(value: str) -> None:
 
 # The optimizer's whole reach (A45). Anything else (evaluator, parsers,
 # gateway, budgets, splits) is not a component and cannot be proposed.
+# Context: doc://onoda/optimizer-scope@0002#seed-by-promotion-only — the optimizer may change only these components; never the evaluator, parser, gateway or splits
 COMPONENT_VALIDATORS: dict[str, Callable[[str], None]] = {
     "rlm.system_prompt": lambda v: _check_text("rlm.system_prompt", v),
     "rlm.tool_doc": lambda v: _check_text("rlm.tool_doc", v),
@@ -1022,6 +1024,7 @@ INITIAL_SEED_PROVENANCE = {
 # measured exactly these bytes, so an edit is a new candidate.
 SEED_FILE = Path(__file__).with_name("seed_candidate.json")
 SEED_CANDIDATE = HarnessCandidate.model_validate_json(SEED_FILE.read_text())
+# Context: doc://onoda/optimizer-scope@0002#seed-by-promotion-only — the seed changes only by a passing promotion check; any edit is a new candidate
 SEED_DIGEST = "sha256:783ec4eade9b71fa00deeb950b9e99226c4026be6f8b3480fcacb92b74dd7bcc"
 if SEED_CANDIDATE.digest() != SEED_DIGEST:  # the promoted bytes, or nothing
     raise RuntimeError(f"{SEED_FILE.name} is not the promoted seed {SEED_DIGEST}")

@@ -105,6 +105,7 @@ export const PI_TEMP_LOG_PLACEHOLDER = "$PI_TEMP_LOG";
  * replace Pi's random temp-log paths, so a replay key is location- and
  * time-free (A34).
  */
+// Context: doc://onoda/replay-fails-closed@0001#replay-fails-closed — only the listed fields normalize; any other change is a replay mismatch
 export function normalizeForReplay(value: unknown, aliases: Record<string, string>): unknown {
 	const paths = Object.keys(aliases).sort((a, b) => b.length - a.length);
 	const walk = (v: unknown): unknown => {

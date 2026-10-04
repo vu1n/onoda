@@ -383,9 +383,10 @@ def run_optimization(
             return True
         return False
 
-    if not resuming and ledger.trials + len(cases) > max_trials:
+    seed_cost = len(cases) * repeats  # the seed is evaluated on every case, `repeats` times
+    if not resuming and ledger.trials + seed_cost > max_trials:
         stop_reason = "trial budget cannot cover the seed evaluation"
-    elif not resuming and not ledger.can_afford(len(cases), 0):
+    elif not resuming and not ledger.can_afford(seed_cost, 0):
         stop_reason = "spend cap cannot cover the seed evaluation"
     else:
         try:

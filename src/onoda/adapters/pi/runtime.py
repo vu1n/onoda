@@ -88,6 +88,7 @@ from onoda.errors import CapabilityError, OnodaError
 _MIN_NODE = (22, 19, 0)
 # A72: one agent `bash` call ends after this many seconds. ORCA jobs run in the
 # host broker, not in bash, so this caps only the agent's own shell commands.
+# Context: doc://onoda/agent-sandbox@0002#sandbox-or-refuse — a convenience bound, not a tuned value; the recorder applies it before spooling
 MAX_BASH_SECONDS = 600
 
 # The only variables the child inherits from this process. Everything else
@@ -207,6 +208,26 @@ def doctor(runtime_dir: Path = RUNTIME_DIR) -> dict[str, Any]:
     }
 
 
+# Context: doc://onoda/pi-first-pinned-stack@0002#pi-pinned — a run launches only on the pinned Pi and SoL-Pi
+def check_pins(*, sol_pi: bool, runtime_dir: Path = RUNTIME_DIR) -> None:
+    """Refuse to stage a run on an installed Pi or SoL-Pi that differs from the pins.
+
+    File reads only, like `doctor` without its `node` probe. A missing install
+    is not refused here: the launch itself fails without Pi, and offline suites
+    stage runs without one. With this check, the pinned `pi_version` and
+    `sol_pi_commit` that `run_info` records are what actually ran.
+    """
+    pi_version = _read_pi_version(runtime_dir)
+    if pi_version is not None and pi_version != PI_VERSION:
+        raise OnodaError(f"{PI_PACKAGE} {pi_version} does not match the pinned {PI_VERSION}")
+    commit = _read_sol_pi_commit(runtime_dir) if sol_pi else None
+    if commit is not None and commit != SOL_PI_COMMIT:
+        raise OnodaError(
+            f"{SOL_PI_PACKAGE} commit {commit} does not match the pinned {SOL_PI_COMMIT}"
+        )
+
+
+# Context: doc://onoda/live-off-by-default@0002#live-settings-explicit — every live provider setting is explicit; nothing inferred from a present key
 @dataclass(frozen=True)
 class LiveSettings:
     """A real-provider run. Every field must be explicitly given; there are no
@@ -287,6 +308,7 @@ class RlmStage:
         }
 
 
+# Context: doc://onoda/agent-sandbox@0002#sandbox-or-refuse — bwrap on Linux, Seatbelt on macOS, refuse anything else; never degrade
 def detect_sandbox() -> PiSandbox:
     """This host's Pi sandbox (A50), or `CapabilityError` saying why there is none.
 
@@ -390,6 +412,7 @@ def build_launch(
     else:
         task_bundle = TaskBundle.model_validate_json(task_json)
     tools = effective_variant.tools(task_kind)
+    # Context: doc://onoda/vte-task-inputs@0001#agent-gets-structure-and-targets — a ladder variant needs an operator-supplied ladder file, pinned by sha256
     if variant.ladder:
         if task_bundle.ladder_sha256 is None or not (bundle_dir / "ladder.md").is_file():
             raise CapabilityError(f"variant {variant_id} requires an advisory ladder")
@@ -460,6 +483,7 @@ def build_launch(
     )
     policy_path.write_text(policy.model_dump_json(by_alias=True))
 
+    check_pins(sol_pi=sol_pi_cfg is not None)
     run_info_path = work_dir / "run_info.json"
     run_info: dict[str, Any] = {
         "schema": SPOOL_SCHEMA,

@@ -541,6 +541,7 @@ class _Refused(Exception):
         self.reason = reason
 
 
+# Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — real ORCA never starts without a job sandbox that passed its trial run
 def _check_confinement(
     scheduler: OrcaLocalScheduler,
     job_sandbox: JobSandbox | None,
@@ -676,6 +677,7 @@ class OrcaBroker:
         try:
             if self._broken:
                 raise _Refused("broker_failed")
+            # Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — one max_executions number caps jobs; refused submissions do not count
             if self._next_job >= self.max_executions:
                 raise _Refused("max_executions")
             attached = self._resolve(request.attach)

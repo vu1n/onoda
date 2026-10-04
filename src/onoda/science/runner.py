@@ -6,7 +6,7 @@ fixture resume, fork, and reanalysis do not apply. Phases:
 
     run.created -> initialized
     -> acquire (authentic outputs produced elsewhere) | execute (local ORCA)
-    -> job-collected -> parse (orca-parser@2) -> diagnostics-committed
+    -> job-collected -> parse (orca-parser@3) -> diagnostics-committed
     -> finalized (visible["final"] is the observation)
 
 Acquired outputs are recorded as a `read` invocation with the upstream
@@ -241,6 +241,7 @@ def _announce(j: _Journal, task: TaskManifest) -> None:
     )
 
 
+# Context: doc://onoda/case-data-provenance@0002#pinned-acquired-cases — outputs we did not run are acquired (executed_here: false), never executions
 def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt, bool]:
     if done := j.committed(ACQUIRE):
         return done, False
