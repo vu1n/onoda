@@ -17,9 +17,10 @@ from onoda.optimize.compare import compare_candidates
 class Runner:
     """The promoted seed removes the initial seed's false-success claims."""
 
-    def __init__(self, fail: str | None = None):
+    def __init__(self, fail: str | None = None, unpriced: str | None = None):
         self.calls: list[str] = []
         self.fail = fail
+        self.unpriced = unpriced
 
     def run(self, candidate, case_id, *, trial_id):
         self.calls.append(trial_id)
@@ -31,7 +32,7 @@ class Runner:
             fs=0 if better else 1,
             case=case_id,
             run=trial_id,
-            cost="0.01",
+            cost=None if trial_id == self.unpriced else "0.01",
         )
         return Trial(case_id=case_id, run_id=trial_id, outcome=outcome)
 
@@ -68,6 +69,24 @@ def test_a_failed_run_never_promotes():
     result = check(Runner(fail="p-baseline-c2-r1"))
     assert not result["accepted"]
     assert result["failed"] == [{"run": "p-baseline-c2-r1", "error": "RuntimeError"}]
+
+
+CAP = {"max_cost_usd": Decimal("1"), "run_reserve_usd": Decimal("0.10")}
+
+
+def test_a_failed_run_is_charged_its_reserve_under_a_cap():
+    result = check(Runner(fail="p-baseline-c1-r1"), **CAP)
+    assert result["spent_usd"] == "0.13"  # the reserve for the failed run, 0.01 for the rest
+
+
+def test_an_unknown_cost_stops_the_check_and_never_promotes():
+    result = check(Runner(unpriced="p-candidate-c1-r1"), repeats=2, **CAP)
+    assert result["stopped"] == "run p-candidate-c1-r1 reported no cost; the check stops"
+    assert result["rounds"]["completed"] == 1 and not result["accepted"]
+
+
+def test_an_unknown_cost_without_a_cap_is_not_a_stop():
+    assert check(Runner(unpriced="p-candidate-c1-r1"))["stopped"] is None
 
 
 def test_a_candidate_is_not_checked_against_itself():

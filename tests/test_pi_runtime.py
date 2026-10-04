@@ -47,7 +47,7 @@ from onoda.adapters.pi.contract import (
     TextBlock,
     parse_spool_line,
 )
-from onoda.adapters.pi.runtime import LiveSettings, build_launch, doctor, launch
+from onoda.adapters.pi.runtime import LiveSettings, build_launch, check_pins, doctor, launch
 from onoda.errors import CapabilityError, OnodaError
 
 SCRIPT = Script(source="test", turns=(ScriptTurn(content=(TextBlock(type="text", text="done"),)),))
@@ -120,6 +120,19 @@ def test_doctor_flags_missing_install(tmp_path):
     result = doctor(tmp_path / "nowhere")
     assert result["ok"] is False
     assert len(result["problems"]) >= 2
+
+
+def test_a_run_refuses_a_pi_or_sol_pi_off_the_pins(tmp_path):
+    ok = write_fake_runtime(tmp_path / "ok", pi_version=PI_VERSION, sol_pi_commit=SOL_PI_COMMIT)
+    check_pins(sol_pi=True, runtime_dir=ok)
+    old_pi = write_fake_runtime(tmp_path / "pi", pi_version="0.1.0", sol_pi_commit=SOL_PI_COMMIT)
+    with pytest.raises(OnodaError, match="0.1.0 does not match"):
+        check_pins(sol_pi=False, runtime_dir=old_pi)
+    old_sol = write_fake_runtime(tmp_path / "sol", pi_version=PI_VERSION, sol_pi_commit="f" * 40)
+    check_pins(sol_pi=False, runtime_dir=old_sol)  # a run without SoL-Pi never loads it
+    with pytest.raises(OnodaError, match="f" * 40):
+        check_pins(sol_pi=True, runtime_dir=old_sol)
+    check_pins(sol_pi=True, runtime_dir=tmp_path / "nowhere")  # the launch itself fails
 
 
 @requires_pi

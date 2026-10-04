@@ -353,6 +353,7 @@ def evaluate_vte_claims(
         claim_verdicts.count("contradicted") + claim_verdicts.count("unsupported")
     )
     metrics["case.id"] = m.case_id
+    metrics["case.review"] = m.review.status  # an unreviewed case never reads as reviewed (A26)
     metrics["claim.present"] = "true" if claim is not None else "false"
     metrics["parser"] = PARSER_ID
     metrics["reference.method"] = references.method

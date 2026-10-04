@@ -208,6 +208,25 @@ def doctor(runtime_dir: Path = RUNTIME_DIR) -> dict[str, Any]:
     }
 
 
+# Context: doc://onoda/pi-first-pinned-stack@0001#pi-pinned — a run launches only on the pinned Pi and SoL-Pi
+def check_pins(*, sol_pi: bool, runtime_dir: Path = RUNTIME_DIR) -> None:
+    """Refuse to stage a run on an installed Pi or SoL-Pi that differs from the pins.
+
+    File reads only, like `doctor` without its `node` probe. A missing install
+    is not refused here: the launch itself fails without Pi, and offline suites
+    stage runs without one. With this check, the pinned `pi_version` and
+    `sol_pi_commit` that `run_info` records are what actually ran.
+    """
+    pi_version = _read_pi_version(runtime_dir)
+    if pi_version is not None and pi_version != PI_VERSION:
+        raise OnodaError(f"{PI_PACKAGE} {pi_version} does not match the pinned {PI_VERSION}")
+    commit = _read_sol_pi_commit(runtime_dir) if sol_pi else None
+    if commit is not None and commit != SOL_PI_COMMIT:
+        raise OnodaError(
+            f"{SOL_PI_PACKAGE} commit {commit} does not match the pinned {SOL_PI_COMMIT}"
+        )
+
+
 # Context: doc://onoda/live-off-by-default@0001#live-settings-explicit — every live provider setting is explicit; nothing inferred from a present key
 @dataclass(frozen=True)
 class LiveSettings:
@@ -464,6 +483,7 @@ def build_launch(
     )
     policy_path.write_text(policy.model_dump_json(by_alias=True))
 
+    check_pins(sol_pi=sol_pi_cfg is not None)
     run_info_path = work_dir / "run_info.json"
     run_info: dict[str, Any] = {
         "schema": SPOOL_SCHEMA,
