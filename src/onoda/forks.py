@@ -82,7 +82,7 @@ def fork_run(
     parent = controller.run_record(parent_run_id)
     if parent.config.get("mode") in ("pi-scripted", "pi-live"):
         raise ForkError(f"run {parent_run_id} is a Pi run; fork it with `onoda pi fork`")
-    found =[cp for _, d, cp in controller.checkpoints(parent_run_id) if d == checkpoint_digest]
+    found = [cp for _, d, cp in controller.checkpoints(parent_run_id) if d == checkpoint_digest]
     if not found:
         raise ForkError(f"checkpoint {checkpoint_digest} is not journaled in {parent_run_id}")
     cp = found[0]
