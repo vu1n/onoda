@@ -104,12 +104,19 @@ def state(job_id: str, energy: str = "6.069") -> dict:
     }
 
 
-def script(source: str, *submits: str, claim_job: str = "j0001") -> Script:
+def script(source: str, *submits: str, claim_job: str = "j0001", energy: str = "6.069") -> Script:
     turns = [
         [tool("s1", "structure")],
         [tool(f"x{i}", "orca_submit", input=text) for i, text in enumerate(submits, start=1)],
         [tool("o1", "orca_output", job_id="j0001", find="NEVPT2")],  # a read: ingested, no job
-        [tool("r1", "report_vtes", states=[state(claim_job)], notes="synthetic scripted claim")],
+        [
+            tool(
+                "r1",
+                "report_vtes",
+                states=[state(claim_job, energy)],
+                notes="synthetic scripted claim",
+            )
+        ],
         [{"type": "text", "text": "reported"}],
     ]
     return Script.model_validate({"source": source, "turns": [{"content": t} for t in turns]})
@@ -466,6 +473,73 @@ def test_shadow_decisions_are_recorded_beside_the_grade_and_shown_in_the_report(
     assert s1["ready_p"]["identified"] == "0.800000"  # j0001: the claim cites it, identified
     assert s1["ready_p"]["uncited"] == "0.300000"  # j0002: the cache hit nothing cites
     assert report["synthetic"] is True and "not a model" in report["note"]
+
+
+# A stand-in for the `kypp` CLI (its remember/recall surface only): keyword OR over
+# subject and content, insertion order, JSON Lines in KYPP_MEMORY_DB. Not kypp itself.
+FAKE_KYPP = f"""#!/usr/bin/env {sys.executable}
+import json, os, re, sys
+db, args = os.environ["KYPP_MEMORY_DB"], sys.argv[1:]
+if args[0] == "remember":
+    with open(db, "a") as f:
+        f.write(json.dumps({{"subject": args[1], "content": args[2], "type": args[4]}}) + "\\n")
+elif args[0] == "recall":
+    limit = int(args[args.index("--limit") + 1])
+    terms = [t.lower() for t in args[1 : args.index("--limit")] if re.fullmatch(r"\\w+", t)]
+    rows = [json.loads(ln) for ln in open(db)] if os.path.exists(db) else []
+    hit = [r for r in rows if any(t in (r["subject"] + r["content"]).lower() for t in terms)]
+    print(json.dumps(hit[:limit]))
+"""
+
+
+def test_memory_shadow_scores_kypp_recall_against_the_tiers(recorded):
+    from onoda.adapters.pi.vte_memory_shadow import (
+        Kypp,
+        check_order,
+        memory_shadow,
+        memory_shadow_report,
+        seed,
+    )
+
+    root, store, evaluator, binary, _ = recorded  # "vte": its claim is identified
+    run(
+        store, root, "vte2", binary, script("test_vte_wrong", INPUT, energy="9.999")
+    )  # cites j0001 with a value it never printed
+    for run_id in ("vte", "vte2"):
+        pi_vte.evaluate_vte_run(store, evaluator, run_id, case())
+    with pytest.raises(OnodaError, match="would know that run's outcome"):
+        check_order(store, ["vte2"], ["vte"])
+    check_order(store, ["vte"], ["vte2"])
+
+    kypp_bin = root / "kypp"
+    kypp_bin.write_text(FAKE_KYPP)
+    kypp_bin.chmod(0o755)
+    kypp = Kypp(str(kypp_bin), root / "kypp.jsonl")
+    memory = Path(__file__).parents[1] / "experiments" / "questdb" / "memory"
+    tiers = {p.name: p.read_text() for p in sorted(memory.glob("memory-*.md"))}
+    lessons = seed(kypp, store, evaluator, tiers, ["vte"])
+    assert len([x for x in lessons if x.type == "procedure"]) >= 10
+    with pytest.raises(OnodaError, match="fresh kypp database"):
+        seed(kypp, store, evaluator, tiers, ["vte"])
+
+    ev = memory_shadow(
+        store, evaluator, "vte2", kypp, tiers=tiers, lessons=lessons, seed_runs=["vte"]
+    )
+    a = ev.assignments
+    assert a["job.j0001.failures"] == ["claim_value"]
+    assert a["job.j0001.tiers.covers"] == ["claim_value"]  # the harness tier names subtraction
+    assert set(a["job.j0001.kypp.covers"]) <= {"claim_value"}
+    assert int(ev.metrics["tiers.chars"]) > int(a["job.j0001.kypp.chars"]) > 0
+    assert ev.metrics["kypp.recall"] in ("keyword", "semantic")
+    assert not store.list_record_ids("evaluation")  # the shadow stays in the evaluator store
+    refs = (case().root / case().manifest.references.path).read_bytes()
+    for digest in ev.output_refs.values():
+        sent = evaluator.get_bytes(digest)
+        assert refs not in sent and REFERENCES_SCHEMA.encode() not in sent
+
+    report = memory_shadow_report(store, evaluator, ["vte", "vte2"])
+    s1 = report["arms"]["S1"]
+    assert s1["runs"] == 1 and s1["failures"] == 1 and s1["tiers_covered"] == 1
 
 
 def test_graded_jobs_become_tuning_examples_and_tuned_wording_is_used(recorded):

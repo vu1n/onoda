@@ -545,7 +545,35 @@ def cmd_vte_report(a) -> Any:
     shadow = shadow_report(store, evaluator_store, a.run_ids)
     if shadow["runs"]:
         report["shadow"] = shadow
+    from onoda.adapters.pi.vte_memory_shadow import memory_shadow_report
+
+    memory = memory_shadow_report(store, evaluator_store, a.run_ids)
+    if memory["arms"]:
+        report["memory_shadow"] = memory
     return report
+
+
+def cmd_vte_memory_shadow(a) -> Any:
+    from onoda.adapters.pi import vte_memory_shadow as ms
+    from onoda.adapters.pi.contract import REPO_ROOT
+
+    store, evaluator_store = _store(a.store), _store(a.evaluator_store, evaluator=True)
+    memory_dir = Path(a.memory_dir or REPO_ROOT / "experiments/questdb/memory")
+    tiers = {p.name: p.read_text() for p in sorted(memory_dir.glob("memory-*.md"))}
+    if not tiers:
+        raise OnodaError(f"no memory-*.md tiers in {memory_dir}")
+    seed_runs = a.seed_run or []
+    ms.check_order(store, seed_runs, a.run_ids)
+    kypp = ms.Kypp(a.kypp, Path(a.kypp_db))
+    lessons = ms.seed(kypp, store, evaluator_store, tiers, seed_runs)
+    out = []
+    for run_id in a.run_ids:
+        ev = ms.memory_shadow(
+            store, evaluator_store, run_id, kypp,
+            tiers=tiers, lessons=lessons, seed_runs=seed_runs, limit=a.limit,
+        )  # fmt: skip
+        out.append({"evaluation": ev.evaluation_id, **ev.metrics})
+    return {"seed_lessons": len(lessons), "runs": out}
 
 
 def cmd_vte_shadow(a) -> Any:
@@ -1301,6 +1329,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     vs.add_argument("--enable-live-decisions", action="store_true")
     vs.set_defaults(func=cmd_vte_shadow)
+    vm = vt.add_parser(
+        "memory-shadow",
+        help="seed a fresh kypp store from the memory tiers and earlier runs, ask it after every "
+        "job of these runs, and score its recall against the tiers; never shown to the agent",
+    )
+    vm.add_argument("run_ids", nargs="+")
+    vm.add_argument("--store", required=True)
+    vm.add_argument("--evaluator-store", required=True)
+    vm.add_argument(
+        "--kypp-db", required=True, help="a new kypp database file (refused if it exists)"
+    )
+    vm.add_argument("--kypp", default="kypp", help="the kypp CLI (default: kypp on PATH)")
+    vm.add_argument(
+        "--seed-run",
+        action="append",
+        help="an earlier run (finished before every shadowed run started) to seed pitfalls from",
+    )
+    vm.add_argument("--memory-dir", help="default: experiments/questdb/memory")
+    vm.add_argument("--limit", type=int, default=5, help="claims kypp returns per job (default 5)")
+    vm.set_defaults(func=cmd_vte_memory_shadow)
+
     vq = vt.add_parser(
         "shadow-questions", help="write the shadow questions template (input to decide tune)"
     )
