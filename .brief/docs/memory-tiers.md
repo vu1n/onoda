@@ -8,6 +8,7 @@ related_code:
   - "experiments/questdb/memory/*.md"
   - "experiments/questdb/run.sh"
   - "tests/test_questdb_memory.py"
+  - "src/onoda/adapters/pi/vte_memory_shadow.py"
 carries: [A75]  # the A75 row this decision replaces in the former register
 ---
 
@@ -35,5 +36,13 @@ running and let runs teach each other mid-experiment.
   bytes.
 - Both arms get the same tiers, so S0 vs S1 still isolates the ladder; whether memory helps is its
   own comparison.
-- kypp runs only in shadow (planned, not built): its answers never reach the agent or the grader,
-  and its store is fed only from runs that finished before the run it is asked about.
+- kypp runs only in shadow (`onoda vte memory-shadow`): its answers go to the evaluator store as
+  `vte-memory-shadow-kypp` evaluations and never reach the agent or the grader.
+- The shadow seeds a fresh kypp database (an existing one is refused) with one claim per tier
+  bullet plus one pitfall per failure seen in seed runs; every seed run's last journal event is
+  earlier than every shadowed run's creation, or the shadow is refused.
+- kypp is asked with what the agent could see after each job (its `!` lines and the parser
+  summary); a failure counts as covered only when the recalled text, or the tiers' text, contains a
+  phrase of its fix (`FIXES`), and the text sizes are recorded beside the counts.
+- Failures come from the parser and from the grader's reason words (A53's limit); no reference
+  value, reference key or error reaches kypp.
