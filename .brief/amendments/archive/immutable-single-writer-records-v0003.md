@@ -18,3 +18,8 @@ None of the code depends on the new text. `adapters/pi/fork.py`, the broker's `p
 
 ## Impact / risk
 The text changes, and a new governed file is added. Ratifying publishes revision 0003. Re-pin the refs with `brief pin`, then run `brief doctor`.
+
+
+---
+ratified_rev: 0003
+ratified_by: vu1n

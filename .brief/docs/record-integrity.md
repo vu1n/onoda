@@ -10,6 +10,7 @@ related_code:
   - "src/onoda/canonical.py"
   - "src/onoda/records.py"
   - "src/onoda/forks.py"
+  - "src/onoda/adapters/pi/fork.py"
   - "src/onoda/controller.py"
   - "pi/extensions/lib/spool.ts"
   - "pi/rlm/onoda_rlm_kernel.py"
@@ -31,11 +32,12 @@ A committed object or record is never overwritten; a reanalysis writes a new rec
 - One authoritative writer per run: no locking exists, so nothing may append to a run's journal concurrently. Pi runs write only a spool; the store is written by `ingest` after Pi exits.
 - A spec digest is not an execution id: identical specs produce distinct `InvocationReceipt`s.
 - Forks start only at a journaled checkpoint whose boundary is in `records.BOUNDARIES`; a fork never inherits outputs of a changed node or anything after its visibility cut.
+- A Pi run is forked by re-running it (`adapters/pi/fork.py`): the child replays the parent's recorded responses up to the fork point, then a continuation answers: a script, or a live model the session hands off to after the replay (its prefix recorded as `replayed`, its own caps on top of the prefix). It inherits no receipt, every prefix tool call must show it the result it showed the parent (or the fork is refused), and it records a `ForkDeclaration`, `Run.parent`, `fork.created` and the visibility cut on every checkpoint. A VTE fork's broker replays the parent's jobs before the fork point and runs only later ones live.
 - There is no native resume: `Controller.resume` accepts only `mode="semantic"` on checkpoints that declare `semantic_restart: supported`.
 - RLM kernel state enters the record only through `commit_state` (JSON, never pickle), spooled before the kernel is acknowledged.
 
 ### Known gaps (not yet enforced; owner to decide)
-- A36: forking is a feature, and Pi runs cannot be forked yet (owner, 2026-10-04: build it, do not refuse it). `fork_run` handles fixture runs only; for a Pi run it fails incidentally on Pi step keys, and no test covers that. Pi checkpoints already carry the observation-pack map, compactions and mechanism config a fork will need.
+- A36: RLM runs and imported runs cannot be forked yet, nor can a live continuation of a variant with a reducer or of a prefix ending in a compaction summary. A replayed prefix job's files are attachable to a later job only when the shared broker cache holds them.
 
 ### Carried forward from the assumptions register
 

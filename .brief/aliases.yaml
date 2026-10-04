@@ -21,7 +21,7 @@ pi-first-pinned-stack:
 promotion-gates:
   latest: 1
 record-integrity:
-  latest: 2
+  latest: 3
 replay-fails-closed:
   latest: 1
 vte-grading-contract:

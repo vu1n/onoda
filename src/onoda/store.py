@@ -199,7 +199,7 @@ class Store:
 
     # ---------------------------------------------------------------- records
 
-    # Context: doc://onoda/record-integrity@0002#immutable-single-writer-records — a committed record is never overwritten; one writer per run
+    # Context: doc://onoda/record-integrity@0003#immutable-single-writer-records — a committed record is never overwritten; one writer per run
     def put_record(self, record: Record) -> str:
         """Commit an immutable record; returns its id. Never overwrites."""
         record_id = record.record_id()
@@ -272,7 +272,7 @@ class Store:
 
     # ---------------------------------------------------------------- journal
 
-    # Context: doc://onoda/record-integrity@0002#immutable-single-writer-records — bytes, then records, then the event that cites them
+    # Context: doc://onoda/record-integrity@0003#immutable-single-writer-records — bytes, then records, then the event that cites them
     def append_event(
         self,
         run_id: str,

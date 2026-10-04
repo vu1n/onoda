@@ -60,7 +60,7 @@ FORBIDDEN_TRUE = {
 }
 
 
-# Context: doc://onoda/record-integrity@0002#immutable-single-writer-records — fork only at a journaled quiescent checkpoint; never inherit invalidated outputs
+# Context: doc://onoda/record-integrity@0003#immutable-single-writer-records — fork only at a journaled quiescent checkpoint; never inherit invalidated outputs
 def fork_run(
     controller: Controller,
     parent_run_id: str,

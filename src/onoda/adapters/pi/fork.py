@@ -107,7 +107,7 @@ def _decisions(store: Store, run_id: str) -> list[tuple[int, InvocationReceipt]]
     return out
 
 
-# Context: doc://onoda/record-integrity@0002#immutable-single-writer-records — fork only at a journaled quiescent checkpoint; the child re-runs the prefix, it inherits nothing
+# Context: doc://onoda/record-integrity@0003#immutable-single-writer-records — fork only at a journaled quiescent checkpoint; the child re-runs the prefix, it inherits nothing
 def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
     """Check that `parent_run_id` can be forked at `checkpoint`; find the fork point."""
     if not store.has_record("run", parent_run_id):

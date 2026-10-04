@@ -14,3 +14,4 @@ immutable-single-writer-records conforms: Pi forks start only at a journaled qui
 broker-owns-orca conforms: a fork's broker replays the parent's jobs then runs live jobs only through its scheduler and job sandbox; prefix jobs count toward max_executions
 live-settings-explicit conforms: a fork's live continuation takes every LiveSettings field explicitly; its request cap is that setting plus the replayed prefix, recorded in config.fork; the prefix replays offline at no cost
 sandbox-or-refuse conforms: a fork's live handoff is a live launch: it refuses to stage without the sandbox and passes only the named credential
+immutable-single-writer-records conforms: ratified @0003 (vu1n) describes Pi forking as built in #28; code unchanged by the amendment, refs re-pinned
