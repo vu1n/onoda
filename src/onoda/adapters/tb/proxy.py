@@ -298,12 +298,18 @@ class SpendProxy:
         h.send_header("Connection", "close")
         h.end_headers()
         seen = bytearray()
+        charged = False
         try:
             while chunk := resp.read1(65536):
                 if len(seen) < _MAX_JSON_RESPONSE_BYTES:
                     seen += chunk
                 h.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
                 h.wfile.flush()
+            # Charge before the response ends: a client that has the whole
+            # response may ask again at once, and that request must see this cost.
+            charged = True
+            if resp.status == 200:
+                self._charge(run, usage_from_body(content_type, bytes(seen)))
             h.wfile.write(b"0\r\n\r\n")
             h.wfile.flush()
         except OSError:
@@ -311,7 +317,7 @@ class SpendProxy:
         finally:
             conn.close()
             h.close_connection = True
-        if resp.status == 200:
+        if not charged and resp.status == 200:
             self._charge(run, usage_from_body(content_type, bytes(seen)))
 
 

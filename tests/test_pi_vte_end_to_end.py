@@ -540,3 +540,32 @@ def test_memory_shadow_scores_kypp_recall_against_the_tiers(recorded):
     report = memory_shadow_report(store, evaluator, ["vte", "vte2"])
     s1 = report["arms"]["S1"]
     assert s1["runs"] == 1 and s1["failures"] == 1 and s1["tiers_covered"] == 1
+
+
+def test_graded_jobs_become_tuning_examples_and_tuned_wording_is_used(recorded):
+    from onoda.adapters.pi.vte_shadow import shadow_examples, shadow_run
+    from onoda.systemone import ScriptedSystemOne
+
+    _, store, evaluator, _, _ = recorded
+    pi_vte.evaluate_vte_run(store, evaluator, "vte", case())
+    (ex,) = shadow_examples(store, evaluator, [("vte", case())])  # j0002: nothing cites it
+    assert ex.id == "vte/j0001" and ex.labels == {"ready": "yes"}  # its claim was identified
+    assert ex.state["job_id"] == "j0001" and "output_excerpt" in ex.state
+
+    seen = []
+
+    def answer(state, questions):
+        seen.append(questions["ready"]["instructions"])
+        return {"rule": {"choice": "H", "probabilities": {"H": 1}}, "ready": {"noul": 0.5}}
+
+    ladder = (Path(__file__).parents[1] / "experiments/questdb/ladder-from-paper.md").read_bytes()
+    ev = shadow_run(
+        store,
+        evaluator,
+        "vte",
+        case(),
+        ScriptedSystemOne(answer),
+        ladder=ladder,
+        instructions={"ready.instructions": "tuned wording"},
+    )
+    assert set(seen) == {"tuned wording"} and ev.metrics["instructions"].startswith("sha256:")
