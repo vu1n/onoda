@@ -34,7 +34,7 @@ A committed object or record is never overwritten; a reanalysis writes a new rec
 - RLM kernel state enters the record only through `commit_state` (JSON, never pickle), spooled before the kernel is acknowledged.
 
 ### Known gaps (not yet enforced; owner to decide)
-- A36: Pi checkpoints declare `semantic_restart: unsupported` and `Controller.resume` honours that, but `fork_run` never reads the checkpoint's capabilities. Forking a Pi run fails only incidentally (on Pi step keys), and no test covers it.
+- A36: forking is a feature, and Pi runs cannot be forked yet (owner, 2026-10-04: build it, do not refuse it). `fork_run` handles fixture runs only; for a Pi run it fails incidentally on Pi step keys, and no test covers that. Pi checkpoints already carry the observation-pack map, compactions and mechanism config a fork will need.
 
 ### Carried forward from the assumptions register
 
