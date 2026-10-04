@@ -23,6 +23,6 @@ def test_no_reference_value_or_reference_active_space_is_in_memory():
     for refs in (ROOT / "cases-dev" / "questdb").glob("*/references.json"):
         for row in json.loads(refs.read_text())["rows"]:
             for key in ("energy_ev", "active_space", "state_average"):
-                value = row.get(key)
-                if value:
-                    assert not re.search(rf"(?<![\d.]){re.escape(value)}(?![\d])", text), (refs, key)
+                if value := row.get(key):
+                    pattern = rf"(?<![\d.]){re.escape(value)}(?![\d])"
+                    assert not re.search(pattern, text), (refs, key)
