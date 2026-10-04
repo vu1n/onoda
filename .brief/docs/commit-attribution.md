@@ -3,7 +3,7 @@ id: commit-attribution
 project: onoda
 type: decision
 status: draft
-title: Commits are authored as the owner with no AI attribution trailers
+title: "Commits are authored as the owner with no AI attribution trailers"
 related_code: []
 ---
 

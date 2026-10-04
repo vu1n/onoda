@@ -3,7 +3,7 @@ id: vte-task-inputs
 project: onoda
 type: decision
 status: active
-title: What a VTE agent is given: geometry, point group and target counts; no energies, no ORCA manual
+title: "What a VTE agent is given: geometry, point group and target counts; no energies, no ORCA manual"
 related_code:
   - "src/onoda/science/vte.py"
   - "src/onoda/adapters/pi/runtime.py"

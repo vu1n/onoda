@@ -3,7 +3,7 @@ id: evaluator-isolation
 project: onoda
 type: decision
 status: active
-title: Evaluator references and credentials never reach the agent store or an agent-visible export
+title: "Evaluator references and credentials never reach the agent store or an agent-visible export"
 related_code:
   - "src/onoda/store.py"
   - "src/onoda/portability.py"

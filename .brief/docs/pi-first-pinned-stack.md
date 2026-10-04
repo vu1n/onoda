@@ -3,7 +3,7 @@ id: pi-first-pinned-stack
 project: onoda
 type: decision
 status: active
-title: Pi is the first agent adapter, pinned at 0.85.1 with SoL-Pi at 1559b5c
+title: "Pi is the first agent adapter, pinned at 0.85.1 with SoL-Pi at 1559b5c"
 related_code:
   - "src/onoda/adapters/pi/contract.py"
   - "src/onoda/adapters/pi/runtime.py"

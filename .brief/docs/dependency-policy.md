@@ -3,7 +3,7 @@ id: dependency-policy
 project: onoda
 type: decision
 status: draft
-title: No DSPy dependency and no third-party single-author packages in the harness
+title: "No DSPy dependency and no third-party single-author packages in the harness"
 related_code: []
 ---
 

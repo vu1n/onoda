@@ -3,7 +3,7 @@ id: orca-parser-authoritative
 project: onoda
 type: decision
 status: active
-title: The deterministic ORCA parser is the only source of graded values; ORCA's exit code is not trusted
+title: "The deterministic ORCA parser is the only source of graded values; ORCA's exit code is not trusted"
 related_code:
   - "src/onoda/science/orca_parser.py"
   - "src/onoda/science/contract.py"

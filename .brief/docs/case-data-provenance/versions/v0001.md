@@ -3,7 +3,7 @@ id: case-data-provenance
 project: onoda
 type: decision
 status: active
-title: Case bytes are pinned by sha256, recorded as acquired, and third-party dev data stays under cases-dev/
+title: "Case bytes are pinned by sha256, recorded as acquired, and third-party dev data stays under cases-dev/"
 related_code:
   - "src/onoda/science/contract.py"
   - "src/onoda/science/runner.py"

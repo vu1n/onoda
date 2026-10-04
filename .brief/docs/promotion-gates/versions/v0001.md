@@ -3,7 +3,7 @@ id: promotion-gates
 project: onoda
 type: decision
 status: active
-title: Gates allow zero capability worsening and zero false-success increase; a missing tolerance is unresolved
+title: "Gates allow zero capability worsening and zero false-success increase; a missing tolerance is unresolved"
 related_code:
   - "src/onoda/ablation/**"
   - "src/onoda/optimize/gates.py"

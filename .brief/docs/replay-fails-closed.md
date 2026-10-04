@@ -3,7 +3,7 @@ id: replay-fails-closed
 project: onoda
 type: decision
 status: active
-title: Offline replay fails closed on any request change; scripted runs are labelled synthetic
+title: "Offline replay fails closed on any request change; scripted runs are labelled synthetic"
 related_code:
   - "pi/extensions/lib/spool.ts"
   - "pi/extensions/onoda-scripted.ts"

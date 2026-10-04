@@ -3,7 +3,7 @@ id: vte-grading-contract
 project: onoda
 type: decision
 status: active
-title: A VTE claim counts only if the one cited job printed it, with its irrep, in that job's results table
+title: "A VTE claim counts only if the one cited job printed it, with its irrep, in that job's results table"
 related_code:
   - "src/onoda/adapters/pi/vte.py"
   - "src/onoda/science/vte.py"

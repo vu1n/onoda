@@ -3,7 +3,7 @@ id: match-by-identity
 project: onoda
 type: decision
 status: active
-title: States are matched by identity, never by energy order; a missing tolerance is unresolved, not pass
+title: "States are matched by identity, never by energy order; a missing tolerance is unresolved, not pass"
 related_code:
   - "src/onoda/science/evaluator.py"
   - "src/onoda/adapters/pi/vte.py"

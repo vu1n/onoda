@@ -3,7 +3,7 @@ id: decision-models-shadow-only
 project: onoda
 type: decision
 status: active
-title: Decision models (Jev, Clef) and ladder checks are advice only; they never grade
+title: "Decision models (Jev, Clef) and ladder checks are advice only; they never grade"
 related_code:
   - "src/onoda/systemone.py"
   - "src/onoda/adapters/pi/vte_shadow.py"

@@ -3,7 +3,7 @@ id: live-off-by-default
 project: onoda
 type: decision
 status: active
-title: Every live setting defaults off, needs explicit values, and fails closed
+title: "Every live setting defaults off, needs explicit values, and fails closed"
 related_code:
   - "src/onoda/science/orca_local.py"
   - "src/onoda/adapters/pi/runtime.py"

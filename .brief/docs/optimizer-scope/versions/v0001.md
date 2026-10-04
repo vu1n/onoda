@@ -3,7 +3,7 @@ id: optimizer-scope
 project: onoda
 type: decision
 status: active
-title: The optimizer changes only allowlisted components, sees verdict classes only, and the seed moves only by promotion
+title: "The optimizer changes only allowlisted components, sees verdict classes only, and the seed moves only by promotion"
 related_code:
   - "src/onoda/optimize/**"
   - "src/onoda/adapters/pi/contract.py"
