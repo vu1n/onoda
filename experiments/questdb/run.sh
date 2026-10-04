@@ -19,6 +19,8 @@
 # must stay under 104 bytes on macOS), OUT (stores, cache and reports;
 # $WORK/out), ORCA_WORK (ORCA job dirs; $WORK/jobs), DOCS_DIR (*.md docs given
 # to both arms; the ORCA manual is not redistributable, so none by default),
+# MEMORY_DIR (memory-*.md tiers given to both arms, A75; default
+# experiments/questdb/memory, `none` for no memory),
 # MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (3600 per
 # run; one agent shell command is capped separately, A72). Every ORCA job runs
 # in the job sandbox (A65), which sees ORCA_HOME, MPI_HOME and its own job dir
@@ -55,6 +57,13 @@ LADDER="$ROOT/experiments/questdb/ladder-from-paper.md"
 DOCS=()
 if [ -n "${DOCS_DIR:-}" ]; then
   for d in "$DOCS_DIR"/*.md; do DOCS+=(--doc "$d"); done
+fi
+MEMORY_DIR="${MEMORY_DIR:-$ROOT/experiments/questdb/memory}"
+if [ "$MEMORY_DIR" != none ]; then  # frozen per run: staged and pinned like any doc (A75)
+  for d in "$MEMORY_DIR"/memory-*.md; do
+    [ -f "$d" ] || { echo "run.sh: no memory-*.md in $MEMORY_DIR (MEMORY_DIR=none for none)" >&2; exit 2; }
+    DOCS+=(--doc "$d")
+  done
 fi
 
 onoda() { (cd "$ROOT" && uv run onoda "$@"); }
