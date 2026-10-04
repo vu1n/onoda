@@ -157,6 +157,7 @@ def run_pi(
         max_requests=policy.pop("max_requests", 20),
         max_acquisitions=policy.pop("max_acquisitions", 2),
         max_cost_usd=policy.pop("max_cost_usd", None),
+        max_bash_seconds=policy.pop("max_bash_seconds", None),
         path_aliases=aliases,
     )
     script = C.Script(
@@ -707,3 +708,21 @@ def test_tool_subprocesses_inherit_no_onoda_variables(tmp_path):
     shown = run.json(visible.content)[0]["text"]
     assert "PATH=" in shown  # the command ran
     assert "ONODA_PI_" not in shown
+
+
+def test_a_bash_call_is_capped_at_max_bash_seconds(tmp_path):
+    """A72: a hung command ends at the cap instead of holding the run."""
+    turns = [
+        turn(call("b1", "bash", command="sleep 30; echo late")),
+        turn(call("b2", "bash", command="echo quick", timeout=1)),
+        turn(text("done")),
+    ]
+    run = run_pi(tmp_path, turns, max_bash_seconds=2)
+    calls = {c.tool_call_id: c for c in run.of("tool.call")}
+    assert run.json(calls["b1"].input)["timeout"] == 2  # none given: the cap
+    assert run.json(calls["b2"].input)["timeout"] == 1  # shorter than the cap: kept
+    (slow,) = run.results("b1", "visible")
+    assert slow.is_error and "late" not in run.json(slow.content)[0]["text"]
+    (quick,) = run.results("b2", "visible")
+    assert "quick" in run.json(quick.content)[0]["text"]
+    assert run.lines[-1].status == "settled"

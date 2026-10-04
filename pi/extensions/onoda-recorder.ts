@@ -362,6 +362,12 @@ export default function onodaRecorder(pi: ExtensionAPI): void {
 
 	pi.on("tool_call", (event) => {
 		const input = (event.input ?? {}) as Record<string, unknown>;
+		// A72: cap one bash call's run time; the spooled input is what runs.
+		const cap = policy.max_bash_seconds;
+		if (event.toolName === "bash" && typeof cap === "number") {
+			const asked = input.timeout;
+			if (typeof asked !== "number" || !(asked > 0) || asked > cap) input.timeout = cap;
+		}
 		const reason = gatewayDecision(policy, event.toolName, input);
 		spoolCall(event.toolCallId, event.toolName, input, reason);
 		return reason ? { block: true, reason: `onoda gateway: ${reason}` } : undefined;

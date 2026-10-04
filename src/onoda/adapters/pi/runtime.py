@@ -86,6 +86,9 @@ from onoda.adapters.pi.vte_contract import ENV_BROKER, VteTaskBundle
 from onoda.errors import CapabilityError, OnodaError
 
 _MIN_NODE = (22, 19, 0)
+# A72: one agent `bash` call ends after this many seconds. ORCA jobs run in the
+# host broker, not in bash, so this caps only the agent's own shell commands.
+MAX_BASH_SECONDS = 600
 
 # The only variables the child inherits from this process. Everything else
 # (credentials, tokens, unrelated settings) stays out; a live run adds exactly
@@ -453,6 +456,7 @@ def build_launch(
         path_aliases=path_aliases,
         read_roots=(str(workspace_dir), str(bundle_dir)) if sandbox is not None else None,
         write_roots=(str(workspace_dir),) if sandbox is not None else None,
+        max_bash_seconds=MAX_BASH_SECONDS,
     )
     policy_path.write_text(policy.model_dump_json(by_alias=True))
 

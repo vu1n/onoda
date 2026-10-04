@@ -72,6 +72,8 @@ export interface GatewayPolicy {
 	path_aliases: Record<string, string>;
 	read_roots?: string[] | null;
 	write_roots?: string[] | null;
+	/** A72: longest one `bash` call may run, in seconds; null or absent means no cap. */
+	max_bash_seconds?: number | null;
 }
 
 export function sha256Hex(data: string | Uint8Array): string {

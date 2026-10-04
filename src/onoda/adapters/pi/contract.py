@@ -242,6 +242,11 @@ class GatewayPolicy(_Frozen):
     # the edit/write roots. None: no path rule (unsandboxed runs).
     read_roots: tuple[str, ...] | None = None
     write_roots: tuple[str, ...] | None = None
+    # A72: the longest one `bash` call may run, in seconds. The recorder sets
+    # a call's `timeout` to this when the agent gives none or a longer one, so
+    # a hung command (e.g. `find /`) ends with a timeout error instead of
+    # holding the run until its wall-clock limit. None: no cap.
+    max_bash_seconds: int | None = Field(None, gt=0)
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
