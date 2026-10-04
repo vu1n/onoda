@@ -7,3 +7,5 @@ live-settings-explicit conforms: ratified @0002 (vu1n) adds signoff: required on
 seed-by-promotion-only conforms: ratified @0002 (vu1n); loop/compare spend checks now meet A51/A54, refs re-pinned
 pinned-acquired-cases conforms: ratified @0002 (vu1n); pi-claims and vte-claims now record case.review, refs re-pinned
 pi-pinned conforms: ratified @0002 (vu1n); build_launch refuses Pi/SoL-Pi off the pins (check_pins), refs re-pinned
+immutable-single-writer-records conforms: Pi forks start only at a journaled quiescent checkpoint, re-run the prefix and inherit no receipt; fork_run now refuses Pi runs by name
+broker-owns-orca conforms: a fork's broker replays the parent's jobs then runs live jobs only through its scheduler and job sandbox; prefix jobs count toward max_executions
