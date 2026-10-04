@@ -19,15 +19,24 @@
 # must stay under 104 bytes on macOS), OUT (stores, cache and reports;
 # $WORK/out), ORCA_WORK (ORCA job dirs; $WORK/jobs), DOCS_DIR (*.md docs given
 # to both arms; the ORCA manual is not redistributable, so none by default),
-# MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (7200 per
-# run). Every ORCA job runs in the job sandbox (A65), which sees ORCA_HOME,
-# MPI_HOME and its own job dir only, so none of these may sit inside ORCA_HOME
-# or MPI_HOME, and nothing here is written inside the repository.
+# MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (3600 per
+# run; one agent shell command is capped separately, A72). Every ORCA job runs
+# in the job sandbox (A65), which sees ORCA_HOME, MPI_HOME and its own job dir
+# only, so none of these may sit inside ORCA_HOME or MPI_HOME, and nothing here
+# is written inside the repository.
+#
+# Progress: one line per finished run goes to $OUT/progress.log (wall time,
+# coverage, false successes). A run whose `run-vte` fails is logged there and
+# skipped, so one bad run does not stop the experiment; its stderr is kept in
+# $OUT/<run>.run.err. Rerunning with the same OUT resumes: a run that already
+# has its evaluate JSON is not run again. Runs are serial because the agent
+# and evaluator stores take one writer at a time.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 need() { [ -n "${!1:-}" ] || { echo "run.sh: $1 must be set explicitly (no default)" >&2; exit 2; }; }
 for v in PROVIDER MODEL CREDENTIAL_ENV MAX_REQUESTS MAX_COST_USD; do need "$v"; done
+# Context: doc://onoda/live-off-by-default@0002#live-settings-explicit — no live run without ENABLE_LIVE_EXECUTION=1 and every provider setting
 if [ "${ENABLE_LIVE_EXECUTION:-}" != 1 ]; then
   echo "run.sh: ORCA execution is off; set ENABLE_LIVE_EXECUTION=1 to run ORCA on this host" >&2
   exit 2
@@ -50,6 +59,20 @@ if [ -n "${DOCS_DIR:-}" ]; then
 fi
 
 onoda() { (cd "$ROOT" && uv run onoda "$@"); }
+graded() {  # run JSON, evaluate JSON -> "<status>: found N of M, false successes K"
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+r, e = (json.load(open(p)) for p in sys.argv[1:3])
+end = r["status"] if r["complete"] else "INCOMPLETE (%s), a harness failure, not a result" % r["status"]
+print("%s: found %s of %s, false successes %s"
+      % (end, e["coverage"], e["coverage_total"], e["false_success_claims"]))
+PY
+}
+progress() {  # run id, start (SECONDS), what happened
+  local line
+  line="$(date -u +%H:%MZ) $1 $(( (SECONDS - $2) / 60 )) min: $3"
+  echo "$line" | tee -a "$OUT/progress.log" >&2
+}
 mkdir -p "$OUT" "$WORK" "$ORCA_WORK"
 RUNS=()
 for case_id in $CASES; do
@@ -58,8 +81,13 @@ for case_id in $CASES; do
     [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
     for r in $(seq 1 "$REPEATS"); do
       run_id="$arm-${case_id#questdb-}-r$r"
+      if [ -s "$OUT/$run_id.evaluate.json" ]; then  # resume: graded by an earlier invocation
+        RUNS+=("$run_id")
+        continue
+      fi
       echo "== $run_id" >&2
-      onoda pi run-vte "$case_id" --variant "$arm" --run-id "$run_id" \
+      started=$SECONDS
+      if ! onoda pi run-vte "$case_id" --variant "$arm" --run-id "$run_id" \
         --store "$OUT/store" --work-dir "$WORK/$run_id" \
         --live --provider "$PROVIDER" --model "$MODEL" --credential-env "$CREDENTIAL_ENV" \
         --max-requests "$MAX_REQUESTS" --max-cost-usd "$MAX_COST_USD" \
@@ -67,11 +95,16 @@ for case_id in $CASES; do
         --orca-work-root "$ORCA_WORK" --orca-cache "$OUT/orca-cache" \
         --orca-mpi-home "$MPI_HOME" \
         --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
-        --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-7200}" \
-        ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} > "$OUT/$run_id.run.json"
+        --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
+        ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} \
+        > "$OUT/$run_id.run.json" 2> "$OUT/$run_id.run.err"; then
+        progress "$run_id" "$started" "run failed, skipped (see $run_id.run.err)"
+        continue
+      fi
       onoda pi evaluate-vte "$run_id" --store "$OUT/store" \
         --evaluator-store "$OUT/evaluator" > "$OUT/$run_id.evaluate.json"
       RUNS+=("$run_id")
+      progress "$run_id" "$started" "$(graded "$OUT/$run_id.run.json" "$OUT/$run_id.evaluate.json")"
     done
   done
 done

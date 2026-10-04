@@ -47,7 +47,7 @@ from onoda.adapters.pi.contract import (
     TextBlock,
     parse_spool_line,
 )
-from onoda.adapters.pi.runtime import LiveSettings, build_launch, doctor, launch
+from onoda.adapters.pi.runtime import LiveSettings, build_launch, check_pins, doctor, launch
 from onoda.errors import CapabilityError, OnodaError
 
 SCRIPT = Script(source="test", turns=(ScriptTurn(content=(TextBlock(type="text", text="done"),)),))
@@ -120,6 +120,19 @@ def test_doctor_flags_missing_install(tmp_path):
     result = doctor(tmp_path / "nowhere")
     assert result["ok"] is False
     assert len(result["problems"]) >= 2
+
+
+def test_a_run_refuses_a_pi_or_sol_pi_off_the_pins(tmp_path):
+    ok = write_fake_runtime(tmp_path / "ok", pi_version=PI_VERSION, sol_pi_commit=SOL_PI_COMMIT)
+    check_pins(sol_pi=True, runtime_dir=ok)
+    old_pi = write_fake_runtime(tmp_path / "pi", pi_version="0.1.0", sol_pi_commit=SOL_PI_COMMIT)
+    with pytest.raises(OnodaError, match="0.1.0 does not match"):
+        check_pins(sol_pi=False, runtime_dir=old_pi)
+    old_sol = write_fake_runtime(tmp_path / "sol", pi_version=PI_VERSION, sol_pi_commit="f" * 40)
+    check_pins(sol_pi=False, runtime_dir=old_sol)  # a run without SoL-Pi never loads it
+    with pytest.raises(OnodaError, match="f" * 40):
+        check_pins(sol_pi=True, runtime_dir=old_sol)
+    check_pins(sol_pi=True, runtime_dir=tmp_path / "nowhere")  # the launch itself fails
 
 
 @requires_pi
@@ -676,9 +689,14 @@ def test_launch_times_out(tmp_path):
         max_requests=1,
         max_acquisitions=0,
     )
-    launch_obj = dataclasses.replace(launch_obj, argv=("sleep", "5"))
-    result = launch(launch_obj, timeout_s=0.2)
+    argv = ("sh", "-c", "echo started >&2; sleep 5")
+    launch_obj = dataclasses.replace(launch_obj, argv=argv)
+    result = launch(launch_obj, timeout_s=0.5)
     assert result.timed_out is True
+    # A72: what Pi printed is kept next to the spool, so a hang can be diagnosed.
+    work = launch_obj.spool_dir.parent
+    assert (work / "pi.stderr.log").read_text() == "started\n"
+    assert (work / "pi.stdout.tail.log").read_text() == ""
 
 
 # ------------------------------------------------------------ review fixes (M3)

@@ -99,6 +99,7 @@ from onoda.adapters.pi.contract import (
     SPOOL_OBJECTS,
     TOOL_CASE_INPUT,
     TOOL_IPYTHON,
+    TOOL_ORCA_OUTPUT,
     TOOL_ORCA_RUN,
     TOOL_ORCA_SUBMIT,
     TOOL_REPORT,
@@ -151,7 +152,15 @@ BROKER_CODE_REF = "onoda.science.orca_broker"
 # `orca_submit`'s tool receipt records what the agent saw; the ORCA job itself
 # is the receipt its `task.execute` line becomes, so the job is never counted twice.
 READ_TOOLS = frozenset(
-    {TOOL_CASE_INPUT, TOOL_ORCA_RUN, TOOL_STRUCTURE, TOOL_ORCA_SUBMIT, "read", "obs_recall"}
+    {
+        TOOL_CASE_INPUT,
+        TOOL_ORCA_RUN,
+        TOOL_STRUCTURE,
+        TOOL_ORCA_SUBMIT,
+        TOOL_ORCA_OUTPUT,
+        "read",
+        "obs_recall",
+    }
 )
 CLAIM_TOOLS = {TOOL_REPORT: Claim, TOOL_REPORT_VTE: VteClaim}
 FUSED_TOOLS = frozenset({"edit", "write"})
@@ -615,6 +624,7 @@ def _broker_jobs(journal: Iterable[BrokerJournalRecord]) -> dict[str, BrokerJour
     return jobs
 
 
+# Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — the broker journal is authoritative; a spool that disagrees is refused
 def _check_broker(
     executions: list[TaskExecute], jobs: dict[str, BrokerJournalRecord]
 ) -> dict[str, BrokerJournalRecord]:

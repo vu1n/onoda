@@ -158,6 +158,7 @@ class Controller:
         self.start_fixture_run(run_id, **kwargs)
         return self.advance(run_id)
 
+    # Context: doc://onoda/record-integrity@0002#immutable-single-writer-records — semantic restart only; no native resume of live process state
     def resume(self, run_id: str, *, mode: str = "semantic") -> RunState:
         """Semantic restart from the latest checkpoint. Native resume is not supported."""
         if mode != "semantic":

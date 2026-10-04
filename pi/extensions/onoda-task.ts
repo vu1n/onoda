@@ -19,7 +19,7 @@
  * The output text is returned whole; shortening it is ObservationPack's job.
  */
 
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -36,6 +36,7 @@ import {
 	sha256Hex,
 	spool,
 	TOOL_CASE_INPUT,
+	TOOL_ORCA_OUTPUT,
 	TOOL_ORCA_RUN,
 	TOOL_ORCA_SUBMIT,
 	TOOL_REPORT,
@@ -388,9 +389,75 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 	return { reply, output };
 }
 
+const OutputParams = Type.Object(
+	{
+		job_id: Type.String({ description: "A job of this run, e.g. j0003" }),
+		find: Type.Optional(
+			Type.String({
+				description: "Show only lines containing this text (case-insensitive), e.g. NEVPT2 or TRANSITION ENERGIES",
+				minLength: 1,
+				maxLength: 200,
+			}),
+		),
+		context: Type.Optional(
+			Type.Integer({ description: "Lines shown around each match (default 3)", minimum: 0, maximum: 40 }),
+		),
+	},
+	{ additionalProperties: false },
+);
+const MAX_FOUND_LINES = 600;
+const JOBS_DIR = "jobs"; // in the workspace (Pi's cwd): read-only copies of each job's input and output
+
+/**
+ * Write jobs/<job_id>/{input.inp,output.out} under the workspace, read-only; returns the folder,
+ * or null if the workspace refused it (the reply then omits the path; orca_output still works).
+ */
+function copyJob(jobId: string, input: Buffer, output: Buffer): string | null {
+	const rel = join(JOBS_DIR, jobId);
+	const dir = join(process.cwd(), rel);
+	try {
+		mkdirSync(dir, { recursive: true });
+		for (const [name, data] of [["input.inp", input], ["output.out", output]] as const) {
+			const path = join(dir, name);
+			writeFileSync(path, data, { flag: "wx" });
+			chmodSync(path, 0o444);
+		}
+	} catch {
+		return null;
+	}
+	return rel;
+}
+
+/** The lines of `text` containing `find` (case-insensitive) with `context` lines around each, numbered. */
+export function findLines(text: string, find: string, context: number): { shown: string; matches: number } {
+	const lines = text.split("\n");
+	const needle = find.toLowerCase();
+	const keep = new Set<number>();
+	let matches = 0;
+	lines.forEach((line, i) => {
+		if (!line.toLowerCase().includes(needle)) return;
+		matches++;
+		for (let j = Math.max(0, i - context); j <= Math.min(lines.length - 1, i + context); j++) keep.add(j);
+	});
+	const out: string[] = [];
+	let last = -2;
+	for (const i of [...keep].sort((a, b) => a - b)) {
+		if (out.length >= MAX_FOUND_LINES) {
+			out.push(`... (more matches; narrow the search)`);
+			break;
+		}
+		if (i !== last + 1 && out.length) out.push("--");
+		out.push(`${i + 1}: ${lines[i]}`);
+		last = i;
+	}
+	return { shown: out.join("\n"), matches };
+}
+
 function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: VteTaskBundle): string {
 	const { task, structure, prompt } = loadVteBundle(dir, raw);
 	const socketPath = process.env[ENV_BROKER];
+	// Job id -> output bytes, as each orca_submit reply verified them (orca_output reads these).
+	const outputs = new Map<string, Buffer>();
 	if (!socketPath) throw new Error("onoda-task: ONODA_PI_BROKER is not set");
 
 	const targets = task.targets.map((t) => `- ${t.count} ${SPIN_NAMES[t.spin]} ${t.irrep} state${t.count > 1 ? "s" : ""}`);
@@ -434,6 +501,8 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			"files only by their attached names, and keep %pal nprocs and %maxcore within the host's caps; an input that " +
 			"names a path, sets %base, or starts other programs (%compound, ExtOpt, ProgExt) is refused (input_rejected). " +
 			"Every call counts against the run's job limit. Cite the job id when you report a value from its output. " +
+			"The job itself runs on the host; a read-only copy of each job's input and output is placed in your " +
+			"workspace as jobs/<job_id>/input.inp and output.out, and orca_output re-reads or searches an earlier job. " +
 			"For a CASSCF job the reply also lists host checks read from its output: the lowest CASSCF root against " +
 			"the Hartree-Fock energy of the same basis and geometry from this run, the active orbitals per irrep, and " +
 			"whether every state-averaged root has the same weight.",
@@ -465,6 +534,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			}
 			const { reply, output } = checkReply(raw, inputHex);
 			if (reply.status === "refused") throw new Error(`orca_submit refused: ${reply.reason ?? "no reason given"}`);
+			if (reply.job_id) outputs.set(reply.job_id, output);
 			w.line({
 				type: "task.execute",
 				tool_call_id: toolCallId,
@@ -475,10 +545,15 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 				cache_hit: reply.cache_hit,
 				executed_here: reply.executed_here,
 			});
+			// A72: a read-only copy in the workspace, after the bytes are spooled, so the
+			// agent's own tools can find and search its jobs. The grader never reads it.
+			const copy = reply.job_id ? copyJob(reply.job_id, input, output) : null;
 			const how = reply.cache_hit ? "cache hit: an identical earlier job's output, not run again" : "executed";
 			const header = [
 				`ORCA job ${reply.job_id}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`,
 				`Files for attach: ${reply.files.length ? reply.files.join(", ") : "none"}`,
+				`orca_submit calls left in this run: ${Math.max(0, task.max_executions - counters().executions)}`,
+				...(copy ? [`Read-only copy in your workspace: ${copy}/input.inp, ${copy}/output.out`] : []),
 				...(reply.checks.length ? ["Host checks on this output (advisory):", ...reply.checks.map((c) => `- ${c}`)] : []),
 			].join("\n");
 			return {
@@ -497,6 +572,31 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 					checks: reply.checks,
 				},
 			};
+		},
+	});
+
+	pi.registerTool({
+		name: TOOL_ORCA_OUTPUT,
+		label: "ORCA output",
+		description:
+			"Read the output of an earlier orca_submit job of this run again, whole or only the lines containing " +
+			"some text (with line numbers). Costs no job.",
+		promptSnippet: "Re-read an earlier ORCA job's output",
+		parameters: OutputParams,
+		async execute(_toolCallId, params) {
+			const output = outputs.get(params.job_id);
+			if (output === undefined) {
+				const known = [...outputs.keys()].join(", ") || "none yet";
+				throw new Error(`orca_output: no job ${JSON.stringify(params.job_id)} in this run (jobs: ${known})`);
+			}
+			const text = output.toString("utf8");
+			const details = { job_id: params.job_id, output_sha256: sha256Hex(output), find: params.find ?? null };
+			if (params.find === undefined) {
+				return { content: [{ type: "text", text: `ORCA job ${params.job_id}: whole output` }, { type: "text", text }], details };
+			}
+			const { shown, matches } = findLines(text, params.find, params.context ?? 3);
+			const header = `ORCA job ${params.job_id}: ${matches} line(s) containing ${JSON.stringify(params.find)}`;
+			return { content: [{ type: "text", text: matches ? `${header}\n${shown}` : header }], details: { ...details, matches } };
 		},
 	});
 

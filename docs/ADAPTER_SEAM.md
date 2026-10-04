@@ -1,6 +1,10 @@
 # Adapter seam: Pi-first, harness-neutral
 
-Status: M0 design sketch, verified in M3 against the installed pins. Pi is
+Status: superseded as a decision record by
+[`.brief/docs/pi-first-pinned-stack.md`](../.brief/docs/pi-first-pinned-stack.md),
+which governs the Pi-first route and the pins and lists what below has gone stale
+(the "no real provider" lines, §2's sandbox line, §6). Kept as design notes;
+snapshot as of M3. Originally: M0 design sketch, verified in M3 against the installed pins. Pi is
 pinned at `@earendil-works/pi-coding-agent@0.85.1` (provenance/sources.json,
 S14) and SoL-Pi at commit `1559b5cb12c72da4a485bc50fe326586b216fb19` (S13),
 both locked in `pi/package-lock.json` and installed by `scripts/pi-setup.sh`.

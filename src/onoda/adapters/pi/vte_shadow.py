@@ -188,6 +188,7 @@ def _job_states(store: Store, run_id: str, case: LoadedVteCase):
         yield job_id, job, job_state(case, job_id, job.output, checks)
 
 
+# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — shadow answers go to the evaluator store only; the agent never sees them
 def shadow_run(
     store: Store,
     evaluator_store: Store,

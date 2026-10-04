@@ -50,6 +50,7 @@ export const TOOL_REPORT = "report_states";
 // VTE tasks (vte_contract.py, A57-A59): the agent runs its own jobs through the host broker.
 export const TOOL_STRUCTURE = "structure";
 export const TOOL_ORCA_SUBMIT = "orca_submit";
+export const TOOL_ORCA_OUTPUT = "orca_output";
 export const TOOL_REPORT_VTE = "report_vtes";
 export const VTE_TASK_SCHEMA = "onoda.pi-vte-task/1";
 export const VTE_CLAIM_SCHEMA = "onoda.pi-vte-claim/1";
@@ -72,6 +73,8 @@ export interface GatewayPolicy {
 	path_aliases: Record<string, string>;
 	read_roots?: string[] | null;
 	write_roots?: string[] | null;
+	/** A72: longest one `bash` call may run, in seconds; null or absent means no cap. */
+	max_bash_seconds?: number | null;
 }
 
 export function sha256Hex(data: string | Uint8Array): string {
@@ -102,6 +105,7 @@ export const PI_TEMP_LOG_PLACEHOLDER = "$PI_TEMP_LOG";
  * replace Pi's random temp-log paths, so a replay key is location- and
  * time-free (A34).
  */
+// Context: doc://onoda/replay-fails-closed@0001#replay-fails-closed — only the listed fields normalize; any other change is a replay mismatch
 export function normalizeForReplay(value: unknown, aliases: Record<string, string>): unknown {
 	const paths = Object.keys(aliases).sort((a, b) => b.length - a.length);
 	const walk = (v: unknown): unknown => {
