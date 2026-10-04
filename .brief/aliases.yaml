@@ -1,0 +1,30 @@
+agent-sandbox:
+  latest: 1
+case-data-provenance:
+  latest: 1
+decision-models-shadow-only:
+  latest: 1
+evaluator-isolation:
+  latest: 1
+live-off-by-default:
+  latest: 1
+match-by-identity:
+  latest: 1
+optimizer-scope:
+  latest: 1
+orca-broker-boundary:
+  latest: 1
+orca-parser-authoritative:
+  latest: 1
+pi-first-pinned-stack:
+  latest: 1
+promotion-gates:
+  latest: 1
+record-integrity:
+  latest: 1
+replay-fails-closed:
+  latest: 1
+vte-grading-contract:
+  latest: 1
+vte-task-inputs:
+  latest: 1

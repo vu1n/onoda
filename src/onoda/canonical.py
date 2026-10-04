@@ -25,6 +25,7 @@ def _check(value: Any, path: str) -> None:
         if abs(value) > _MAX_SAFE_INT:
             raise CanonicalizationError(f"integer outside IEEE-754 safe range at {path}")
         return
+    # Context: doc://onoda/record-integrity@0001#immutable-single-writer-records — no floats in canonical records; exact values are decimal strings
     if isinstance(value, float):
         raise CanonicalizationError(f"float at {path}; encode exact values as decimal strings")
     if isinstance(value, dict):

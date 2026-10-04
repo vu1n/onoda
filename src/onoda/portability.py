@@ -586,6 +586,7 @@ def _write_archive(out: Path, files: dict[str, bytes]) -> None:
             gz.write(buf.getvalue())
 
 
+# Context: doc://onoda/evaluator-isolation@0001#references-never-agent-visible — exports carry no secrets, references or protected bytes
 def _check_leaks(
     files: dict[str, bytes], secrets: Iterable[str], protected: list[tuple[str, bytes]]
 ) -> None:
@@ -1017,6 +1018,7 @@ def _write_journal(store: Store, run_id: str, raw: bytes) -> None:
     os.replace(tmp, path)
 
 
+# Context: doc://onoda/evaluator-isolation@0001#references-never-agent-visible — import is data-only: no code execution, pickle, network or installs
 def import_bundle(
     bundle: str | os.PathLike[str],
     store: Store,

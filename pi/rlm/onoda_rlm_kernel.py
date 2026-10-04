@@ -122,6 +122,7 @@ class Kernel:
             return reply["value"]
         raise RlmError(reply.get("error"))
 
+    # Context: doc://onoda/record-integrity@0001#immutable-single-writer-records — kernel state reaches the record only as committed JSON, never pickle
     def _commit_state(self, name: str, value: Any) -> str:
         # allow_nan=False also rejects float("inf"); the dump happens before the
         # name is even checked, so a bad value never reaches the host.

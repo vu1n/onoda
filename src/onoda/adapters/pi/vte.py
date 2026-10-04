@@ -181,6 +181,7 @@ def _pt2_method(references: VteReferences) -> str:
     return references.method.split("/", 1)[0]
 
 
+# Context: doc://onoda/vte-grading-contract@0001#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
 def _grade_value(
     cs: ClaimedVte,
     jobs: Mapping[str, VteJob],
@@ -230,6 +231,7 @@ def _grade_value(
     return "contradicted", {**detail, "reason": "value" if pt2 else "no_state"}
 
 
+# Context: doc://onoda/match-by-identity@0001#no-energy-order-matching — references are picked by spin, irrep and character, never by energy order
 def _candidates(
     cs: ClaimedVte, rows: tuple[VteReferenceRow, ...]
 ) -> tuple[list[VteReferenceRow], str | None]:
@@ -431,6 +433,7 @@ def evaluate_vte_run(
     )
 
 
+# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — only vte-claims evaluations are graded; shadow answers never are
 def _latest_vte_evaluation(evaluator_store: Store, run_id: str) -> Evaluation:
     prefix = f"{run_id}.{VTE_EVALUATOR}-v"
     ids = sorted(i for i in evaluator_store.list_record_ids("evaluation") if i.startswith(prefix))

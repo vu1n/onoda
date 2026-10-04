@@ -241,6 +241,7 @@ def _announce(j: _Journal, task: TaskManifest) -> None:
     )
 
 
+# Context: doc://onoda/case-data-provenance@0001#pinned-acquired-cases — outputs we did not run are acquired (executed_here: false), never executions
 def _acquire(j: _Journal, case: LoadedCase, inp: str) -> tuple[InvocationReceipt, bool]:
     if done := j.committed(ACQUIRE):
         return done, False

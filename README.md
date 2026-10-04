@@ -62,8 +62,9 @@ Milestones M0 to M4 of the handoff in [`docs/handoff/`](docs/handoff/) are
 done ([`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
 text there). Before any claim about chemistry: human review of the cases, ORCA
 runs on licensed hardware against the paper's targets, and a real advisory
-ladder. Open decisions are tracked in
-[`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
+ladder. Decisions, including the open ones, are governed docs in
+[`.brief/docs/`](.brief/docs/); [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) maps the
+old A-row ids to them.
 
 ## Quick start
 
@@ -348,7 +349,7 @@ belong to later milestones.
   provider's reducer and compaction-summary calls are not spooled (see
   `docs/ADAPTER_SEAM.md` §2).
 - Scientific tolerances, task membership, and the expert convergence check are
-  unresolved; see [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). Upstream
+  unresolved; see [`.brief/docs/`](.brief/docs/). Upstream
   revisions are pinned in [`provenance/sources.json`](provenance/sources.json).
 - `RunView` is a snapshot taken at construction and must be rebuilt after new
   events.

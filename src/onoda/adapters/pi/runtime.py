@@ -88,6 +88,7 @@ from onoda.errors import CapabilityError, OnodaError
 _MIN_NODE = (22, 19, 0)
 # A72: one agent `bash` call ends after this many seconds. ORCA jobs run in the
 # host broker, not in bash, so this caps only the agent's own shell commands.
+# Context: doc://onoda/agent-sandbox@0001#sandbox-or-refuse — one agent bash command runs at most 600 s
 MAX_BASH_SECONDS = 600
 
 # The only variables the child inherits from this process. Everything else
@@ -208,6 +209,7 @@ def doctor(runtime_dir: Path = RUNTIME_DIR) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+# Context: doc://onoda/live-off-by-default@0001#live-settings-explicit — every live provider setting is explicit; nothing inferred from a present key
 class LiveSettings:
     """A real-provider run. Every field must be explicitly given; there are no
     defaults and nothing is inferred from a present API key (A35).
@@ -287,6 +289,7 @@ class RlmStage:
         }
 
 
+# Context: doc://onoda/agent-sandbox@0001#sandbox-or-refuse — bwrap on Linux, Seatbelt on macOS, refuse anything else; never degrade
 def detect_sandbox() -> PiSandbox:
     """This host's Pi sandbox (A50), or `CapabilityError` saying why there is none.
 
@@ -390,6 +393,7 @@ def build_launch(
     else:
         task_bundle = TaskBundle.model_validate_json(task_json)
     tools = effective_variant.tools(task_kind)
+    # Context: doc://onoda/vte-task-inputs@0001#agent-gets-structure-and-targets — a ladder variant needs an operator-supplied ladder file, pinned by sha256
     if variant.ladder:
         if task_bundle.ladder_sha256 is None or not (bundle_dir / "ladder.md").is_file():
             raise CapabilityError(f"variant {variant_id} requires an advisory ladder")

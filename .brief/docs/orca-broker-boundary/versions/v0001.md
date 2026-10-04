@@ -1,0 +1,56 @@
+---
+id: orca-broker-boundary
+project: onoda
+type: decision
+status: active
+title: Agent ORCA jobs run only in the host broker, each in its own job sandbox, under one execution cap
+related_code:
+  - "src/onoda/science/orca_broker.py"
+  - "src/onoda/science/orca_sandbox.py"
+  - "src/onoda/science/orca_local.py"
+  - "src/onoda/adapters/pi/ingest.py"
+  - "pi/extensions/onoda-task.ts"
+  - "src/onoda/adapters/pi/vte_contract.py"
+carries: [A4, A59, A65]  # rows of the former docs/ASSUMPTIONS.md register
+---
+
+<!-- brief:anchor broker-owns-orca -->
+## ORCA runs only in the host broker, confined per job, and the broker's journal is the record
+
+ORCA never runs inside the Pi sandbox. The host broker answers `orca_submit` over a Unix socket, runs each job in a job sandbox writable only in its job folder, caches by (input, attachments, binary sha256, stand-in flag), and journals each reply before sending it. A cache hit is acquired (`executed_here: false`), never an execution. One number, `max_executions` (default 24), caps submissions per run across bundle, gateway and broker. Real ORCA refuses to start without a sandbox that passes a trial run.
+
+**Why.** Agent-written ORCA inputs can name files and start programs; the broker boundary and the job sandbox are what keep that away from the host, the cache and the grader's bytes.
+
+### Invariant
+- `OrcaBroker._submit` refuses once `max_executions` submissions got a job (cache hits and failed jobs count; refused submissions do not).
+- `_check_confinement` refuses real ORCA without a passing job sandbox and refuses a cache the sandbox could read.
+- `input_problem` is a tripwire, not the boundary: `%base`, `%compound`, `Sys_Cmd`, `ProgExt`, `ExtOpt`, `$new_job`, path-bearing strings, unattached file arguments, and nprocs/maxcore above the caps are refused as `input_rejected`.
+- Ingest (`_check_broker`) refuses a spool whose `task.execute` lines disagree with the broker journal, or have no journal.
+
+### Carried forward from the assumptions register
+
+Verbatim from `docs/ASSUMPTIONS.md` as of 83df418 (2026-10-04). Where a row and the invariants above disagree, the invariants are current.
+
+Drift found when this was verified against code (2026-10-04):
+
+- A65 lists the job environment as `PATH`, `HOME`, `TMPDIR`, `LANG`; on Linux with an MPI prefix it also sets `OMPI_MCA_btl_vader_single_copy_mechanism=none`.
+- A65 says a labelled stand-in runs unconfined only on a host with neither backend; `host_job_sandbox` returns no sandbox for a stand-in on any `CapabilityError`, including a backend that exists but fails its trial run. Real ORCA still fails closed.
+- Project notes outside the repo said the attempt cap is 8; code and `run.sh` use 24 (8 is the molecule count).
+
+#### A4: Operational meaning of "an attempt" (the paper's eight-attempt limit)
+
+Register status: unresolved. Owner milestone: M1.
+
+Track jobs, configurations, retries, and actual resource use as separate portable-record fields rather than inferring the paper's accounting.
+
+#### A59: How do agent-submitted ORCA jobs run, and what counts as an execution?
+
+Register status: decided (default, QUESTDB slice). Owner milestone: QUESTDB slice.
+
+ORCA runs on the host, never inside the Pi sandbox: a broker (`onoda.science.orca_broker`) owns `OrcaLocalScheduler` and answers `orca_submit` over a Unix socket in the Pi work directory, which the agent's own commands cannot reach. Jobs are cached by sha256 of (input bytes, attached files, ORCA binary sha256, stand-in flag), so stand-in and ORCA outputs never share an entry; a hit returns the earlier output under a new job id recorded as acquired (`cache_hit`, `executed_here: false`), never as an execution. `max_executions` (default 24) caps submissions per run that got a job, hits and failed jobs included; a refused submission runs nothing and is not counted, by the broker or by the Pi gateway. The broker's journal is written before each reply and is the authoritative record: ingest refuses a spool whose `task.execute` lines disagree with it. Scripted replay runs the broker in replay mode, which serves recorded outputs only and never executes.
+
+#### A65: How are agent-submitted ORCA jobs confined?
+
+Register status: decided (default, QUESTDB slice). Owner milestone: QUESTDB slice.
+
+The agent writes the ORCA input, and ORCA reads and writes the files it names (`%moinp "../.."`, `*xyzfile`, `inhessname`, `%base "/x/y"`) and can start programs (`%compound` with `Sys_Cmd`, `ExtOpt`/`ProgExt`), so every broker job runs in a job sandbox (`onoda.science.orca_sandbox`) that `OrcaLocalScheduler` applies as an argv prefix plus environment. It sees the system directories, ORCA_HOME (the binary's directory) and the MPI prefix (`--orca-mpi-home`) read-only and its own job directory read-write, nothing else; its environment is `PATH`, `HOME` and `TMPDIR` (the job dir) and `LANG`; it has loopback and unix sockets in the job dir (OpenMPI) and no other network. Linux: `bwrap --unshare-all --die-with-parent --clearenv`, private `/tmp` and `/proc`. macOS: `env -i` + a generated deny-default Seatbelt profile that also allows `process-exec` only under ORCA_HOME, MPI_HOME and `/bin/sh`, and an allowlist of sysctls without `kern.procargs2`; Seatbelt has no pid namespace, so a job process that leaves its process group survives the group kill, still confined. The broker refuses to start real ORCA without a sandbox that passes a trial run (fail closed, like A50); a labelled stand-in runs unconfined only on a host with neither backend. The broker's input checks (`orca_broker.input_problem`) are a tripwire, not the boundary: `%base`, `%compound`, `Sys_Cmd`, `ProgExt`, `ExtOpt`, `$new_job`, any quoted string with `/`, `\` or `..`, and a `%moinp`/`*xyzfile`/`*gzmtfile`/`*pdbfile`/`inhessname` argument that is not an attached file are refused as `input_rejected` (journaled, nothing runs), as are `%pal nprocs`/`PALn` above `max_nprocs` (default 4) and `%maxcore` above `max_maxcore_mb` (default 4000 MB per process; an input without `%maxcore` gets ORCA's own default). Every file a job writes, its log included, is capped by `RLIMIT_FSIZE` at `max_output_bytes` (default 256 MiB); a job killed by `SIGXFSZ` or that left a file at the cap is `failed` with reason `output_too_large`, and its reply carries an empty output (pinned by its sha256) and no files, so nothing of it is shown, attachable or cached. The caps are recorded in the run config; replaying a run recorded before them skips the checks. The job sandbox keeps ORCA away from the broker's cache (`--orca-cache`): it never names the cache directory, and the broker refuses a cache the sandbox could read (e.g. one under ORCA_HOME); the cache is shared across runs and only the broker writes it. A cache entry is data from that shared directory, so each file name it lists must be a product name (`attachable`) before a path is built from it, else `cache_corrupt`. The operator's own `onoda case ingest --execute` path runs trusted inputs and stays unconfined.

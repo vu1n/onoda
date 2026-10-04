@@ -47,6 +47,7 @@ NEVPT2_COLUMN = "SC-NEVPT2"
 # molecule -> (point group, ground-state xyz name in geometries/xyz). The
 # point group is the symmetry QUESTDB's active-space tables are labelled in:
 # Cs for the two planar molecules with a' / a'' columns, C2v otherwise.
+# Context: doc://onoda/case-data-provenance@0001#pinned-acquired-cases — QUESTDB data is dev-only and lives under cases-dev/, credited
 MOLECULES: dict[str, tuple[str, str]] = {
     "acetaldehyde": ("Cs", "acetaldehyde.xyz"),
     "formamide": ("Cs", "formamide.xyz"),

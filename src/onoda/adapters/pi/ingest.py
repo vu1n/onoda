@@ -624,6 +624,7 @@ def _broker_jobs(journal: Iterable[BrokerJournalRecord]) -> dict[str, BrokerJour
     return jobs
 
 
+# Context: doc://onoda/orca-broker-boundary@0001#broker-owns-orca — the broker journal is authoritative; a spool that disagrees is refused
 def _check_broker(
     executions: list[TaskExecute], jobs: dict[str, BrokerJournalRecord]
 ) -> dict[str, BrokerJournalRecord]:

@@ -4,4 +4,5 @@
 # Lifecycle scripts are skipped: the pinned packages need none to run.
 set -euo pipefail
 cd "$(dirname "$0")/../pi"
+# Context: doc://onoda/pi-first-pinned-stack@0001#pi-pinned — install only from the lockfile pins
 npm ci --ignore-scripts --no-audit --no-fund

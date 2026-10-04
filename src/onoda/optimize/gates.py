@@ -43,6 +43,7 @@ def _capability_reason(c: MetricCheck) -> str:
     )
 
 
+# Context: doc://onoda/promotion-gates@0001#zero-capability-tolerance — accept on eligible, or on capability_gain with zero capability worsening
 def gate_decision(
     parent: PooledArm, child: PooledArm, spec: GateSpec
 ) -> tuple[bool, tuple[str, ...]]:
