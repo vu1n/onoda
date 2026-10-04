@@ -468,9 +468,14 @@ def cmd_pi_fork(a) -> Any:
     from onoda.adapters.pi.runtime import detect_sandbox
     from onoda.science.orca_local import OrcaSettings
 
+    if bool(a.script) == bool(a.live):
+        raise OnodaError("give exactly one of --script (offline) or --live")
+    if a.live and a.fresh_allowance:
+        raise OnodaError("a --live fork always gets its own caps; drop --fresh-allowance")
     store = _store(a.store)
     cfg = store.run_record(a.run_id).config
     vte = cfg.get("task_kind") == "vte"
+    live = _live_settings(a)
     pi = fork_pi_run(
         store,
         a.run_id,
@@ -479,10 +484,11 @@ def cmd_pi_fork(a) -> Any:
         if vte
         else _case(cfg.get("case_id"), a.cases_root),
         new_run_id=a.new_run,
-        continuation=Script.model_validate_json(Path(a.script).read_text()),
+        continuation=Script.model_validate_json(Path(a.script).read_text()) if a.script else None,
+        live=live,
         reason=a.reason,
         work_dir=Path(a.work_dir),
-        budget_treatment="fresh-allowance" if a.fresh_allowance else "inherit-remaining",
+        budget_treatment="fresh-allowance" if a.fresh_allowance or live else "inherit-remaining",
         # Every field defaults off; OrcaLocalScheduler refuses unresolved settings.
         orca=OrcaSettings(
             enabled=a.enable_live_execution,
@@ -494,7 +500,7 @@ def cmd_pi_fork(a) -> Any:
         if vte
         else None,
         cache_dir=Path(a.orca_cache) if a.orca_cache else None,
-        sandbox=detect_sandbox() if a.sandbox else None,
+        sandbox=detect_sandbox() if a.sandbox or live else None,
         timeout_s=a.timeout,
     )
     return {**_pi_run_summary(pi), "parent": a.run_id, "checkpoint": a.checkpoint}
@@ -1202,21 +1208,34 @@ def build_parser() -> argparse.ArgumentParser:
     rv.set_defaults(func=cmd_pi_run_vte)
     pf = pi.add_parser(
         "fork",
-        help="fork a recorded Pi run at a checkpoint: replay it there, then continue on a script",
+        help="fork a recorded Pi run at a checkpoint: replay it there, then continue on a "
+        "script or a live model",
     )
     pf.add_argument("run_id", help="the parent run")
     pf.add_argument("--checkpoint", required=True, help="see `onoda checkpoint list`")
     pf.add_argument("--new-run", required=True)
     pf.add_argument("--store", required=True)
     pf.add_argument("--work-dir", required=True, help="short for a VTE run: the broker socket")
-    pf.add_argument("--script", required=True, help="the continuation (offline; synthetic)")
+    pf.add_argument("--script", help="the continuation (offline; synthetic)")
+    pf.add_argument(
+        "--live",
+        action="store_true",
+        help="continue on a real provider (every live flag needed; caps are on top of the prefix)",
+    )
+    pf.add_argument("--provider")
+    pf.add_argument("--model")
+    pf.add_argument("--credential-env", help="name of the env var holding the API key")
+    pf.add_argument("--max-cost-usd")
+    pf.add_argument("--max-requests", type=int, help="the live model's requests")
     pf.add_argument("--reason", required=True, help="why this fork, recorded with it")
     pf.add_argument(
         "--fresh-allowance",
         action="store_true",
         help="give the fork the parent's caps again on top of the replayed prefix",
     )
-    pf.add_argument("--sandbox", action="store_true", help="run Pi in the sandbox")
+    pf.add_argument(
+        "--sandbox", action="store_true", help="run Pi in the sandbox (always on for --live)"
+    )
     pf.add_argument(
         "--enable-live-execution", action="store_true", help="VTE: let the broker run ORCA"
     )

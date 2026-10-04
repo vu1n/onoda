@@ -259,6 +259,7 @@ def run_case(
         reducer=reducer,
         candidate=candidate,
         sandbox=sandbox,
+        handoff=_handoff(fork, script, live),
     )
     # Refusals happen above; only a launchable run commits anything.
     task = _commit_task(
@@ -270,7 +271,7 @@ def run_case(
         synthetic_ladder=synthetic_ladder,
     )
     config: dict[str, Any] = {
-        "mode": "pi-scripted" if script is not None else "pi-live",
+        "mode": "pi-scripted" if live is None else "pi-live",
         "variant": variant_id,
         "case_id": case.manifest.case_id,
         "instruction": instruction,
@@ -342,18 +343,28 @@ def _ingest_launch(
 def _record_driver(
     store: Store, config: dict[str, Any], script: Script | None, live: LiveSettings | None
 ) -> None:
-    """Add what drove the agent to `config`: the committed script, or the live settings."""
+    """Add what drove the agent to `config`: the committed script, or the live settings
+    (a fork's live continuation has both: its replayed prefix is `prefix_script`)."""
     if script is not None:
-        config["script"] = store.put_json(
-            script.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]
+        config["script" if live is None else "prefix_script"] = store.put_json(
+            script.model_dump(mode="json", by_alias=True),
+            labels=["pi-script", "synthetic" if live is None else "replayed"],
         ).digest
-    else:
-        assert live is not None
+    if live is not None:
         config.update(
             provider=live.provider,
             model=live.model,
             max_cost_usd=live.max_cost_usd,
         )
+
+
+def _handoff(fork: ForkLaunch | None, script: Script | None, live: LiveSettings | None) -> bool:
+    """Whether this launch replays a fork's prefix and then hands off to a live model."""
+    if script is not None and live is not None:
+        if fork is None:
+            raise OnodaError("a run takes a script or live settings, not both, unless it is a fork")
+        return True
+    return False
 
 
 def _request_cap(live: LiveSettings | None, max_requests: int | None) -> int:
@@ -541,6 +552,7 @@ def run_vte_case(
         sandbox=sandbox,
         task_kind="vte",
         broker_socket=work_dir / "pi" / BROKER_SOCKET,
+        handoff=_handoff(fork, script, live),
     )
     # Outside the Pi work dir: the journal is the host's record, not Pi's.
     broker = OrcaBroker(
@@ -564,7 +576,7 @@ def run_vte_case(
         synthetic_ladder=synthetic_ladder,
     )
     config: dict[str, Any] = {
-        "mode": "pi-scripted" if script is not None else "pi-live",
+        "mode": "pi-scripted" if live is None else "pi-live",
         "variant": variant_id,
         "task_kind": "vte",
         "case_id": case.manifest.case_id,

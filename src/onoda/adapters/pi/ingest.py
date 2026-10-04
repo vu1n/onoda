@@ -499,6 +499,7 @@ def _analyze(
     if start.sandbox != config.get("sandbox"):
         raise OnodaError(f"spool sandbox={start.sandbox!r} contradicts the run's")
     tokens = tuple(t.lower() for t in (*UNFUSABLE_COMMAND_TOKENS, *config.get("unfusable", ())))
+    handoff_at = _handoff_at(config)
     fusion = "actionFusion" in variant.mechanisms
     depth = config.get("depth", 0)
     cells: set[str] = set()
@@ -531,7 +532,12 @@ def _analyze(
                         f"request at seq {line.seq}: source {line.source} cannot write "
                         f"a {line.purpose} request"
                     )
-                if (line.source == "scripted-provider") != start.scripted:
+                # A fork's live continuation: the scripted provider serves exactly the
+                # replayed prefix (every request before `handoff_at`), the live model the rest.
+                scripted = start.scripted or (
+                    handoff_at is not None and line.request_index < handoff_at
+                )
+                if (line.source == "scripted-provider") != scripted:
                     raise IntegrityError(
                         f"request at seq {line.seq}: source {line.source} in a "
                         f"{'scripted' if start.scripted else 'live'} run"
@@ -754,6 +760,7 @@ class _Writer:
         self.unspooled = unspooled
         self.scripted = spool.start.scripted
         self.synthetic = ["synthetic"] if self.scripted else []
+        self.handoff_at = _handoff_at(run.config)
         self.runtime = {"pi": spool.start.pi_version, "sol_pi": spool.start.sol_pi_commit}
         existing = store.events(run.run_id)
         self.done: dict[str, Event] = {k: e for e in existing if (k := _step_key(e))}
@@ -969,14 +976,20 @@ class _Writer:
     def decision(self, req: ProviderRequest, resp: ProviderResponse | None) -> None:
         reducer = req.purpose == "reducer"
         provider = self.spool.start.provider
-        if reducer:
+        # A request of a fork's replayed prefix, served before the handoff to the live model.
+        replayed = not self.scripted and req.source == "scripted-provider"
+        simulated = self.scripted or replayed
+        tags = ["replayed"] if replayed else self.synthetic
+        if replayed:
+            provider = SCRIPTED_PROVIDER
+        elif reducer:
             provider = self.run.config.get("reducer_provider") or (
                 SCRIPTED_PROVIDER if self.scripted else "unknown"
             )
         role = (
             "reducer" if reducer else "compaction-summary" if req.purpose == "summary" else "agent"
         )
-        ctx = self.obj(req.context, "application/json", ["pi-context", *self.synthetic])
+        ctx = self.obj(req.context, "application/json", ["pi-context", *tags])
         outputs, metadata = (
             {},
             {
@@ -989,16 +1002,16 @@ class _Writer:
                 "spool_seq": req.seq,
             },
         )
-        usage = Usage(units={}, measured=False, simulated=self.scripted, cost_usd=None)
+        if replayed:
+            metadata["replayed_from"] = self.run.config["fork"]["parent"]
+        usage = Usage(units={}, measured=False, simulated=simulated, cost_usd=None)
         if resp is not None:
-            outputs["message"] = self.obj(
-                resp.message, "application/json", ["pi-message", *self.synthetic]
-            )
+            outputs["message"] = self.obj(resp.message, "application/json", ["pi-message", *tags])
             metadata["stop_reason"] = resp.stop_reason
             usage = Usage(
                 units=dict(resp.usage_tokens),
-                measured=not self.scripted,
-                simulated=self.scripted,
+                measured=not simulated,
+                simulated=simulated,
                 cost_usd=resp.cost_usd,
                 price_table="pi-computed" if resp.cost_usd is not None else None,
             )
@@ -1017,7 +1030,7 @@ class _Writer:
             outputs,
             status="succeeded" if resp is not None else "failed",
             metadata=metadata,
-            labels=[role, *self.synthetic],
+            labels=[role, *tags],
             usage=usage,
         )
         if role == "agent":
@@ -1462,6 +1475,12 @@ def _run_config(config: dict[str, Any]) -> dict[str, Any]:
     if "spool" in config:
         raise OnodaError("config key 'spool' is set by ingest")
     return json.loads(canonical_bytes(config))  # rejects floats; normalizes tuples
+
+
+def _handoff_at(config: dict[str, Any]) -> int | None:
+    """The first request a fork's live continuation answers, or None for any other run."""
+    fork = config.get("fork") or {}
+    return fork["resume_request"] if "handoff" in fork else None
 
 
 def _effective_variant(config: dict[str, Any]) -> Variant:

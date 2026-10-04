@@ -27,6 +27,7 @@ export const ENV_TASK = "ONODA_PI_TASK";
 export const ENV_POLICY = "ONODA_PI_POLICY";
 export const ENV_RUN_INFO = "ONODA_PI_RUN_INFO";
 export const ENV_SPOOL_KEY = "ONODA_PI_SPOOL_KEY";
+export const ENV_HANDOFF = "ONODA_PI_HANDOFF"; // a fork's live model, {provider, model} JSON path
 export const ENV_BROKER = "ONODA_PI_BROKER"; // vte_contract.py: path of the broker's Unix socket
 export const ENV_PREFIX = "ONODA_PI_";
 

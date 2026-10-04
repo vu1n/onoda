@@ -5,18 +5,30 @@ Every run here is scripted on the real pinned Pi, so its outputs are synthetic.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 import test_pi_vte_end_to_end as v
 from conftest import requires_pi
-from test_pi_end_to_end import LADDER, case, claim_args, script, stores, tool, turns_script
+from test_pi_end_to_end import (
+    FIXTURES,
+    LADDER,
+    case,
+    claim_args,
+    script,
+    stores,
+    tool,
+    turns_script,
+)
 
 from onoda.adapters.pi import run as pi_run
 from onoda.adapters.pi.fork import fork_pi_run, fork_point
-from onoda.errors import ForkError, ReplayMismatch
+from onoda.adapters.pi.runtime import LiveSettings
+from onoda.errors import CapabilityError, ForkError, ReplayMismatch
 from onoda.records import ForkDeclaration
 from onoda.science.orca_broker import read_journal
 from onoda.store import Store
@@ -261,3 +273,115 @@ def test_cli_fork_and_the_fixture_fork_points_pi_runs_to_it(tmp_path, capsys):
     argv = ["fork", "p", "--checkpoint", at, "--declaration", str(decl), "--new-run", "g"]
     assert main([*argv, "--store", agent]) != 0
     assert "onoda pi fork" in capsys.readouterr().err
+
+
+# --- a live continuation: the prefix replays, then the session hands off to a live model
+
+
+class PassThroughSandbox:
+    """Test-only: a 'sandbox' that wraps nothing, so a live launch runs here without bwrap.
+
+    The live provider below is a local stand-in too; nothing leaves the machine.
+    """
+
+    kind = "test-passthrough"
+
+    def stage(self, *, pi_work_dir: Path, workspace: Path, bundle_dir: Path):
+        return Path("/bin/bash"), Path(sys.executable)
+
+    def outer_argv(self, *, pi_work_dir: Path, bundle_dir: Path) -> list[str]:
+        return []
+
+
+def live_stand_in(monkeypatch, tmp_path: Path, *turns) -> LiveSettings:
+    """Load tests/pi_fixtures/live-provider.ts, serving `turns`, as the fork's live model."""
+    served = tmp_path / "live-turns.json"
+    served.write_text(turns_script("test_live_stand_in", *turns).model_dump_json(by_alias=True))
+    real = pi_run.build_launch
+
+    def build(**kw):
+        prepared = real(**kw)
+        argv = list(prepared.argv)
+        at = len(argv) - 1 - argv[::-1].index("-e")  # the recorder's -e
+        argv[at:at] = ["-e", str(FIXTURES / "live-provider.ts")]
+        env = {**prepared.env, "ONODA_TEST_LIVE_TURNS": str(served)}
+        return dataclasses.replace(prepared, argv=tuple(argv), env=env)
+
+    monkeypatch.setattr(pi_run, "build_launch", build)
+    monkeypatch.setenv("ONODA_TEST_KEY", "not-a-real-key")
+    return LiveSettings(
+        provider="onoda-test-live",
+        model="live",
+        credential_env="ONODA_TEST_KEY",
+        max_requests=3,
+        max_cost_usd="1",
+    )
+
+
+def decisions(store: Store, run_id: str):
+    out = []
+    for e in store.events(run_id):
+        if e.type == "invocation.committed":
+            r = store.receipt(e.payload["invocation_id"])
+            if r.invocation_kind == "decision":
+                out.append(r)
+    return sorted(out, key=lambda r: r.metadata["request_index"])
+
+
+def test_a_live_continuation_replays_the_prefix_then_hands_off(tmp_path, monkeypatch):
+    store = parent(tmp_path)
+    at = checkpoint(store, "p", "job-collected")
+    live = live_stand_in(
+        monkeypatch,
+        tmp_path,
+        [tool("k1", "report_states", **wrong_claim())],
+        [{"type": "text", "text": "reported something else"}],
+    )
+    pi = fork(store, tmp_path, at, continuation=None, live=live, sandbox=PassThroughSandbox())
+    assert (pi.ingest.status, pi.ingest.complete) == ("settled", True)
+
+    child = store.run_record("f")
+    assert child.config["mode"] == "pi-live" and "synthetic" not in child.labels
+    assert child.config["fork"]["handoff"] == {"provider": "onoda-test-live", "model": "live"}
+    assert child.config["max_requests"] == 3 + 2  # the live model's own cap, on top of the prefix
+    decl = store.get_record("fork", child.fork)
+    assert decl.intervention["to_policy"] == "onoda-test-live/live"
+    assert decl.budget_treatment == "fresh-allowance"
+
+    # The prefix was replayed by the scripted provider at no cost; the live model answered after.
+    rs = decisions(store, "f")
+    assert [(r.metadata["provider"], r.metadata["source"]) for r in rs] == [
+        ("onoda-scripted", "scripted-provider"),
+        ("onoda-scripted", "scripted-provider"),
+        ("onoda-test-live", "before_provider_request"),
+        ("onoda-test-live", "before_provider_request"),
+    ]
+    assert all("replayed" in r.labels and r.usage.simulated for r in rs[:2])
+    assert all(r.metadata["replayed_from"] == "p" for r in rs[:2])
+    assert all(r.usage.measured and r.usage.cost_usd == "0.001" for r in rs[2:])
+    assert agent_keys(store, "f")[:2] == agent_keys(store, "p")[:2]
+    claims = {r: [e for e in store.events(r) if e.type == "pi.claim"] for r in ("p", "f")}
+    assert claims["f"][-1].payload_refs["claim"] != claims["p"][-1].payload_refs["claim"]
+
+
+def test_live_continuations_that_cannot_hand_off_are_refused(tmp_path, monkeypatch):
+    store = parent(tmp_path)
+    at = checkpoint(store, "p", "job-collected")
+    live = live_stand_in(monkeypatch, tmp_path, [{"type": "text", "text": "never"}])
+    with pytest.raises(ForkError, match="exactly one"):
+        fork(store, tmp_path, at, live=live)  # and the default script continuation
+    with pytest.raises(ForkError, match="fresh allowance"):
+        fork(store, tmp_path, at, continuation=None, live=live,
+             budget_treatment="inherit-remaining")  # fmt: skip
+    with pytest.raises(CapabilityError, match="sandbox"):
+        fork(store, tmp_path, at, continuation=None, live=live)
+    assert not store.has_record("run", "f")
+
+
+def test_a_live_fork_from_the_start_is_live_from_its_first_request(tmp_path, monkeypatch):
+    store = parent(tmp_path)
+    live = live_stand_in(monkeypatch, tmp_path, [{"type": "text", "text": "done"}])
+    at = checkpoint(store, "p", "initialized")
+    fork(store, tmp_path, at, continuation=None, live=live, sandbox=PassThroughSandbox())
+    rs = decisions(store, "f")
+    assert [r.metadata["provider"] for r in rs] == ["onoda-test-live"]

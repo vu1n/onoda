@@ -6,9 +6,9 @@
 ## What should change
 1. Add `src/onoda/adapters/pi/fork.py` to `related_code`.
 2. Add one invariant bullet after the fork bullet:
-   "A Pi run is forked by re-running it (`adapters/pi/fork.py`): the child replays the parent's recorded responses up to the fork point, then a continuation answers. It inherits no receipt, every prefix tool call must show it the result it showed the parent (or the fork is refused), and it records a `ForkDeclaration`, `Run.parent`, `fork.created` and the visibility cut on every checkpoint. A VTE fork's broker replays the parent's jobs before the fork point and runs only later ones live."
+   "A Pi run is forked by re-running it (`adapters/pi/fork.py`): the child replays the parent's recorded responses up to the fork point, then a continuation answers: a script, or a live model the session hands off to after the replay (its prefix recorded as `replayed`, its own caps on top of the prefix). It inherits no receipt, every prefix tool call must show it the result it showed the parent (or the fork is refused), and it records a `ForkDeclaration`, `Run.parent`, `fork.created` and the visibility cut on every checkpoint. A VTE fork's broker replays the parent's jobs before the fork point and runs only later ones live."
 3. Replace the A36 "Known gaps" bullet with:
-   "A36: Pi forks continue on a script only (synthetic); a live-model continuation is not built yet. RLM runs and imported runs cannot be forked yet. A replayed prefix job's files are attachable to a later job only when the shared broker cache holds them."
+   "A36: RLM runs and imported runs cannot be forked yet, nor can a live continuation of a variant with a reducer or of a prefix ending in a compaction summary. A replayed prefix job's files are attachable to a later job only when the shared broker cache holds them."
 
 ## Why
 Vu asked for forking to be built rather than refused (2026-10-04). This PR builds it, so the gap note no longer describes the code.

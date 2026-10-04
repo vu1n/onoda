@@ -19,14 +19,23 @@
  * SoL-Pi falls back to the unreduced output, and the run ends budget-exhausted.
  * A turn's `usage_cost` is a synthetic cost reported as Pi's cost estimate, so
  * tests and replays can drive `max_cost_usd`.
+ *
+ * Handoff (a fork's live continuation, `ENV_HANDOFF`): the script is the
+ * parent's replayed prefix. At the first turn end after its last agent and
+ * summary turn were served (at session start, for an empty prefix), the
+ * session switches to the named live model, so every later request goes to
+ * it and the recorder spools it as a live request. A model Pi cannot find, or
+ * one without configured auth, ends the run `provider-error` before any live
+ * request is sent.
  */
 
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, MessageEndEvent, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, MessageEndEvent, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { mainRequestSent, requestEnd } from "./onoda-recorder.ts";
 import {
 	addCost,
 	counters,
+	ENV_HANDOFF,
 	ENV_POLICY,
 	ENV_SCRIPT,
 	type EndStatus,
@@ -64,6 +73,11 @@ interface ScriptTurn {
 
 type Purpose = "agent" | "reducer" | "summary";
 
+interface Handoff {
+	provider: string;
+	model: string;
+}
+
 interface Script {
 	schema: "onoda.pi-script/1";
 	synthetic: true;
@@ -99,6 +113,20 @@ export default function onodaScripted(pi: ExtensionAPI): void {
 		reducer: script?.reducer_turns ?? [],
 		summary: script?.summary_turns ?? [],
 	};
+	const handoff = readJsonEnv<Handoff>(ENV_HANDOFF);
+	let handedOff = false;
+	const handOff = async (ctx: ExtensionContext) => {
+		if (!handoff || handedOff) return;
+		if (cursor.agent < turnsFor.agent.length || cursor.summary < turnsFor.summary.length) return;
+		handedOff = true;
+		const model = ctx.modelRegistry.find(handoff.provider, handoff.model);
+		if (!model || !(await pi.setModel(model))) {
+			requestEnd("provider-error", `handoff to ${handoff.provider}/${handoff.model} failed: no such model or no auth`);
+			ctx.abort();
+		}
+	};
+	pi.on("session_start", (_event, ctx) => handOff(ctx));
+	pi.on("turn_end", (_event, ctx) => handOff(ctx));
 
 	const reply = (model: Model, context: Context, options?: SimpleStreamOptions): EventStream => {
 		const stream = createAssistantMessageEventStream() as unknown as EventStream;

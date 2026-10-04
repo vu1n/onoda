@@ -85,6 +85,9 @@ ENV_RUN_INFO = "ONODA_PI_RUN_INFO"  # SpoolStart fields the recorder copies verb
 # the recorder then removes every ONODA_PI_* variable from the process
 # environment so tool subprocesses inherit none of them.
 ENV_SPOOL_KEY = "ONODA_PI_SPOOL_KEY"
+# A fork's live continuation (`adapters.pi.fork`): JSON {provider, model}. The
+# scripted provider serves the replayed prefix, then switches the session to it.
+ENV_HANDOFF = "ONODA_PI_HANDOFF"
 
 # RLM (M4). The extension reads all four at load (before the recorder scrubs
 # ONODA_PI_*) and hands a child Pi process its own values explicitly.

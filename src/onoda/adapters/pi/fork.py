@@ -17,7 +17,12 @@ unkeyed. Either way, after the run every prefix tool call must have shown
 the child the result it showed the parent (`check_prefix`, with each run's
 work dir normalized), or the fork is refused. A checkpoint inside an agent turn resumes at the
 end of that turn: the turn's remaining tool calls are part of the prefix.
-After the prefix the continuation answers: a script (offline, synthetic).
+After the prefix the continuation answers: a script (offline, synthetic),
+or a live model (`live`). A live continuation is a handoff: the scripted
+provider serves the prefix, then switches the session to the live model, and
+the run is a live run (sandbox, credential, its own explicit request and cost
+caps, on top of the prefix, which is served at no cost). Its prefix requests
+are recorded as `replayed`, answered by the scripted provider.
 For a VTE parent, the broker serves the parent's jobs that the prefix's tool
 calls submitted, as a replay, and runs the continuation's jobs live.
 
@@ -28,7 +33,9 @@ checkpoint, and `config["fork"]` naming the parent, the checkpoint and the
 prefix. A fork whose prefix diverged is still recorded, then refused with
 `ReplayMismatch`.
 
-Not yet forkable: RLM runs (their children's scripts would have to be split
+Not yet forkable: a live continuation of a variant with a reducer, or one
+whose prefix ends with a compaction summary (the handoff happens at a turn
+end, before the next summary); RLM runs (their children's scripts would have to be split
 at the fork point too), imported runs (the prefix re-executes the parent's
 tool calls; import is data-only) and a finalized checkpoint (nothing follows
 it).
@@ -36,6 +43,7 @@ it).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +59,7 @@ from onoda.adapters.pi.run import (
     run_case,
     run_vte_case,
 )
+from onoda.adapters.pi.runtime import LiveSettings
 from onoda.adapters.pi.sandbox import PiSandbox
 from onoda.errors import ForkError, ReplayMismatch
 from onoda.portability import imported_runs
@@ -77,6 +86,7 @@ class ForkPoint:
     resume_request: int  # the parent's first agent request after the checkpoint
     prefix: Script  # every parent response before `resume_request`, keyed
     tool_calls: frozenset[str]  # tool call ids the prefix's agent turns propose
+    last_role: str | None = None  # the role of the prefix's last request
 
     def counts(self) -> dict[str, int]:
         return {
@@ -142,6 +152,7 @@ def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
     keyed = cfg["mode"] == "pi-scripted"
     turns: dict[str, list[ScriptTurn]] = {role: [] for role in ROLES}
     calls: set[str] = set()
+    last_role = None
     for _, r in sorted(decisions, key=lambda d: d[1].metadata["request_index"]):
         if r.metadata["request_index"] >= resume:
             break
@@ -155,6 +166,7 @@ def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
         message = store.get_json(r.outputs["message"])
         key = r.metadata["replay_key"] if keyed else None
         turns[r.metadata["role"]].append(_turn(message, key, r.usage.cost_usd))
+        last_role = r.metadata["role"]
         if r.metadata["role"] == "agent":
             calls |= {b["id"] for b in message.get("content") or [] if b.get("type") == "toolCall"}
     prefix = Script.model_validate(
@@ -170,6 +182,7 @@ def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
         resume_request=resume,
         prefix=prefix,
         tool_calls=frozenset(calls),
+        last_role=last_role,
     )
 
 
@@ -257,6 +270,19 @@ def _join(prefix: Script, continuation: Script) -> Script:
     )
 
 
+def _free(prefix: Script) -> Script:
+    """`prefix` with no recorded costs: replaying it before a live continuation costs nothing."""
+    return Script.model_validate(
+        {
+            "source": prefix.source,
+            **{
+                field: [t.model_copy(update={"usage_cost": None}) for t in getattr(prefix, field)]
+                for field in ROLES.values()
+            },
+        }
+    )
+
+
 def fork_pi_run(
     store: Store,
     parent_run_id: str,
@@ -264,27 +290,38 @@ def fork_pi_run(
     case: LoadedCase | LoadedVteCase,
     *,
     new_run_id: str,
-    continuation: Script,
+    continuation: Script | None = None,
+    live: LiveSettings | None = None,
     reason: str,
     work_dir: Path,
-    budget_treatment: BudgetTreatment = "inherit-remaining",
+    budget_treatment: BudgetTreatment | None = None,
     orca: OrcaSettings | None = None,
     cache_dir: Path | None = None,
     sandbox: PiSandbox | None = None,
     timeout_s: float = 300,
 ) -> PiRun:
-    """Fork `parent_run_id` at `checkpoint`: replay its prefix, then run `continuation`.
+    """Fork `parent_run_id` at `checkpoint`: replay its prefix, then continue with
+    `continuation` (a script) or `live` (a real model; exactly one).
 
     The child stages the parent's own task (case, instruction, docs, ladder,
     variant, candidate) and must reproduce its task id.
-    `budget_treatment` "inherit-remaining" keeps the parent's request and job
-    caps (the prefix re-counts against them); "fresh-allowance" adds the
-    parent's caps again on top of what the prefix uses. A VTE parent needs
-    `orca` settings on the same ORCA binary (or stand-in) the parent ran.
+    `budget_treatment` "inherit-remaining" (a script's default) keeps the
+    parent's request and job caps (the prefix re-counts against them);
+    "fresh-allowance" adds the parent's caps again on top of what the prefix
+    uses. A live continuation is always a fresh allowance: its requests and
+    cost are capped by `live`'s own explicit settings, on top of the prefix.
+    A VTE parent needs `orca` settings on the same ORCA binary (or stand-in)
+    the parent ran.
     """
     check_safe_id(new_run_id, "run id")
     if store.has_record("run", new_run_id):
         raise ForkError(f"run {new_run_id} already exists")
+    if (continuation is None) == (live is None):
+        raise ForkError("a fork continues with a script or a live model (exactly one)")
+    if budget_treatment is None:
+        budget_treatment = "fresh-allowance" if live is not None else "inherit-remaining"
+    if live is not None and budget_treatment != "fresh-allowance":
+        raise ForkError("a live continuation has its own explicit caps: a fresh allowance")
     if budget_treatment not in ("inherit-remaining", "fresh-allowance"):
         raise ForkError(f"unknown budget treatment {budget_treatment!r}")
     if not reason.strip():
@@ -296,14 +333,25 @@ def fork_pi_run(
     vte = cfg.get("task_kind") == "vte"
     if vte != isinstance(case, LoadedVteCase):
         raise ForkError(f"run {parent_run_id} is {'a' if vte else 'not a'} VTE run")
-    script = _join(point.prefix, continuation)
-    script_digest = store.put_json(
-        continuation.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]
-    ).digest
+    if live is not None:
+        if point.last_role == "compaction-summary":
+            raise ForkError(
+                f"the prefix of {parent_run_id} ends with a compaction summary; a live "
+                "continuation hands off at a turn end, so fork at an earlier checkpoint"
+            )
+        script = _free(point.prefix)
+        to_policy = f"{live.provider}/{live.model}"
+    else:
+        assert continuation is not None
+        script = _join(point.prefix, continuation)
+        script_digest = store.put_json(
+            continuation.model_dump(mode="json", by_alias=True), labels=["pi-script", "synthetic"]
+        ).digest
+        to_policy = f"script:{script_digest}"
     intervention = {
         "kind": "decision-policy-change",
         "from_policy": _policy(point.parent),
-        "to_policy": f"script:{script_digest}",
+        "to_policy": to_policy,
     }
     declaration = ForkDeclaration.new(
         new_run_id=new_run_id,
@@ -316,15 +364,23 @@ def fork_pi_run(
         reason=reason,
     )
     fresh = budget_treatment == "fresh-allowance"
-    max_requests = cfg["max_requests"] + (point.resume_request if fresh else 0)
     fork_config: dict[str, Any] = {
         "schema": FORK_SCHEMA,
         "parent": parent_run_id,
         "checkpoint": checkpoint,
         "resume_request": point.resume_request,
         "prefix": point.counts(),
-        "continuation": script_digest,
     }
+    if live is not None:
+        if not live.max_requests or live.max_requests <= 0:
+            live.validate()  # names every missing setting
+        # The live model's own cap, on top of the replayed prefix.
+        live = dataclasses.replace(live, max_requests=live.max_requests + point.resume_request)
+        max_requests = live.max_requests
+        fork_config["handoff"] = {"provider": live.provider, "model": live.model}
+    else:
+        max_requests = cfg["max_requests"] + (point.resume_request if fresh else 0)
+        fork_config["continuation"] = script_digest
     staging = recorded_staging(store, parent_run_id)
     # The continuation is scripted, so its reducer is the scripted one, as in any scripted run.
     reducer = None
@@ -333,6 +389,7 @@ def fork_pi_run(
         "variant_id": cfg["variant"],
         "work_dir": Path(work_dir),
         "script": script,
+        "live": live,
         "max_requests": max_requests,
         "reducer": reducer,
         "timeout_s": timeout_s,

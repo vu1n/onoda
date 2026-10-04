@@ -5,6 +5,9 @@
  * script `turns`, reducer turns (told apart by the reducer's system prompt)
  * from `reducer_turns`. Like a real provider it calls `onPayload` and reports
  * a cost on every response. Its output is synthetic.
+ *
+ * `ONODA_TEST_LIVE_TURNS`, when set, names a script whose turns it serves
+ * instead (a fork's handoff, where the run's own script is the prefix).
  */
 import { readFileSync } from "node:fs";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -19,7 +22,8 @@ const COST = 0.001;
 
 export default function liveProvider(pi: ExtensionAPI): void {
 	// Read now: the recorder, loaded last, clears ONODA_PI_* from the environment.
-	const script = JSON.parse(readFileSync(process.env.ONODA_PI_SCRIPT as string, "utf8")) as {
+	const source = process.env.ONODA_TEST_LIVE_TURNS ?? (process.env.ONODA_PI_SCRIPT as string);
+	const script = JSON.parse(readFileSync(source, "utf8")) as {
 		turns: Turn[];
 		reducer_turns: Turn[];
 	};

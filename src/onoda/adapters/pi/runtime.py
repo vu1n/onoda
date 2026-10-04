@@ -46,6 +46,7 @@ from typing import Any
 
 from onoda.adapters.pi.contract import (
     DECIMAL_RE,
+    ENV_HANDOFF,
     ENV_POLICY,
     ENV_RLM_COMPONENTS,
     ENV_RLM_DEPTH,
@@ -349,6 +350,7 @@ def build_launch(
     sandbox: PiSandbox | None = None,
     task_kind: TaskKind = "case",
     broker_socket: Path | None = None,
+    handoff: bool = False,
 ) -> Launch:
     """Stage one run of `variant_id` against the bundle at `bundle_dir` under
     `work_dir`. Exactly one of `script` (offline, deterministic) or `live` (a
@@ -372,8 +374,18 @@ def build_launch(
     which the outer sandbox layer mounts and the inner one does not, and its
     path must fit AF_UNIX on macOS (under 104 bytes). RLM variants are refused
     for VTE tasks in this slice.
+
+    `handoff` (a fork's live continuation, `adapters.pi.fork`) takes both:
+    `script` is the parent's replayed prefix, served by the scripted provider,
+    which then switches the session to `live`'s model (`ENV_HANDOFF`). The run
+    is a live run in every other way (sandbox, credential, network, cost cap,
+    `run_info`). RLM variants and variants with a reducer are refused: their
+    side requests would have to change hands too.
     """
-    if (script is None) == (live is None):
+    if handoff:
+        if script is None or live is None:
+            raise OnodaError("a handoff launch takes both the prefix script and the live settings")
+    elif (script is None) == (live is None):
         raise OnodaError("build_launch requires exactly one of script or live")
     if live is not None and live.max_requests is not None and max_requests != live.max_requests:
         raise OnodaError(
@@ -424,10 +436,14 @@ def build_launch(
         provider, model = live.provider, live.model
     else:
         provider, model = SCRIPTED_PROVIDER, SCRIPTED_MODEL
+    if handoff and (
+        variant.rlm or "evidencePreservingReducer" in effective_variant.mechanisms or reducer
+    ):
+        raise CapabilityError(f"variant {variant_id} cannot hand off to a live model yet")
 
     if reducer is not None:
         reducer_provider, reducer_model = reducer
-    elif script is not None:
+    elif script is not None and not handoff:
         reducer_provider, reducer_model = SCRIPTED_PROVIDER, SCRIPTED_REDUCER_MODEL
     else:
         reducer_provider = reducer_model = None
@@ -493,7 +509,7 @@ def build_launch(
         "mechanisms": list(effective_variant.mechanisms),
         "provider": provider,
         "model": model,
-        "scripted": script is not None,
+        "scripted": live is None,
     }
     if sandbox is not None:  # absent for an unsandboxed run, so its record is unchanged
         run_info["sandbox"] = sandbox.kind
@@ -533,6 +549,10 @@ def build_launch(
         script_path = work_dir / "script.json"
         script_path.write_text(script.model_dump_json(by_alias=True))
         env[ENV_SCRIPT] = str(script_path)
+    if handoff:
+        handoff_path = work_dir / "handoff.json"
+        _write_json(handoff_path, {"provider": provider, "model": model})
+        env[ENV_HANDOFF] = str(handoff_path)
     env.update(
         {
             "PI_CODING_AGENT_DIR": str(agent_dir),
@@ -575,10 +595,11 @@ def build_launch(
         "--no-context-files",
         "--no-skills",
         "--no-prompt-templates",
+        # A handoff starts on the scripted provider; it switches to `model` itself.
         "--provider",
-        provider,
+        SCRIPTED_PROVIDER if handoff else provider,
         "--model",
-        model,
+        SCRIPTED_MODEL if handoff else model,
         "--tools",
         ",".join(tools),
         "--mode",
