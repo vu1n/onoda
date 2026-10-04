@@ -528,6 +528,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			const header = [
 				`ORCA job ${reply.job_id}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`,
 				`Files for attach: ${reply.files.length ? reply.files.join(", ") : "none"}`,
+				`orca_submit calls left in this run: ${Math.max(0, task.max_executions - counters().executions)}`,
 				...(reply.checks.length ? ["Host checks on this output (advisory):", ...reply.checks.map((c) => `- ${c}`)] : []),
 			].join("\n");
 			return {

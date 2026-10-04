@@ -676,9 +676,14 @@ def test_launch_times_out(tmp_path):
         max_requests=1,
         max_acquisitions=0,
     )
-    launch_obj = dataclasses.replace(launch_obj, argv=("sleep", "5"))
-    result = launch(launch_obj, timeout_s=0.2)
+    argv = ("sh", "-c", "echo started >&2; sleep 5")
+    launch_obj = dataclasses.replace(launch_obj, argv=argv)
+    result = launch(launch_obj, timeout_s=0.5)
     assert result.timed_out is True
+    # A72: what Pi printed is kept next to the spool, so a hang can be diagnosed.
+    work = launch_obj.spool_dir.parent
+    assert (work / "pi.stderr.log").read_text() == "started\n"
+    assert (work / "pi.stdout.tail.log").read_text() == ""
 
 
 # ------------------------------------------------------------ review fixes (M3)

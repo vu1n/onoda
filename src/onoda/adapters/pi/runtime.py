@@ -616,6 +616,7 @@ def launch(launch: Launch, *, timeout_s: float) -> LaunchResult:
         _kill_group(proc.pid)
         stdout, stderr = proc.communicate()
     _kill_group(proc.pid)
+    _keep_logs(launch.spool_dir.parent, stdout, stderr)
     return LaunchResult(
         -1 if timed_out else proc.returncode,
         stdout,
@@ -625,6 +626,21 @@ def launch(launch: Launch, *, timeout_s: float) -> LaunchResult:
         timed_out,
         launch.spool_key,
     )
+
+
+# Pi's own stdout (JSON events) can be large; its tail and all of stderr are
+# enough to tell after the fact whether a run hung, crashed or was killed.
+PI_LOG_STDOUT_TAIL = 1 << 20
+
+
+def _keep_logs(work_dir: Path, stdout: str, stderr: str) -> None:
+    """Pi's stderr and the tail of its stdout, next to the spool, after Pi exited.
+
+    Diagnostics only: nothing reads them back, and the agent never sees them
+    (Pi has exited before they are written).
+    """
+    (work_dir / "pi.stderr.log").write_text(stderr, errors="replace")
+    (work_dir / "pi.stdout.tail.log").write_text(stdout[-PI_LOG_STDOUT_TAIL:], errors="replace")
 
 
 def _kill_group(pgid: int) -> None:

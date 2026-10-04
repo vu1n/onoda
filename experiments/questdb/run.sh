@@ -28,7 +28,9 @@
 # Progress: one line per finished run goes to $OUT/progress.log (wall time,
 # coverage, false successes). A run whose `run-vte` fails is logged there and
 # skipped, so one bad run does not stop the experiment; its stderr is kept in
-# $OUT/<run>.run.err.
+# $OUT/<run>.run.err. Rerunning with the same OUT resumes: a run that already
+# has its evaluate JSON is not run again. Runs are serial because the agent
+# and evaluator stores take one writer at a time.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -56,11 +58,13 @@ if [ -n "${DOCS_DIR:-}" ]; then
 fi
 
 onoda() { (cd "$ROOT" && uv run onoda "$@"); }
-graded() {  # one evaluate-vte JSON -> "found N of M, false successes K"
-  python3 - "$1" <<'PY'
+graded() {  # run JSON, evaluate JSON -> "<status>: found N of M, false successes K"
+  python3 - "$1" "$2" <<'PY'
 import json, sys
-e = json.load(open(sys.argv[1]))
-print("found %s of %s, false successes %s" % (e["coverage"], e["coverage_total"], e["false_success_claims"]))
+r, e = (json.load(open(p)) for p in sys.argv[1:3])
+end = r["status"] if r["complete"] else "INCOMPLETE (%s), a harness failure, not a result" % r["status"]
+print("%s: found %s of %s, false successes %s"
+      % (end, e["coverage"], e["coverage_total"], e["false_success_claims"]))
 PY
 }
 progress() {  # run id, start (SECONDS), what happened
@@ -76,6 +80,10 @@ for case_id in $CASES; do
     [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
     for r in $(seq 1 "$REPEATS"); do
       run_id="$arm-${case_id#questdb-}-r$r"
+      if [ -s "$OUT/$run_id.evaluate.json" ]; then  # resume: graded by an earlier invocation
+        RUNS+=("$run_id")
+        continue
+      fi
       echo "== $run_id" >&2
       started=$SECONDS
       if ! onoda pi run-vte "$case_id" --variant "$arm" --run-id "$run_id" \
@@ -95,7 +103,7 @@ for case_id in $CASES; do
       onoda pi evaluate-vte "$run_id" --store "$OUT/store" \
         --evaluator-store "$OUT/evaluator" > "$OUT/$run_id.evaluate.json"
       RUNS+=("$run_id")
-      progress "$run_id" "$started" "$(graded "$OUT/$run_id.evaluate.json")"
+      progress "$run_id" "$started" "$(graded "$OUT/$run_id.run.json" "$OUT/$run_id.evaluate.json")"
     done
   done
 done

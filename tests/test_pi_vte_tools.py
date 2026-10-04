@@ -287,6 +287,7 @@ def test_vte_run_submits_spools_execute_and_reports_a_claim(tmp_path, broker):
         assert visible.startswith(f"ORCA job {e.job_id}: completed")
         assert visible.endswith(broker.jobs[e.job_id].decode())
         assert "job.gbw" in visible
+        assert "orca_submit calls left in this run: " in visible
     assert "cache hit" in shown(run, "x2")
     assert broker.jobs["j0002"] == broker.jobs["j0001"]
 
