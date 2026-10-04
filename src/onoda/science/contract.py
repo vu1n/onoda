@@ -175,7 +175,7 @@ class LoadedCase(BaseModel):
     output_bytes: dict[str, bytes]
 
 
-# Context: doc://onoda/case-data-provenance@0001#pinned-acquired-cases — case bytes must match their sha256 pin; vendored bytes are never edited
+# Context: doc://onoda/case-data-provenance@0002#pinned-acquired-cases — case bytes must match their sha256 pin; vendored bytes are never edited
 def _read_pinned(root: Path, pinned: PinnedFile) -> bytes:
     path = (root / pinned.path).resolve()
     if not path.is_relative_to(root.resolve()):

@@ -335,7 +335,7 @@ def _request_cap(live: LiveSettings | None, max_requests: int | None) -> int:
 # ------------------------------------------------------------------ VTE runs
 
 
-# Context: doc://onoda/evaluator-isolation@0001#references-never-agent-visible — a staged bundle holding the references is refused before anything runs
+# Context: doc://onoda/evaluator-isolation@0002#references-never-agent-visible — a staged bundle holding the references is refused before anything runs
 def _refuse_references(bundle_dir: Path, case: LoadedVteCase) -> None:
     """Refuse a staged bundle holding the evaluator-only references file (A58).
 

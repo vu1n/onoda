@@ -123,7 +123,7 @@ def usage_from_body(content_type: str, body: bytes) -> dict[str, Any] | None:
     return found
 
 
-# Context: doc://onoda/agent-sandbox@0001#sandbox-or-refuse — no credential enters the task container; the host proxy adds the key and caps spend
+# Context: doc://onoda/agent-sandbox@0002#sandbox-or-refuse — no credential enters the task container; the host proxy adds the key and caps spend
 @dataclass
 class SpendProxy:
     """Forward `/t/<token>/api/v1/...` to `upstream` with the real credential."""

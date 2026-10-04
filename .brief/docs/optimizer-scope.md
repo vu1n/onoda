@@ -30,10 +30,6 @@ GEPA proposals may change only the `HarnessCandidate` components in `COMPONENT_V
 - A split over `pending-human-review` cases is `exploratory` and nothing selected on it is called validated.
 - RLM children draw from the parent's request and cost budget; `rlm()` past depth, children or budget is refused before spawn.
 
-### Known gaps (not yet enforced; owner to decide)
-- A51: the pre-search seed affordability check uses the case count and ignores `--repeats` (`optimize/loop.py` near line 386), so with repeats a seed evaluation can be cut off partway instead of refused up front.
-- A54: `compare_candidates` counts an unreported or failed-run cost as $0 (`optimize/compare.py:73`), so the promotion check's spend cap is softer than the ablation's, which stops on unknown cost.
-
 ### Carried forward from the assumptions register
 
 Verbatim from `docs/ASSUMPTIONS.md` as of 83df418 (2026-10-04). Where a row and the invariants above disagree, the invariants are current.

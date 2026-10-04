@@ -3,6 +3,7 @@ id: agent-sandbox
 project: onoda
 type: decision
 status: active
+signoff: required
 title: "Agent commands run sandboxed: bwrap two layers on Linux, one Seatbelt layer on macOS, refused elsewhere"
 related_code:
   - "src/onoda/adapters/pi/sandbox.py"

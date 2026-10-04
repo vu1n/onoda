@@ -1,0 +1,66 @@
+---
+id: pi-first-pinned-stack
+project: onoda
+type: decision
+status: active
+title: "Pi is the first agent adapter, pinned at 0.85.1 with SoL-Pi at 1559b5c"
+related_code:
+  - "src/onoda/adapters/pi/contract.py"
+  - "src/onoda/adapters/pi/runtime.py"
+  - "scripts/pi-setup.sh"
+  - "src/onoda/adapters/agents.py"
+carries: [A8, A13, A17, A19, A31]  # rows of the former docs/ASSUMPTIONS.md register
+---
+
+<!-- brief:anchor pi-pinned -->
+## Run stock Pi 0.85.1 with SoL-Pi 1559b5c unmodified; do not upgrade without re-verifying
+
+Route A: stock Pi (`@earendil-works/pi-coding-agent@0.85.1`) plus unmodified SoL-Pi at commit `1559b5cb12c72da4a485bc50fe326586b216fb19`, with onoda's own extensions as glue, so a Pi run and a Pi+SoL-Pi run are a validated control pair. Both are pinned in `pi/package.json`, `pi/package-lock.json` and `provenance/sources.json`, installed with `npm ci`. Prime is an optional later comparison arm (Route B), not attempted. The S2 letters follow SOL_PI_DELTA §2's table order.
+
+**Why.** SoL-Pi's mechanisms were measured on that Pi; moving either pin without re-checking the extension points would make mechanism results incomparable.
+
+### Invariant
+- `PI_VERSION = "0.85.1"` and `SOL_PI_COMMIT` match the lockfile and sources.json S13/S14.
+- `scripts/pi-setup.sh` installs from the lockfile; `runtime.doctor` checks the pins.
+- S2a ObservationPack, S2b Evidence-Preserving Reducer, S2c Online Context Compact, S2d Action Fusion (`VARIANTS`).
+- No Prime adapter and no reconstruction of SoL-Pi's auto-research loop exist.
+- `build_launch` refuses to stage a run when the installed Pi version or SoL-Pi commit differs from the pins (`check_pins`); a missing install is left to fail at launch.
+
+### Carried forward from the assumptions register
+
+Verbatim from `docs/ASSUMPTIONS.md` as of 83df418 (2026-10-04). Where a row and the invariants above disagree, the invariants are current.
+
+Drift found when this was verified against code (2026-10-04):
+
+- A8: Jev is now integrated as `typesafe/jev-1.13` (`src/onoda/systemone.py`), but sources.json S6 still says "resolve at Jev integration time"; there is no entry for Clef or the OpenRouter Decisions API.
+- docs/ADAPTER_SEAM.md header and §6 say nothing has run against a real provider, no OCC compaction was observed and no reflection called a model; live runs since then resolved all three. §2 lists the `context` event, which no extension hooks (the recorder uses `before_provider_request`), and does not list the recorder's use of the private `modelRegistry.runtime`.
+
+#### A8: Exact Prime / Jev / GEPA / Verifiers revisions
+
+Register status: partially resolved. Owner milestone: M0.
+
+See `provenance/sources.json`: Prime (S3), GEPA (S8), and Verifiers (S9) are pinned to a commit; Jev (S6, S7) remains `unresolved` — hosted docs site, no version identifier, no repository.
+
+#### A13: Pi / SoL-Pi revisions and extension API stability
+
+Register status: pinned (revisions); API stability unresolved. Owner milestone: M0.
+
+`provenance/sources.json` pins SoL-Pi to commit `1559b5c...` (S13) and the Pi coding agent to npm `0.85.1` with its published integrity hash (S14). Whether SoL-Pi's extension points are stable across Pi 0.85.1 → 0.87.1 (current npm `latest`) is not verified; do not install past 0.85.1 without re-checking.
+
+#### A17: Prime's base Pi version and its compatibility with the SoL-Pi extension API
+
+Register status: unresolved. Owner milestone: M3 (if Route B pursued).
+
+Verify before attempting Route B (PrimeAgent-SoL per SOL_PI_DELTA §0); do not assume compatibility.
+
+#### A19: Auto-research loop code (the search procedure that produced SoL-Pi's mechanisms)
+
+Register status: unresolved (not released in the repository). Owner milestone: M6.
+
+Reconstruct only from the published paper; label any reconstruction as such; do not claim it reproduces the authors' implementation.
+
+#### A31: Which mechanism each S2 letter names
+
+Register status: decided. Owner milestone: M3.
+
+Letters follow SOL_PI_DELTA §2's table order: S2a ObservationPack, S2b Evidence-Preserving Reducer, S2c Online Context Compact, S2d Action Fusion (`onoda.adapters.pi.contract.VARIANTS`).

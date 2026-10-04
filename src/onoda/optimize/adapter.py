@@ -58,7 +58,7 @@ from onoda.optimize.gates import pool_outputs
 from onoda.records import Frozen as _Frozen
 from onoda.store import Store, check_safe_id
 
-# Context: doc://onoda/optimizer-scope@0001#seed-by-promotion-only — reflection sees agent-visible steps and reason classes, never receipts or references
+# Context: doc://onoda/optimizer-scope@0002#seed-by-promotion-only — reflection sees agent-visible steps and reason classes, never receipts or references
 AGENT_VISIBLE_SOURCES = ("agent", "raw_tool")
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._?-]{0,63}$")
 # What each verdict word means, and the evaluator's reason classes (A53). Fixed

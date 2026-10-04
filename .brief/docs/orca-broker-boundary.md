@@ -3,6 +3,7 @@ id: orca-broker-boundary
 project: onoda
 type: decision
 status: active
+signoff: required
 title: "Agent ORCA jobs run only in the host broker, each in its own job sandbox, under one execution cap"
 related_code:
   - "src/onoda/science/orca_broker.py"

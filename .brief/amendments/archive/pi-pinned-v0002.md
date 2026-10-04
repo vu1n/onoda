@@ -14,3 +14,8 @@ None. The code already conforms to the decision; only the gap note is stale.
 
 ## Impact / risk
 Text only. Ratifying publishes revision 0002; re-pin the refs (`brief pin`) and run `brief doctor`.
+
+
+---
+ratified_rev: 0002
+ratified_by: vu1n

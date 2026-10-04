@@ -3,6 +3,7 @@ id: record-integrity
 project: onoda
 type: decision
 status: active
+signoff: required
 title: "Run records are immutable, single-writer, float-free, and restart only from semantic checkpoints"
 related_code:
   - "src/onoda/store.py"

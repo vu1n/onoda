@@ -33,7 +33,6 @@ Drift found when this was verified against code (2026-10-04):
 
 - CLAUDE.md, `adapters/pi/run.py` and the README say dev cases are "never part of a split", but QUESTDB manifests carry `split: development` and cclib-data manifests `split: test`.
 - Raw QUESTDB JSON/xyz files are also vendored at `experiments/questdb-phase0/questdb-raw/` (used by tests), outside `cases-dev/`.
-- A26 says each evaluation carries `case.review`; only the `orca-smoke` evaluator does. `pi-claims` and `vte-claims` evaluations do not (they put `review_status` only in the agent bundle).
 - Byte immutability is enforced by sha256 at load only; nothing stops an edit committed together with a new pin.
 
 #### A1: Exact historical task membership (which molecules/transitions the paper actually used)

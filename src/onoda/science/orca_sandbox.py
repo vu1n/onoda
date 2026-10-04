@@ -279,7 +279,7 @@ def detect_job_sandbox(
     )
 
 
-# Context: doc://onoda/orca-broker-boundary@0001#broker-owns-orca — each agent ORCA job is writable only in its own job folder
+# Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — each agent ORCA job is writable only in its own job folder
 def host_job_sandbox(
     binary: str | Path,
     *,

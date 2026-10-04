@@ -24,9 +24,7 @@ Route A: stock Pi (`@earendil-works/pi-coding-agent@0.85.1`) plus unmodified SoL
 - `scripts/pi-setup.sh` installs from the lockfile; `runtime.doctor` checks the pins.
 - S2a ObservationPack, S2b Evidence-Preserving Reducer, S2c Online Context Compact, S2d Action Fusion (`VARIANTS`).
 - No Prime adapter and no reconstruction of SoL-Pi's auto-research loop exist.
-
-### Known gaps (not yet enforced; owner to decide)
-- `build_launch` does not call `doctor()`, and `run_info` records the constant `PI_VERSION`, not the installed version; a mismatched install is caught only when `onoda pi doctor` is run.
+- `build_launch` refuses to stage a run when the installed Pi version or SoL-Pi commit differs from the pins (`check_pins`); a missing install is left to fail at launch.
 
 ### Carried forward from the assumptions register
 

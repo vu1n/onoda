@@ -14,3 +14,8 @@ None. Without this, changes under this decision's `Context:` refs land with no s
 
 ## Impact / risk
 A PR that touches code under this decision's `Context:` refs needs a `.brief/SIGNOFF` line. Ratifying publishes revision 0002; re-pin the refs (`brief pin`) and run `brief doctor`.
+
+
+---
+ratified_rev: 0002
+ratified_by: vu1n
