@@ -88,7 +88,7 @@ from onoda.errors import CapabilityError, OnodaError
 _MIN_NODE = (22, 19, 0)
 # A72: one agent `bash` call ends after this many seconds. ORCA jobs run in the
 # host broker, not in bash, so this caps only the agent's own shell commands.
-# Context: doc://onoda/agent-sandbox@0001#sandbox-or-refuse — one agent bash command runs at most 600 s
+# Context: doc://onoda/agent-sandbox@0001#sandbox-or-refuse — a convenience bound, not a tuned value; the recorder applies it before spooling
 MAX_BASH_SECONDS = 600
 
 # The only variables the child inherits from this process. Everything else
@@ -208,8 +208,8 @@ def doctor(runtime_dir: Path = RUNTIME_DIR) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
 # Context: doc://onoda/live-off-by-default@0001#live-settings-explicit — every live provider setting is explicit; nothing inferred from a present key
+@dataclass(frozen=True)
 class LiveSettings:
     """A real-provider run. Every field must be explicitly given; there are no
     defaults and nothing is inferred from a present API key (A35).

@@ -34,7 +34,7 @@ Verbatim from `docs/ASSUMPTIONS.md` as of 83df418 (2026-10-04). Where a row and 
 Drift found when this was verified against code (2026-10-04):
 
 - A56 says the parser is `orca-parser@2`. Code is `orca-parser@3` (`src/onoda/science/orca_parser.py:72`): @3 added SA-CASSCF/SC-NEVPT2 transition listings (`mr_states`) and `casscf_converged` for the QUESTDB slice (PLAN.md VTE-005). No register row recorded the @3 bump; this doc does now.
-- `src/onoda/science/runner.py:9` docstring still says `orca-parser@2`.
+- `src/onoda/science/runner.py:9` docstring said `orca-parser@2`; corrected to `@3` with this migration.
 
 #### A15: Reducer completeness on scientific logs (does a compact receipt drop a convergence warning or root flip?)
 
