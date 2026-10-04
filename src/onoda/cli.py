@@ -543,7 +543,6 @@ def cmd_vte_report(a) -> Any:
 
 
 def cmd_vte_shadow(a) -> Any:
-    from onoda.adapters.pi.contract import REPO_ROOT
     from onoda.adapters.pi.vte_shadow import shadow_run
     from onoda.systemone import LiveSystemOne
 
@@ -556,11 +555,80 @@ def cmd_vte_shadow(a) -> Any:
         a.run_id,
         _vte_case(case_id, a.cases_root),
         model,
-        ladder=Path(
-            a.ladder or REPO_ROOT / "experiments/questdb/ladder-from-paper.md"
-        ).read_bytes(),
+        ladder=_ladder(a.ladder),
+        instructions=json.loads(Path(a.instructions).read_text()) if a.instructions else None,
     )
     return {"evaluation": ev.evaluation_id, **ev.metrics, "cost_usd": ev.usage.cost_usd}
+
+
+def _ladder(path: str | None) -> bytes:
+    from onoda.adapters.pi.contract import REPO_ROOT
+
+    return Path(path or REPO_ROOT / "experiments/questdb/ladder-from-paper.md").read_bytes()
+
+
+def cmd_vte_shadow_questions(a) -> Any:
+    from onoda.adapters.pi.vte_shadow import questions
+
+    Path(a.out).write_text(json.dumps(questions(_ladder(a.ladder)), indent=2, sort_keys=True))
+    return {"questions": a.out}
+
+
+def cmd_vte_shadow_dataset(a) -> Any:
+    from onoda.adapters.pi.vte_shadow import shadow_examples
+    from onoda.decision_tune import dump_dataset
+
+    store = _store(a.store)
+    runs = [
+        (rid, _vte_case(store.run_record(rid).config.get("case_id"), a.cases_root))
+        for rid in a.run_ids
+    ]
+    examples = shadow_examples(store, _store(a.evaluator_store, evaluator=True), runs)
+    Path(a.out).write_text(dump_dataset(examples))
+    labels = [e.labels["ready"] for e in examples]
+    return {"dataset": a.out, "examples": len(examples), "ready_yes": labels.count("yes")}
+
+
+def cmd_decide_tune(a) -> Any:
+    from decimal import Decimal
+
+    from onoda.decision_tune import Spend, load_dataset, tune
+    from onoda.optimize.reflection import LiveReflection, ReflectionSettings
+    from onoda.systemone import LiveSystemOne
+
+    model = LiveSystemOne(a.provider, model=a.model, enabled=a.enable_live_decisions)
+    reflect = LiveReflection(
+        ReflectionSettings(
+            provider="openrouter",
+            model=a.reflection_model,
+            credential_env=a.reflection_credential_env,
+            max_tokens=a.reflection_max_tokens,
+            max_cost_usd=a.reflection_max_cost_usd,
+        )
+    )
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    result = tune(
+        questions=json.loads(Path(a.questions).read_text()),
+        examples=load_dataset(a.dataset),
+        model=model,
+        reflect=reflect,
+        reflection_cost=lambda: (reflect.last_receipt or {}).get("cost_usd"),
+        spend=Spend(max_decision_calls=a.max_decision_calls, max_cost_usd=Decimal(a.max_cost_usd)),
+        cache_dir=out / "cache",
+        max_reflections=a.max_reflections,
+        val_fraction=Decimal(a.val_fraction),
+        minibatch_size=a.minibatch_size,
+        seed=a.seed,
+    )
+    (out / "result.json").write_text(json.dumps(result.as_json(), indent=2, sort_keys=True))
+    (out / "best-instructions.json").write_text(json.dumps(result.best, indent=2, sort_keys=True))
+    return {
+        "result": str(out / "result.json"),
+        "validation_score": result.scores,
+        "stop_reason": result.stop_reason,
+        **result.spend,
+    }
 
 
 def cmd_pi_replay(a) -> Any:
@@ -1209,8 +1277,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="the ladder whose rules A-H are the choices (default: the reconstruction, A61)",
     )
     vs.add_argument("--cases-root")
+    vs.add_argument(
+        "--instructions", help="question wording from `onoda decide tune` (best-instructions.json)"
+    )
     vs.add_argument("--enable-live-decisions", action="store_true")
     vs.set_defaults(func=cmd_vte_shadow)
+    vq = vt.add_parser(
+        "shadow-questions", help="write the shadow questions template (input to decide tune)"
+    )
+    vq.add_argument("--ladder")
+    vq.add_argument("--out", required=True)
+    vq.set_defaults(func=cmd_vte_shadow_questions)
+    vd = vt.add_parser(
+        "shadow-dataset",
+        help="label each graded run's cited jobs ready yes/no from the grader (A70)",
+    )
+    vd.add_argument("run_ids", nargs="+")
+    vd.add_argument("--store", required=True)
+    vd.add_argument("--evaluator-store", required=True)
+    vd.add_argument("--cases-root")
+    vd.add_argument("--out", required=True, help="onoda.decision-example/1 JSONL")
+    vd.set_defaults(func=cmd_vte_shadow_dataset)
+
+    de = sub.add_parser("decide", help="System One decision models (Jev, Clef)")
+    de = de.add_subparsers(dest="decide_command", required=True)
+    dt = de.add_parser(
+        "tune", help="hill-climb question wording against labelled examples with GEPA (A70)"
+    )
+    dt.add_argument("--dataset", required=True, help="onoda.decision-example/1 JSONL")
+    dt.add_argument("--questions", required=True, help="questions template JSON")
+    dt.add_argument("--provider", required=True, choices=["jev", "clef"])
+    dt.add_argument("--model")
+    dt.add_argument("--reflection-model", required=True, help="OpenRouter model id")
+    dt.add_argument("--reflection-credential-env", default="OPENROUTER_API_KEY")
+    dt.add_argument("--reflection-max-tokens", type=int, default=4000)
+    dt.add_argument("--reflection-max-cost-usd", default="0.05", help="per reflection call")
+    dt.add_argument("--max-reflections", type=int, required=True)
+    dt.add_argument("--max-decision-calls", type=int, required=True)
+    dt.add_argument("--max-cost-usd", required=True, help="whole search, both models")
+    dt.add_argument("--val-fraction", default="0.3")
+    dt.add_argument("--minibatch-size", type=int, default=4)
+    dt.add_argument("--seed", type=int, default=0)
+    dt.add_argument("--out", required=True, help="dir: result.json, best-instructions.json, cache")
+    dt.add_argument("--enable-live-decisions", action="store_true")
+    dt.set_defaults(func=cmd_decide_tune)
 
     ab = sub.add_parser("ablation", help="SoL-Pi add-one ablation over Pi arms (M3b)")
     ab = ab.add_subparsers(dest="ablation_command", required=True)

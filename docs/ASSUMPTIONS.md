@@ -77,8 +77,10 @@ listed in that decision. Record new assumptions and decisions there, not here. E
 | A67 | How do System One decision models (Jev, Clef) enter the QUESTDB research? | [`decision-models-shadow-only`](../.brief/docs/decision-models-shadow-only.md) |
 | A68 | What did the first live shadow pass change? | [`decision-models-shadow-only`](../.brief/docs/decision-models-shadow-only.md) |
 | A69 | How does a Pi run on a benchmark task that brings its own container (Terminal-Bench via Harbor)? | [`agent-sandbox`](../.brief/docs/agent-sandbox.md) |
+| A70 | How is a decision model's question wording tuned? | [`decision-prompt-tuning`](../.brief/docs/decision-prompt-tuning.md) (draft) |
 | A71 | Does a supported claim from a job without printed irreps identify a target? | [`vte-grading-contract`](../.brief/docs/vte-grading-contract.md) |
 | A72 | How long may one agent `bash` command run, and how does the agent get back to an earlier job's output? | [`agent-sandbox`](../.brief/docs/agent-sandbox.md) |
 | A73 | What are the agents told about how a VTE claim is graded? | [`vte-grading-contract`](../.brief/docs/vte-grading-contract.md) |
+| A74 | What does an `orca_submit` reply show, and how does the agent find its earlier jobs? | [`orca-reply-summary`](../.brief/docs/orca-reply-summary.md) (draft) |
+| A75 | What memory do QUESTDB agents carry between runs? | [`memory-tiers`](../.brief/docs/memory-tiers.md) (draft) |
 
-A70 is not on `main`: it belongs to open PR #21 and should land as a `.brief/docs` decision.
