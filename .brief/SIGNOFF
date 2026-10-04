@@ -12,3 +12,5 @@ broker-owns-orca conforms: replies add a parser summary and orca_output lists a 
 live-settings-explicit conforms: run.sh adds memory-*.md tiers as --doc inputs (draft memory-tiers, A75); every live setting is still explicit and ORCA execution still needs ENABLE_LIVE_EXECUTION=1
 immutable-single-writer-records conforms: Pi forks start only at a journaled quiescent checkpoint, re-run the prefix and inherit no receipt; fork_run now refuses Pi runs by name
 broker-owns-orca conforms: a fork's broker replays the parent's jobs then runs live jobs only through its scheduler and job sandbox; prefix jobs count toward max_executions
+live-settings-explicit conforms: a fork's live continuation takes every LiveSettings field explicitly; its request cap is that setting plus the replayed prefix, recorded in config.fork; the prefix replays offline at no cost
+sandbox-or-refuse conforms: a fork's live handoff is a live launch: it refuses to stage without the sandbox and passes only the named credential
