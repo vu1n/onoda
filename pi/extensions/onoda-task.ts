@@ -19,7 +19,7 @@
  * The output text is returned whole; shortening it is ObservationPack's job.
  */
 
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -406,6 +406,27 @@ const OutputParams = Type.Object(
 	{ additionalProperties: false },
 );
 const MAX_FOUND_LINES = 600;
+const JOBS_DIR = "jobs"; // in the workspace (Pi's cwd): read-only copies of each job's input and output
+
+/**
+ * Write jobs/<job_id>/{input.inp,output.out} under the workspace, read-only; returns the folder,
+ * or null if the workspace refused it (the reply then omits the path; orca_output still works).
+ */
+function copyJob(jobId: string, input: Buffer, output: Buffer): string | null {
+	const rel = join(JOBS_DIR, jobId);
+	const dir = join(process.cwd(), rel);
+	try {
+		mkdirSync(dir, { recursive: true });
+		for (const [name, data] of [["input.inp", input], ["output.out", output]] as const) {
+			const path = join(dir, name);
+			writeFileSync(path, data, { flag: "wx" });
+			chmodSync(path, 0o444);
+		}
+	} catch {
+		return null;
+	}
+	return rel;
+}
 
 /** The lines of `text` containing `find` (case-insensitive) with `context` lines around each, numbered. */
 export function findLines(text: string, find: string, context: number): { shown: string; matches: number } {
@@ -480,8 +501,8 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			"files only by their attached names, and keep %pal nprocs and %maxcore within the host's caps; an input that " +
 			"names a path, sets %base, or starts other programs (%compound, ExtOpt, ProgExt) is refused (input_rejected). " +
 			"Every call counts against the run's job limit. Cite the job id when you report a value from its output. " +
-			"Job files stay on the host and are not in your workspace or anywhere your shell can reach; to read an " +
-			"earlier job's output again, use orca_output. " +
+			"The job itself runs on the host; a read-only copy of each job's input and output is placed in your " +
+			"workspace as jobs/<job_id>/input.inp and output.out, and orca_output re-reads or searches an earlier job. " +
 			"For a CASSCF job the reply also lists host checks read from its output: the lowest CASSCF root against " +
 			"the Hartree-Fock energy of the same basis and geometry from this run, the active orbitals per irrep, and " +
 			"whether every state-averaged root has the same weight.",
@@ -524,11 +545,15 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 				cache_hit: reply.cache_hit,
 				executed_here: reply.executed_here,
 			});
+			// A72: a read-only copy in the workspace, after the bytes are spooled, so the
+			// agent's own tools can find and search its jobs. The grader never reads it.
+			const copy = reply.job_id ? copyJob(reply.job_id, input, output) : null;
 			const how = reply.cache_hit ? "cache hit: an identical earlier job's output, not run again" : "executed";
 			const header = [
 				`ORCA job ${reply.job_id}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`,
 				`Files for attach: ${reply.files.length ? reply.files.join(", ") : "none"}`,
 				`orca_submit calls left in this run: ${Math.max(0, task.max_executions - counters().executions)}`,
+				...(copy ? [`Read-only copy in your workspace: ${copy}/input.inp, ${copy}/output.out`] : []),
 				...(reply.checks.length ? ["Host checks on this output (advisory):", ...reply.checks.map((c) => `- ${c}`)] : []),
 			].join("\n");
 			return {

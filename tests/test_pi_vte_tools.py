@@ -442,3 +442,8 @@ def test_orca_output_rereads_an_earlier_job_without_spending_a_job(tmp_path, bro
     (missing,) = run.results("r4", "visible")
     assert missing.is_error and "no job" in shown(run, "r4") and "j0001" in shown(run, "r4")
     assert len(broker.submits) == 1 and len(run.of("task.execute")) == 1
+    copy = tmp_path / "ws" / "jobs" / "j0001"  # A72: a read-only copy in the workspace
+    assert (copy / "output.out").read_bytes() == broker.jobs["j0001"]
+    assert (copy / "input.inp").read_text() == INPUT
+    assert (copy / "output.out").stat().st_mode & 0o222 == 0
+    assert "jobs/j0001/output.out" in shown(run, "x1")
