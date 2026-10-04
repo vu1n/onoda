@@ -43,7 +43,9 @@ attachments, write elsewhere, start other programs, or exceed the broker's
 
 Every reply also carries `checks` (A66): advisory lines `orca_checks` reads
 from the job's output, using earlier jobs of this broker where a check needs
-them (a Hartree-Fock energy). Replays recompute them from the same bytes.
+them (a Hartree-Fock energy), and `summary` (A74): the deterministic parser's
+reading of the output (termination, symmetry, CASSCF convergence, transition
+energies with their line numbers). Replays recompute both from the same bytes.
 
 Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
 so a cached output is not a converged one; that is for the parser and grader.
@@ -80,6 +82,7 @@ from onoda.science.orca_local import (
     sha256_file,
 )
 from onoda.science.orca_sandbox import JobSandbox
+from onoda.science.orca_summary import job_summary
 
 BROKER_PROTOCOL = "onoda.orca-broker/1"
 JOURNAL_NAME = "broker.jsonl"
@@ -251,6 +254,7 @@ class BrokerReply(_Frozen):
     files: tuple[str, ...] = ()  # names this job produced that a later submit may attach
     reason: str | None = None
     checks: tuple[str, ...] = ()  # advisory ladder checks read from the output (A66)
+    summary: tuple[str, ...] = ()  # the parser's reading of the output, with line numbers (A74)
 
     @model_validator(mode="after")
     def _consistent(self) -> BrokerReply:
@@ -303,6 +307,7 @@ class BrokerJournalEntry(_Frozen):
     duration_ms: int | None = None
     sandbox: str | None = None  # the job sandbox an executed job ran in (A65)
     checks: tuple[str, ...] = ()  # what the reply told the agent about its output (A66)
+    summary: tuple[str, ...] = ()  # the same for the parser summary (A74)
 
     @model_validator(mode="after")
     def _consistent(self) -> BrokerJournalEntry:
@@ -732,6 +737,7 @@ class OrcaBroker:
         output_sha = sha256_digest(log)
         facts = job_facts(log)
         checks = job_checks(job_id, facts, self._facts)
+        summary = job_summary(log)
         self._facts.append((job_id, facts))
         self._append(
             event="reply",
@@ -752,6 +758,7 @@ class OrcaBroker:
             duration_ms=duration_ms,
             sandbox=sandbox,
             checks=checks,
+            summary=summary,
         )
         return BrokerReply(
             status=status,
@@ -764,6 +771,7 @@ class OrcaBroker:
             files=tuple(sorted(files)),
             reason=reason,
             checks=checks,
+            summary=summary,
         )
 
     def _serve_replay(self, request: BrokerSubmit, key: str, input_sha: str) -> BrokerReply:

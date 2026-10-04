@@ -91,6 +91,7 @@ interface BrokerReply {
 	files: string[];
 	reason: string | null;
 	checks: string[]; // advisory ladder checks the broker read from the output (A66)
+	summary: string[]; // the parser's reading of the output, with line numbers (A74)
 }
 
 const DECIMAL_RE = /^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$/;
@@ -359,6 +360,7 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 		files: r.files ?? [],
 		reason: r.reason ?? null,
 		checks: r.checks ?? [],
+		summary: r.summary ?? [],
 	};
 	if (reply.cache_hit && reply.executed_here) throw new Error("orca_submit: broker reply is a cache hit and an execution");
 	if (reply.status === "refused") {
@@ -379,8 +381,10 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 	if (!Array.isArray(reply.files) || !reply.files.every((f) => typeof f === "string" && FILE_NAME_RE.test(f))) {
 		throw new Error("orca_submit: the broker's file list is malformed");
 	}
-	if (!Array.isArray(reply.checks) || !reply.checks.every((c) => typeof c === "string")) {
-		throw new Error("orca_submit: the broker's checks are malformed");
+	for (const [name, list] of [["checks", reply.checks], ["summary", reply.summary]] as const) {
+		if (!Array.isArray(list) || !list.every((c) => typeof c === "string")) {
+			throw new Error(`orca_submit: the broker's ${name} is malformed`);
+		}
 	}
 	const output = Buffer.from(reply.output_b64, "base64");
 	if (typeof reply.output_sha256 !== "string" || bareHex(reply.output_sha256) !== sha256Hex(output)) {
@@ -391,7 +395,9 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 
 const OutputParams = Type.Object(
 	{
-		job_id: Type.String({ description: "A job of this run, e.g. j0003" }),
+		job_id: Type.Optional(
+			Type.String({ description: "A job of this run, e.g. j0003; leave out to list every job of the run" }),
+		),
 		find: Type.Optional(
 			Type.String({
 				description: "Show only lines containing this text (case-insensitive), e.g. NEVPT2 or TRANSITION ENERGIES",
@@ -406,6 +412,7 @@ const OutputParams = Type.Object(
 	{ additionalProperties: false },
 );
 const MAX_FOUND_LINES = 600;
+const TAIL_LINES = 25; // of each output, shown in the orca_submit reply (where ORCA prints errors)
 const JOBS_DIR = "jobs"; // in the workspace (Pi's cwd): read-only copies of each job's input and output
 
 /**
@@ -458,6 +465,8 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 	const socketPath = process.env[ENV_BROKER];
 	// Job id -> output bytes, as each orca_submit reply verified them (orca_output reads these).
 	const outputs = new Map<string, Buffer>();
+	// Job id -> its ledger entry: the reply's first line, the input's keyword lines and the parser summary (A74).
+	const ledger = new Map<string, string[]>();
 	if (!socketPath) throw new Error("onoda-task: ONODA_PI_BROKER is not set");
 
 	const targets = task.targets.map((t) => `- ${t.count} ${SPIN_NAMES[t.spin]} ${t.irrep} state${t.count > 1 ? "s" : ""}`);
@@ -492,7 +501,9 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 		name: TOOL_ORCA_SUBMIT,
 		label: "ORCA submit",
 		description:
-			"Run one ORCA job on the host and return its complete output. Pass the full input file text; to reuse files " +
+			"Run one ORCA job on the host. The reply gives the job's status, what the deterministic parser read from " +
+			"its output (termination, symmetry, CASSCF convergence, each transition energy with its line number) and " +
+			"the output's last lines, not the whole output: read more with orca_output. Pass the full input file text; to reuse files " +
 			"an earlier job produced (e.g. orbitals), list them in attach by job id and file name. An attached file is " +
 			'placed next to the input as <job_id><suffix> (j0001 + job.gbw -> j0001.gbw), so read it with %moinp "j0001.gbw". ' +
 			"An input identical to an earlier one (with the same attachments) returns that job's output from the cache " +
@@ -502,7 +513,8 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			"names a path, sets %base, or starts other programs (%compound, ExtOpt, ProgExt) is refused (input_rejected). " +
 			"Every call counts against the run's job limit. Cite the job id when you report a value from its output. " +
 			"The job itself runs on the host; a read-only copy of each job's input and output is placed in your " +
-			"workspace as jobs/<job_id>/input.inp and output.out, and orca_output re-reads or searches an earlier job. " +
+			"workspace as jobs/<job_id>/input.inp and output.out. orca_output without a job id lists every job of " +
+			"this run with that summary, so you need not search for them. " +
 			"For a CASSCF job the reply also lists host checks read from its output: the lowest CASSCF root against " +
 			"the Hartree-Fock energy of the same basis and geometry from this run, the active orbitals per irrep, and " +
 			"whether every state-averaged root has the same weight.",
@@ -534,7 +546,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			}
 			const { reply, output } = checkReply(raw, inputHex);
 			if (reply.status === "refused") throw new Error(`orca_submit refused: ${reply.reason ?? "no reason given"}`);
-			if (reply.job_id) outputs.set(reply.job_id, output);
+			const jobId = reply.job_id as string; // checkReply: a reply that is not refused names its job
 			w.line({
 				type: "task.execute",
 				tool_call_id: toolCallId,
@@ -547,19 +559,29 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			});
 			// A72: a read-only copy in the workspace, after the bytes are spooled, so the
 			// agent's own tools can find and search its jobs. The grader never reads it.
-			const copy = reply.job_id ? copyJob(reply.job_id, input, output) : null;
+			const copy = copyJob(jobId, input, output);
 			const how = reply.cache_hit ? "cache hit: an identical earlier job's output, not run again" : "executed";
+			const first = `ORCA job ${jobId}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`;
+			const keywords = params.input.split("\n").filter((l) => l.trimStart().startsWith("!")).map((l) => `input: ${l.trim()}`);
+			outputs.set(jobId, output);
+			ledger.set(jobId, [first, ...keywords, ...reply.summary]);
+			const text = output.toString("utf8");
+			const lines = text.split("\n");
+			const tail = lines.slice(-TAIL_LINES).join("\n");
 			const header = [
-				`ORCA job ${reply.job_id}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`,
+				first,
 				`Files for attach: ${reply.files.length ? reply.files.join(", ") : "none"}`,
 				`orca_submit calls left in this run: ${Math.max(0, task.max_executions - counters().executions)}`,
-				...(copy ? [`Read-only copy in your workspace: ${copy}/input.inp, ${copy}/output.out`] : []),
+				...(reply.summary.length ? ["What the parser read from this output:", ...reply.summary] : []),
 				...(reply.checks.length ? ["Host checks on this output (advisory):", ...reply.checks.map((c) => `- ${c}`)] : []),
+				`Full output: ${lines.length} lines, read with orca_output (job_id ${jobId}, optionally find)` +
+					(copy ? ` or in your workspace at ${copy}/output.out (input at ${copy}/input.inp)` : ""),
+				`Last ${Math.min(TAIL_LINES, lines.length)} lines of the output:`,
 			].join("\n");
 			return {
 				content: [
 					{ type: "text", text: header },
-					{ type: "text", text: output.toString("utf8") },
+					{ type: "text", text: tail },
 				],
 				details: {
 					job_id: reply.job_id,
@@ -570,6 +592,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 					output_sha256: sha256Hex(output),
 					files: reply.files,
 					checks: reply.checks,
+					summary: reply.summary,
 				},
 			};
 		},
@@ -579,11 +602,19 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 		name: TOOL_ORCA_OUTPUT,
 		label: "ORCA output",
 		description:
-			"Read the output of an earlier orca_submit job of this run again, whole or only the lines containing " +
-			"some text (with line numbers). Costs no job.",
+			"List this run's ORCA jobs (leave out job_id): each job's status, input keywords and what the parser read " +
+			"from its output (termination, symmetry, CASSCF convergence, transition energies with line numbers). " +
+			"With job_id, read that job's output again, whole or only the lines containing some text (with line " +
+			"numbers). Costs no job.",
 		promptSnippet: "Re-read an earlier ORCA job's output",
 		parameters: OutputParams,
 		async execute(_toolCallId, params) {
+			if (params.job_id === undefined) {
+				const text = ledger.size
+					? [...ledger.values()].map((entry) => entry.join("\n")).join("\n\n")
+					: "No ORCA jobs in this run yet.";
+				return { content: [{ type: "text", text }], details: { jobs: [...ledger.keys()] } as Record<string, unknown> };
+			}
 			const output = outputs.get(params.job_id);
 			if (output === undefined) {
 				const known = [...outputs.keys()].join(", ") || "none yet";

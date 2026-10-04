@@ -81,4 +81,6 @@ listed in that decision. Record new assumptions and decisions there, not here. E
 | A71 | Does a supported claim from a job without printed irreps identify a target? | [`vte-grading-contract`](../.brief/docs/vte-grading-contract.md) |
 | A72 | How long may one agent `bash` command run, and how does the agent get back to an earlier job's output? | [`agent-sandbox`](../.brief/docs/agent-sandbox.md) |
 | A73 | What are the agents told about how a VTE claim is graded? | [`vte-grading-contract`](../.brief/docs/vte-grading-contract.md) |
+| A74 | What does an `orca_submit` reply show, and how does the agent find its earlier jobs? | [`orca-reply-summary`](../.brief/docs/orca-reply-summary.md) (draft) |
+| A75 | What memory do QUESTDB agents carry between runs? | [`memory-tiers`](../.brief/docs/memory-tiers.md) (draft) |
 

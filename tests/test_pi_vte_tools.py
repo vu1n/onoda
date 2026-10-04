@@ -60,6 +60,7 @@ class FakeBroker(socketserver.UnixStreamServer):
     """One reply per connection. Inputs containing REFUSE are refused, TAMPER
     gets an output that does not match its pin, PAD pads the output past
     ObservationPack's threshold, CHECKS gets one synthetic check line (A66).
+    Every completed job gets a one-line synthetic summary (A74).
     A repeated (input, attach) is a cache hit."""
 
     def __init__(self, path: str):
@@ -92,6 +93,7 @@ class FakeBroker(socketserver.UnixStreamServer):
             checks=("SYNTHETIC check line, not a chemistry result",)
             if "CHECKS" in req.input
             else (),
+            summary=(f"termination: SYNTHETIC summary for {job_id}",),
         )
 
 
@@ -302,7 +304,7 @@ def test_vte_run_submits_spools_execute_and_reports_a_claim(tmp_path, broker):
     assert "onoda-vte-ladder-marker" in first["systemPrompt"]  # S1 gets the ladder
 
 
-def test_broker_checks_are_shown_between_the_header_and_the_output(tmp_path, broker):
+def test_broker_checks_are_shown_before_the_output_tail(tmp_path, broker):
     turns = [
         turn(
             call("x1", "orca_submit", input=INPUT + "CHECKS\n"),
@@ -314,7 +316,7 @@ def test_broker_checks_are_shown_between_the_header_and_the_output(tmp_path, bro
     assert run.lines[-1].status == "settled", run.proc.stderr.decode()
     checked, plain = shown(run, "x1"), shown(run, "x2")
     assert "Host checks on this output (advisory):\n- SYNTHETIC check line" in checked
-    assert checked.endswith(broker.jobs["j0001"].decode())
+    assert checked.index("Host checks") < checked.index("Full output:")
     assert "Host checks" not in plain
 
 
@@ -400,9 +402,41 @@ def test_refused_or_unverifiable_replies_and_bad_claims_spool_nothing(tmp_path, 
     assert [s.tool_call_id for s in broker.submits] == ["x1", "x2", "x3"]  # x4 never sent
 
 
-def test_long_output_passes_through_for_observation_pack(tmp_path, broker):
+def test_a_long_output_is_summarized_not_pasted(tmp_path, broker):
+    """A74: the reply carries the parser summary and the output's tail, not the whole output."""
+    turns = [
+        turn(call("x1", "orca_submit", input="! CASSCF UseSym\n" + INPUT + "# PAD\n")),
+        turn(call("x2", "orca_submit", input=INPUT)),
+        turn(call("l1", "orca_output")),
+        turn(text("Synthetic scripted run complete.")),
+    ]
+    run = run_vte(tmp_path, turns, broker)
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    output = broker.jobs["j0001"].decode()
+    assert len(output) > 10 * 1024
+    visible = shown(run, "x1")
+    assert len(visible) < 4 * 1024
+    assert (
+        "What the parser read from this output:\ntermination: SYNTHETIC summary for j0001"
+        in visible
+    )
+    assert f"Full output: {len(output.split(chr(10)))} lines, read with orca_output" in visible
+    assert visible.endswith("\n".join(output.split("\n")[-25:]))
+    (e,) = [e for e in run.of("task.execute") if e.job_id == "j0001"]
+    assert run.obj(e.output) == broker.jobs["j0001"]  # the record keeps every byte
+    assert shown(run, "l1") == (
+        "ORCA job j0001: completed (executed)\n"
+        "input: ! CASSCF UseSym\ninput: ! synthetic test input\n"
+        "termination: SYNTHETIC summary for j0001\n\n"
+        "ORCA job j0002: completed (executed)\ninput: ! synthetic test input\n"
+        "termination: SYNTHETIC summary for j0002"
+    )
+
+
+def test_a_whole_output_reread_passes_through_for_observation_pack(tmp_path, broker):
     turns = [
         turn(call("x1", "orca_submit", input=INPUT + "# PAD\n")),
+        turn(call("o1", "orca_output", job_id="j0001")),
         turn(call("s1", "structure")),
         turn(call("s2", "structure")),
         turn(text("Synthetic scripted run complete.")),
@@ -411,11 +445,9 @@ def test_long_output_passes_through_for_observation_pack(tmp_path, broker):
     assert run.lines[-1].status == "settled", run.proc.stderr.decode()
     output = broker.jobs["j0001"]
     assert len(output) > 10 * 1024
-    (e,) = run.of("task.execute")
-    assert run.obj(e.output) == output
-    assert shown(run, "x1").endswith(output.decode())  # the tool result is whole
-    assert run.shown_result(1, "x1").endswith(output.decode())
-    later = run.shown_result(3, "x1")  # ObservationPack's handle once it ages
+    assert shown(run, "o1").endswith(output.decode())  # the tool result is whole
+    assert run.shown_result(2, "o1").endswith(output.decode())
+    later = run.shown_result(4, "o1")  # ObservationPack's handle once it ages
     assert "obs_" in later and len(later) < len(output) // 4
 
 
