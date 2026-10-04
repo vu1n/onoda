@@ -1,4 +1,4 @@
-"""A75 (decision memory-tiers): the memory tiers both QUESTDB arms get hold procedures, never reference values."""
+"""A75: the memory tiers both QUESTDB arms get hold procedures, never reference values."""
 
 from __future__ import annotations
 
