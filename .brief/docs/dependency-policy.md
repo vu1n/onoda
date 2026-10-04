@@ -3,17 +3,20 @@ id: dependency-policy
 project: onoda
 type: decision
 status: draft
-title: "No DSPy dependency and no third-party single-author packages in the harness"
+title: "No DSPy dependency; single-author packages are allowed"
 related_code: []
 ---
 
-<!-- brief:anchor no-single-author-deps -->
-## Do not add DSPy or third-party single-author packages as dependencies
+<!-- brief:anchor no-dspy-dependency -->
+## Do not add DSPy as a dependency
 
-**Draft: not verifiable from the repository.** This convention comes from the owner's instructions outside the repo. It needs the owner's confirmation before it is promoted to `active`. Rejected options so far: DSPy RLM as a dependency (onoda has its own RLM extension), and third-party packages maintained by one author. Today no DSPy package is in `pyproject.toml`, `uv.lock` or `pi/package-lock.json`; DSPy appears only as a prompt reference (sources.json S18).
+onoda has its own RLM extension (`pi/extensions/onoda-rlm.ts` with `pi/rlm/onoda_rlm_kernel.py`),
+so DSPy's RLM is not a dependency. Today no DSPy package is in `pyproject.toml`, `uv.lock` or
+`pi/package-lock.json`; DSPy appears only as a prompt reference (`provenance/sources.json` S18).
+Packages maintained by a single author are allowed (owner, 2026-10-04).
 
-**Why.** Every dependency of the harness is part of what a reproduced run trusts; small single-author packages are the likeliest to vanish or change under a pin.
+**Why.** The RLM extension is built around onoda's semantic checkpoints; a second RLM stack would
+duplicate it with a different state model.
 
 ### Invariant
 - No `dspy` in Python or npm dependencies.
-- Open question for the owner: current deps include `typebox` (effectively single-maintainer), `gepa` and `rfc8785` (small teams). Are these accepted exceptions, or does the rule mean something narrower?
