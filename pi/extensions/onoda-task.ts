@@ -558,7 +558,8 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			"(you may edit the text first). method nevpt2 is state-averaged CASSCF with SC-NEVPT2. roots are blocks " +
 			"of (mult, irrep, nroots), irrep as ORCA's number for the point group, ground state first (mult 1, irrep 0). " +
 			"read_orbitals names an earlier job whose job.gbw is read with MORead; rotate swaps orbital pairs (0-based) " +
-			"after reading, e.g. to bring an intended orbital back into the active space.",
+			"after reading, e.g. to bring an intended orbital back into the active space. With several root blocks it " +
+			"writes bweight = the nroots list, so every root gets the same weight (ORCA's default weights each block equally).",
 		promptSnippet: "Write an ORCA input from chosen parameters for orca_submit",
 		parameters: InputBuildParams,
 		async execute(_toolCallId, params) {
