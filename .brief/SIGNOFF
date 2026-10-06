@@ -15,3 +15,4 @@ broker-owns-orca conforms: a fork's broker replays the parent's jobs then runs l
 live-settings-explicit conforms: a fork's live continuation takes every LiveSettings field explicitly; its request cap is that setting plus the replayed prefix, recorded in config.fork; the prefix replays offline at no cost
 sandbox-or-refuse conforms: a fork's live handoff is a live launch: it refuses to stage without the sandbox and passes only the named credential
 immutable-single-writer-records conforms: ratified @0003 (vu1n) describes Pi forking as built in #28; code unchanged by the amendment, refs re-pinned
+live-settings-explicit conforms: run.sh adds PARALLEL (default 1) to run several runs at once, each with its own store and ORCA cache; every live setting is still explicit and ORCA execution still needs ENABLE_LIVE_EXECUTION=1
