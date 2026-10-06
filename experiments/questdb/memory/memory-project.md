@@ -1,4 +1,4 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@1)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@2)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
@@ -18,6 +18,84 @@ others are agent runs).
 - A single-root job prints no transition table, so it cannot be cited for an
   excitation energy. [acetaldehyde runs, 2026-10-04]
 - Every aug-cc-pVTZ CASSCF job here used `trafostep ri` with RIJCOSX. [fixtures]
+
+## Inputs that ran in ORCA 6.1.1
+
+These are the shapes of inputs that terminated normally here, with the active
+space left as `NEL`/`NORB` and the per-irrep lists as `...` to fill in. Keep the
+keyword spelling exactly. Each step reads the previous step's orbitals: attach
+that job's `job.gbw` in `orca_submit` (it arrives as `<job_id>.gbw`, for example
+`j0001.gbw`) and name it in `%moinp`. Give the geometry inline; the job
+directory holds only the input and its attachments. [ketene a-f, acetone a-g,
+orca_submit]
+
+The full route that ran for ketene had five steps: RHF/cc-pVDZ, valence CASSCF/cc-pVDZ,
+the same CASSCF in aug-cc-pVTZ without `UseSym`, that one re-read with
+`UseSym`, then the state-averaged target job. The three shapes below cover
+every step: drop `UseSym` for the step without symmetry. See "Keeping the
+intended orbitals active" for what re-reading with `UseSym` does to the
+orbital order.
+
+Step 1, RHF with symmetry, small basis:
+
+```
+! RHF cc-pVDZ TightSCF UseSym
+%maxcore 2000
+%pal nprocs 4 end
+* xyz 0 1
+(the structure's atom lines)
+*
+```
+
+Valence CASSCF steps, one root each (so they print no table):
+
+```
+! aug-cc-pVTZ RIJCOSX AutoAux TightSCF UseSym MORead
+%moinp "j0001.gbw"
+%maxcore 2000
+%pal nprocs 4 end
+%casscf
+  nel NEL
+  norb NORB
+  mult 1
+  irrep 0
+  nroots 1
+  trafostep ri
+end
+* xyz 0 1
+(the structure's atom lines)
+*
+```
+
+Target job, state-averaged CASSCF with SC-NEVPT2, one block per irrep (comma
+lists of equal length: `mult`, `irrep`, `nroots`):
+
+```
+! aug-cc-pVTZ RIJCOSX AutoAux TightSCF UseSym MORead
+%moinp "j0002.gbw"
+%maxcore 2000
+%pal nprocs 4 end
+%casscf
+  nel NEL
+  norb NORB
+  mult 1,1
+  irrep 0,...
+  nroots 1,...
+  trafostep ri
+  orbstep TRAH
+  maxiter 150
+  PTMethod SC_NEVPT2
+end
+* xyz 0 1
+(the structure's atom lines)
+*
+```
+
+- Every `%` block ends with its own `end`. `%pal nprocs 4 end` fits on one
+  line. [fixtures]
+- Put the ground state first (`mult 1`, `irrep 0`, `nroots 1` leading each
+  list). The parser rejects a table whose lowest root is not a singlet ground
+  state. [orca_parser]
 
 ## Getting CASSCF to converge
 
