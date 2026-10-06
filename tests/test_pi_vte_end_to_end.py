@@ -223,6 +223,7 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert report["synthetic"] is True and "not a chemistry" in report["note"]
     assert report["arms"]["S1"]["coverage"] == 1 and report["arms"]["S1"]["mae_ev"] == "0.002000"
     assert report["arms"]["S1"]["accurate"] == 1 and report["arms"]["S1"]["runs_without_claim"] == 0
+    assert (report["arms"]["S1"]["jobs"], report["arms"]["S1"]["jobs_failed"]) == (2, 0)
 
 
 def test_a_run_citing_a_stand_in_job_is_graded_synthetic(recorded, monkeypatch):

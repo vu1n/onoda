@@ -416,6 +416,32 @@ def _vte_jobs(store: Store, run_id: str) -> dict[str, VteJob]:
     return jobs
 
 
+# A job counts as failed when the broker said so or the parser found it did not
+# finish cleanly; an RHF job without a CASSCF table is not a failure.
+_FAILED_JOB_FIELDS = frozenset({"termination", "casscf_converged"})
+
+
+def vte_job_counts(store: Store, run_id: str) -> tuple[int, int]:
+    """(jobs, failed jobs) of a VTE run: every broker job it named, cache hits included."""
+    jobs = failed = 0
+    for event in store.events(run_id):
+        if event.type != "invocation.committed":
+            continue
+        receipt = store.receipt(event.payload["invocation_id"])
+        if receipt.metadata.get("job_id") is None or "log" not in receipt.outputs:
+            continue
+        jobs += 1
+        failed += job_failed(receipt.status, store.get_bytes(receipt.outputs["log"]))
+    return jobs, failed
+
+
+def job_failed(status: str, output: bytes) -> bool:
+    """Whether one ORCA job failed: the broker said so, or its output did not finish cleanly."""
+    if status == "failed":
+        return True
+    return any(p.field in _FAILED_JOB_FIELDS for p in parse_orca_output(output).problems)
+
+
 def evaluate_vte_run(
     store: Store, evaluator_store: Store, run_id: str, case: LoadedVteCase
 ) -> Evaluation:
@@ -473,8 +499,9 @@ def vte_report_runs(
     An arm is a run's variant. Per arm: identified reference rows over all
     rows of its runs (`coverage`), how many of those are within the tolerance
     (`accurate`), MAE over every identified row of every run, the false-success
-    claim count, and the runs that never reported (`runs_without_claim`, so a
-    timed-out run is not read as an agent that found nothing). When exactly
+    claim count, the runs that never reported (`runs_without_claim`, so a
+    timed-out run is not read as an agent that found nothing), and the ORCA
+    jobs the arm named with how many failed (`jobs`, `jobs_failed`). When exactly
     two arms are compared (or `arms` names two), `common_target_mae_ev` restricts both to targets
     (case, reference row) each arm identified in at least one run, averaging
     an arm's repeats per target first, so both arms are measured on the same
@@ -504,8 +531,13 @@ def vte_report_runs(
                 "accurate": 0,
                 "false_success_claims": 0,
                 "runs_without_claim": 0,
+                "jobs": 0,
+                "jobs_failed": 0,
             },
         )
+        jobs, failed = vte_job_counts(store, run_id)
+        a["jobs"] += jobs
+        a["jobs_failed"] += failed
         a["runs"].append(run_id)
         a["coverage"] += int(m["coverage"])
         a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3

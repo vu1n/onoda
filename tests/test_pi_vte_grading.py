@@ -396,3 +396,18 @@ def test_reevaluation_writes_a_new_record(evaluator_store):
     second = _grade(evaluator_store, case, None, {})
     assert first.evaluation_id != second.evaluation_id
     assert evaluator_store.has_record("evaluation", first.evaluation_id)
+
+
+@pytest.mark.parametrize(
+    ("status", "name", "failed"),
+    [
+        ("succeeded", "ketene_a_rhf", False),  # an RHF job prints no CASSCF table; not a failure
+        ("succeeded", "ketene_f_target", False),
+        ("succeeded", "ethylene_nevpt2_np4_default_orbstep", True),  # CASSCF did not converge
+        ("failed", "ketene_f_target", True),  # the broker's word
+    ],
+)
+def test_failed_jobs_are_counted_from_the_broker_and_the_parser(status, name, failed):
+    from onoda.adapters.pi.vte import job_failed
+
+    assert job_failed(status, _out(name)) is failed
