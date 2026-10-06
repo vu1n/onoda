@@ -558,6 +558,19 @@ def cmd_vte_report(a) -> Any:
         raise OnodaError("--arm names exactly two arms, or none")
     from onoda.adapters.pi.vte_shadow import shadow_report
 
+    if a.run_stores:  # one store pair per run (`run.sh` with PARALLEL > 1)
+        if a.store or a.evaluator_store:
+            raise OnodaError("--run-stores replaces --store and --evaluator-store")
+        from onoda.adapters.pi.vte import vte_report_runs
+
+        root = Path(a.run_stores)
+        runs = [
+            (_store(root / r / "store"), _store(root / r / "evaluator", evaluator=True), r)
+            for r in a.run_ids
+        ]
+        return vte_report_runs(runs, arms=tuple(a.arm or ()))
+    if not (a.store and a.evaluator_store):
+        raise OnodaError("give --store and --evaluator-store, or --run-stores")
     store, evaluator_store = _store(a.store), _store(a.evaluator_store, evaluator=True)
     report = vte_report(store, evaluator_store, a.run_ids, arms=tuple(a.arm or ()))
     shadow = shadow_report(store, evaluator_store, a.run_ids)
@@ -1321,8 +1334,13 @@ def build_parser() -> argparse.ArgumentParser:
         "report", help="coverage, MAE and false successes per arm over graded VTE runs"
     )
     vr.add_argument("run_ids", nargs="+")
-    vr.add_argument("--store", required=True)
-    vr.add_argument("--evaluator-store", required=True)
+    vr.add_argument("--store")
+    vr.add_argument("--evaluator-store")
+    vr.add_argument(
+        "--run-stores",
+        help="dir holding <run_id>/store and <run_id>/evaluator per run (parallel runs); "
+        "the shadow sections need one shared store and are left out",
+    )
     vr.add_argument(
         "--arm", action="append", help="compare these two arms (repeat once); default: all"
     )

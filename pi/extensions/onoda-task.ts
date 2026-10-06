@@ -11,8 +11,9 @@
  * pinned, previously produced output and spools `task.acquire` with
  * `executed_here: false` before the agent sees a byte of it.
  *
- * A VTE bundle (`onoda.pi-vte-task/1`, A57) gets `structure`, `orca_submit`
- * and `report_vtes`. `orca_submit` sends the agent's input to the host broker
+ * A VTE bundle (`onoda.pi-vte-task/1`, A57) gets `structure`, `orca_input`,
+ * `orca_submit`, `orca_output` and `report_vtes`. `orca_input` only writes input
+ * text from chosen parameters; it runs nothing and costs no job. `orca_submit` sends the agent's input to the host broker
  * over its Unix socket (ORCA never runs in this process) and spools
  * `task.execute` with the broker's own word on `executed_here`/`cache_hit`,
  * input and output objects written first, before the agent sees the output.
@@ -24,6 +25,7 @@ import { createConnection } from "node:net";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { buildOrcaInput, INPUT_NPROCS, type InputParams, xyzAtomLines } from "./lib/orca-input.ts";
 import {
 	BROKER_PROTOCOL,
 	counters,
@@ -36,6 +38,7 @@ import {
 	sha256Hex,
 	spool,
 	TOOL_CASE_INPUT,
+	TOOL_ORCA_INPUT,
 	TOOL_ORCA_OUTPUT,
 	TOOL_ORCA_RUN,
 	TOOL_ORCA_SUBMIT,
@@ -393,6 +396,50 @@ function checkReply(raw: unknown, inputHex: string): { reply: BrokerReply; outpu
 	return { reply, output };
 }
 
+const InputBuildParams = Type.Object(
+	{
+		method: Type.Union([Type.Literal("rhf"), Type.Literal("casscf"), Type.Literal("nevpt2")], {
+			description: "rhf, casscf (CASSCF only) or nevpt2 (state-averaged CASSCF with SC-NEVPT2)",
+		}),
+		basis: Type.String({ description: "Basis set, e.g. cc-pVDZ or aug-cc-pVTZ", minLength: 1, maxLength: 40 }),
+		symmetry: Type.Optional(Type.Boolean({ description: "UseSym (default true): needed for irreps in the output" })),
+		ri: Type.Optional(Type.Boolean({ description: "RIJCOSX AutoAux (default true for casscf/nevpt2, false for rhf)" })),
+		charge: Type.Optional(Type.Integer({ description: "Molecular charge (default 0)", minimum: -4, maximum: 4 })),
+		read_orbitals: Type.Optional(
+			Type.String({ description: "An earlier job of this run whose job.gbw to read (MORead), e.g. j0001" }),
+		),
+		rotate: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						i: Type.Integer({ minimum: 0, maximum: 9999 }),
+						j: Type.Integer({ minimum: 0, maximum: 9999 }),
+					},
+					{ additionalProperties: false },
+				),
+				{ description: "Orbital pairs (0-based) to swap: %scf rotate {i, j, 90}", maxItems: 20 },
+			),
+		),
+		nel: Type.Optional(Type.Integer({ description: "Active electrons (casscf/nevpt2)", minimum: 1, maximum: 40 })),
+		norb: Type.Optional(Type.Integer({ description: "Active orbitals (casscf/nevpt2)", minimum: 1, maximum: 40 })),
+		roots: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						mult: Type.Union([Type.Literal(1), Type.Literal(3)], { description: "1 singlet, 3 triplet" }),
+						irrep: Type.Integer({ description: "ORCA's irrep number in the point group (0 = totally symmetric)", minimum: 0, maximum: 7 }),
+						nroots: Type.Integer({ description: "Roots of this spin and irrep", minimum: 1, maximum: 30 }),
+					},
+					{ additionalProperties: false },
+				),
+				{ description: "State-averaged blocks, ground state first (default: one singlet root of irrep 0)", maxItems: 16 },
+			),
+		),
+		maxiter: Type.Optional(Type.Integer({ description: "CASSCF macro-iterations (default 150)", minimum: 1, maximum: 500 })),
+	},
+	{ additionalProperties: false },
+);
+
 const OutputParams = Type.Object(
 	{
 		job_id: Type.Optional(
@@ -467,6 +514,9 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 	const outputs = new Map<string, Buffer>();
 	// Job id -> its ledger entry: the reply's first line, the input's keyword lines and the parser summary (A74).
 	const ledger = new Map<string, string[]>();
+	// Jobs whose reply lists a job.gbw (orca_input's read_orbitals must name one).
+	const gbwJobs = new Set<string>();
+	const atoms = xyzAtomLines(structure.toString("utf8"));
 	if (!socketPath) throw new Error("onoda-task: ONODA_PI_BROKER is not set");
 
 	const targets = task.targets.map((t) => `- ${t.count} ${SPIN_NAMES[t.spin]} ${t.irrep} state${t.count > 1 ? "s" : ""}`);
@@ -494,6 +544,33 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 				content: [{ type: "text", text: structureText }],
 				details: { case_id: task.case_id, name: task.structure_name, sha256: sha256Hex(structure), targets: task.targets },
 			};
+		},
+	});
+
+	pi.registerTool({
+		name: TOOL_ORCA_INPUT,
+		label: "ORCA input",
+		description:
+			"Write an ORCA input from the choices that matter (method, basis, active space, roots per irrep, orbitals " +
+			"to read and swap) in the syntax that runs on this host: the geometry inline from the structure, " +
+			`%pal nprocs ${INPUT_NPROCS} and %maxcore within the caps, every % block closed, TightSCF, and for CASSCF trafostep ri ` +
+			"and orbstep TRAH. Runs nothing and costs no job: pass the returned input and attach to orca_submit " +
+			"(you may edit the text first). method nevpt2 is state-averaged CASSCF with SC-NEVPT2. roots are blocks " +
+			"of (mult, irrep, nroots), irrep as ORCA's number for the point group, ground state first (mult 1, irrep 0). " +
+			"read_orbitals names an earlier job whose job.gbw is read with MORead; rotate swaps orbital pairs (0-based) " +
+			"after reading, e.g. to bring an intended orbital back into the active space.",
+		promptSnippet: "Write an ORCA input from chosen parameters for orca_submit",
+		parameters: InputBuildParams,
+		async execute(_toolCallId, params) {
+			const built = buildOrcaInput(params as InputParams, atoms, gbwJobs);
+			const text = [
+				"ORCA input (not submitted; pass input and attach to orca_submit):",
+				`attach: ${built.attach.length ? JSON.stringify(built.attach) : "none"}`,
+				...built.notes.map((n) => `note: ${n}`),
+				"",
+				built.input,
+			].join("\n");
+			return { content: [{ type: "text", text }], details: { ...built } as Record<string, unknown> };
 		},
 	});
 
@@ -564,6 +641,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 			const first = `ORCA job ${jobId}: ${reply.status} (${how})${reply.reason ? `; ${reply.reason}` : ""}`;
 			const keywords = params.input.split("\n").filter((l) => l.trimStart().startsWith("!")).map((l) => `input: ${l.trim()}`);
 			outputs.set(jobId, output);
+			if (reply.files.includes("job.gbw")) gbwJobs.add(jobId);
 			ledger.set(jobId, [first, ...keywords, ...reply.summary]);
 			const text = output.toString("utf8");
 			const lines = text.split("\n");

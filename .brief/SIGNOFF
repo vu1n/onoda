@@ -16,3 +16,6 @@ live-settings-explicit conforms: a fork's live continuation takes every LiveSett
 sandbox-or-refuse conforms: a fork's live handoff is a live launch: it refuses to stage without the sandbox and passes only the named credential
 immutable-single-writer-records conforms: ratified @0003 (vu1n) describes Pi forking as built in #28; code unchanged by the amendment, refs re-pinned
 claim-from-one-cited-job amend-proposed: identity must check the character even for the only row of its spin and irrep (qv5 credited states up to 10.6 eV off); accuracy judged against draft vte-energy-tolerance
+broker-owns-orca conforms: orca_input only writes input text in the Pi extension and runs nothing; ORCA still runs only through orca_submit and the host broker, which counts every job
+immutable-single-writer-records conforms: spool.ts only gains the orca_input tool name; orca_input writes no record bytes or events of its own, and its tool result is spooled by the recorder like any other
+live-settings-explicit conforms: run.sh adds PARALLEL (default 1) to run several runs at once, each with its own store and ORCA cache; every live setting is still explicit and ORCA execution still needs ENABLE_LIVE_EXECUTION=1

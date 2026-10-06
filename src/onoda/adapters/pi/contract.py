@@ -112,7 +112,14 @@ TOOL_STRUCTURE = "structure"  # read the molecule's xyz, point group and target 
 TOOL_ORCA_SUBMIT = "orca_submit"  # run one ORCA input through the host broker
 TOOL_REPORT_VTE = "report_vtes"  # the agent's final VTE claim
 TOOL_ORCA_OUTPUT = "orca_output"  # re-read an earlier job's output (A72)
-VTE_TASK_TOOLS = (TOOL_STRUCTURE, TOOL_ORCA_SUBMIT, TOOL_REPORT_VTE, TOOL_ORCA_OUTPUT)
+TOOL_ORCA_INPUT = "orca_input"  # write input text from chosen parameters; runs nothing
+VTE_TASK_TOOLS = (
+    TOOL_STRUCTURE,
+    TOOL_ORCA_SUBMIT,
+    TOOL_REPORT_VTE,
+    TOOL_ORCA_OUTPUT,
+    TOOL_ORCA_INPUT,
+)
 TaskKind = Literal["case", "vte"]
 BASE_TOOLS = ("read", "bash", "edit", "write")
 MECHANISM_TOOLS = {"observationPack": ("obs_recall",), "onlineContextCompact": ("update_plan",)}

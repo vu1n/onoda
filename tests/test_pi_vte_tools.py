@@ -479,3 +479,59 @@ def test_orca_output_rereads_an_earlier_job_without_spending_a_job(tmp_path, bro
     assert (copy / "input.inp").read_text() == INPUT
     assert (copy / "output.out").stat().st_mode & 0o222 == 0
     assert "jobs/j0001/output.out" in shown(run, "x1")
+
+
+ATOM_LINES = "\n".join(line for line in STRUCTURE.splitlines()[2:])
+
+
+def test_orca_input_writes_inputs_that_orca_submit_takes_without_spending_a_job(tmp_path, broker):
+    """`orca_input` writes the syntax from chosen parameters; it runs nothing, so only
+    `orca_submit` spends the job budget, and it refuses parameters that would not run."""
+    target = {
+        "method": "nevpt2",
+        "basis": "aug-cc-pVTZ",
+        "read_orbitals": "j0001",
+        "rotate": [{"i": 7, "j": 9}],
+        "nel": 6,
+        "norb": 5,
+        "roots": [{"mult": 1, "irrep": 0, "nroots": 1}, {"mult": 1, "irrep": 1, "nroots": 2}],
+    }
+    turns = [
+        turn(call("b1", "orca_input", method="rhf", basis="cc-pVDZ")),
+        turn(call("x1", "orca_submit", input="! RHF cc-pVDZ synthetic\n")),
+        turn(
+            call("b2", "orca_input", **target),
+            call("e1", "orca_input", **{**target, "read_orbitals": "j0009"}),
+            call("e2", "orca_input", **{**target, "roots": [{"mult": 1, "irrep": 1, "nroots": 1}]}),
+            call("e3", "orca_input", method="casscf", basis="cc-pVDZ"),
+            call("e4", "orca_input", method="rhf", basis="cc-pVDZ\n%base x"),
+        ),
+        turn(text("Synthetic scripted run complete.")),
+    ]
+    run = run_vte(tmp_path, turns, broker, max_executions=1)
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    rhf = shown(run, "b1")
+    assert rhf.endswith(
+        "! RHF cc-pVDZ TightSCF UseSym\n%maxcore 2000\n%pal nprocs 4 end\n"
+        f"* xyz 0 1\n{ATOM_LINES}\n*\n"
+    )
+    assert "attach: none" in rhf
+    built = shown(run, "b2")
+    assert '"job_id":"j0001","name":"job.gbw"' in built
+    assert (
+        "! aug-cc-pVTZ RIJCOSX AutoAux TightSCF UseSym MORead\n"
+        '%moinp "j0001.gbw"\n%maxcore 2000\n%pal nprocs 4 end\n'
+        "%scf\n  rotate\n    {7, 9, 90}\n  end\nend\n"
+        "%casscf\n  nel 6\n  norb 5\n  mult 1,1\n  irrep 0,1\n  nroots 1,2\n"
+        "  trafostep ri\n  orbstep TRAH\n  maxiter 150\n  PTMethod SC_NEVPT2\nend\n"
+        f"* xyz 0 1\n{ATOM_LINES}\n*\n"
+    ) in built
+    for call_id, why in [
+        ("e1", "no job"),
+        ("e2", "ground state first"),
+        ("e3", "needs nel and norb"),
+        ("e4", "not a basis set name"),
+    ]:
+        (result,) = run.results(call_id, "visible")
+        assert result.is_error and why in shown(run, call_id), call_id
+    assert len(broker.submits) == 1 and len(run.of("task.execute")) == 1
