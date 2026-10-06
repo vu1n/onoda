@@ -99,6 +99,7 @@ from onoda.adapters.pi.contract import (
     SPOOL_OBJECTS,
     TOOL_CASE_INPUT,
     TOOL_IPYTHON,
+    TOOL_ORCA_INPUT,
     TOOL_ORCA_OUTPUT,
     TOOL_ORCA_RUN,
     TOOL_ORCA_SUBMIT,
@@ -167,6 +168,7 @@ READ_TOOLS = frozenset(
         TOOL_STRUCTURE,
         TOOL_ORCA_SUBMIT,
         TOOL_ORCA_OUTPUT,
+        TOOL_ORCA_INPUT,
         "read",
         "obs_recall",
     }

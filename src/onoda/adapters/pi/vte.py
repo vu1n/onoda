@@ -459,8 +459,17 @@ def _latest_vte_evaluation(evaluator_store: Store, run_id: str) -> Evaluation:
 def vte_report(
     store: Store, evaluator_store: Store, run_ids: Iterable[str], *, arms: tuple[str, ...] = ()
 ) -> dict[str, Any]:
+    """`vte_report_runs` over runs that share one store and one evaluator store."""
+    return vte_report_runs(((store, evaluator_store, r) for r in run_ids), arms=arms)
+
+
+def vte_report_runs(
+    runs: Iterable[tuple[Store, Store, str]], *, arms: tuple[str, ...] = ()
+) -> dict[str, Any]:
     """Coverage, MAE and false successes per arm over graded VTE runs; never a verdict (A63).
 
+    Each run is read from its own (store, evaluator store), so runs recorded in
+    parallel, one store each, are pooled the same way as runs in one store.
     An arm is a run's variant. Per arm: identified reference rows over all
     rows of its runs (`coverage`), how many of those are within the tolerance
     (`accurate`), MAE over every identified row of every run, the false-success
@@ -476,7 +485,7 @@ def vte_report(
     per_arm: dict[str, dict[str, Any]] = {}
     errors: dict[str, dict[tuple[str, str], list[Decimal]]] = {}
     synthetic = False
-    for run_id in run_ids:
+    for store, evaluator_store, run_id in runs:
         run = store.run_record(run_id)
         if run.config.get("task_kind") != "vte":
             raise OnodaError(f"run {run_id} is not a VTE run")

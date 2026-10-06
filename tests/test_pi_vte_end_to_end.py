@@ -218,6 +218,7 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert not store.list_record_ids("evaluation")  # grading stays in the evaluator store
 
     report = pi_vte.vte_report(store, evaluator, ["vte"])
+    assert pi_vte.vte_report_runs([(store, evaluator, "vte")]) == report  # one store per run
     assert report["synthetic"] is True and "not a chemistry" in report["note"]
     assert report["arms"]["S1"]["coverage"] == 1 and report["arms"]["S1"]["mae_ev"] == "0.002000"
     assert report["arms"]["S1"]["accurate"] == 1 and report["arms"]["S1"]["runs_without_claim"] == 0
