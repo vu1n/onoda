@@ -93,7 +93,9 @@ VTE_INSTRUCTION = (
     "A value counts only if that one job prints it in its SC-NEVPT2 transition energy table "
     "with the state's irrep: run state-averaged jobs (the ground state and the excited roots "
     "of one spin together) with point-group symmetry on, and do not report differences of "
-    "total energies from separate jobs (A73)."
+    "total energies from separate jobs (A73). A state is matched to a target by its spin, "
+    "irrep and character together, so give the character you assigned from the active "
+    "orbitals as an orbital pair (for example n,pi*)."
 )
 
 # The eight QUESTDB dev cases (A62); dev-only, never part of `cases/` or a split.
