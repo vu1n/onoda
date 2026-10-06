@@ -31,8 +31,11 @@
 # coverage, false successes). A run whose `run-vte` fails is logged there and
 # skipped, so one bad run does not stop the experiment; its stderr is kept in
 # $OUT/<run>.run.err. Rerunning with the same OUT resumes: a run that already
-# has its evaluate JSON is not run again. Runs are serial because the agent
-# and evaluator stores take one writer at a time.
+# has its evaluate JSON is not run again. PARALLEL (1) runs that many runs at
+# once; above 1 each run gets its own agent store, evaluator store and ORCA
+# cache under $OUT/runs/<run>/ (a store takes one writer at a time), and the
+# report pools them. Each ORCA job may use up to 4 processes (the broker's
+# cap), so PARALLEL=4 fills 16 cores.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -83,40 +86,66 @@ progress() {  # run id, start (SECONDS), what happened
   echo "$line" | tee -a "$OUT/progress.log" >&2
 }
 mkdir -p "$OUT" "$WORK" "$ORCA_WORK"
-RUNS=()
+PARALLEL="${PARALLEL:-1}"
+case "$PARALLEL" in ''|*[!0-9]*|0) echo "run.sh: PARALLEL must be a positive integer" >&2; exit 2;; esac
+store_args() {  # run id -> the run's agent store, evaluator store and ORCA cache
+  if [ "$PARALLEL" = 1 ]; then
+    echo "$OUT/store $OUT/evaluator $OUT/orca-cache"
+  else  # a store takes one writer at a time, so parallel runs get one each
+    echo "$OUT/runs/$1/store $OUT/runs/$1/evaluator $OUT/runs/$1/orca-cache"
+  fi
+}
+run_one() {  # case id, arm, repeat
+  local case_id=$1 arm=$2 r=$3 run_id store evaluator cache started ladder=()
+  run_id="$arm-${case_id#questdb-}-r$r"
+  read -r store evaluator cache <<< "$(store_args "$run_id")"
+  [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
+  echo "== $run_id" >&2
+  started=$SECONDS
+  mkdir -p "$(dirname "$store")"
+  if ! onoda pi run-vte "$case_id" --variant "$arm" --run-id "$run_id" \
+    --store "$store" --work-dir "$WORK/$run_id" \
+    --live --provider "$PROVIDER" --model "$MODEL" --credential-env "$CREDENTIAL_ENV" \
+    --max-requests "$MAX_REQUESTS" --max-cost-usd "$MAX_COST_USD" \
+    --enable-live-execution --orca-binary "$ORCA_HOME/orca" \
+    --orca-work-root "$ORCA_WORK" --orca-cache "$cache" \
+    --orca-mpi-home "$MPI_HOME" \
+    --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
+    --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
+    ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} \
+    > "$OUT/$run_id.run.json" 2> "$OUT/$run_id.run.err"; then
+    progress "$run_id" "$started" "run failed, skipped (see $run_id.run.err)"
+    return 0
+  fi
+  onoda pi evaluate-vte "$run_id" --store "$store" \
+    --evaluator-store "$evaluator" > "$OUT/$run_id.evaluate.json"
+  progress "$run_id" "$started" "$(graded "$OUT/$run_id.run.json" "$OUT/$run_id.evaluate.json")"
+}
+ALL=()
 for case_id in $CASES; do
   for arm in S0 S1; do
-    ladder=()
-    [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
     for r in $(seq 1 "$REPEATS"); do
       run_id="$arm-${case_id#questdb-}-r$r"
-      if [ -s "$OUT/$run_id.evaluate.json" ]; then  # resume: graded by an earlier invocation
-        RUNS+=("$run_id")
-        continue
+      ALL+=("$run_id")
+      [ -s "$OUT/$run_id.evaluate.json" ] && continue  # resume: graded by an earlier invocation
+      if [ "$PARALLEL" = 1 ]; then
+        run_one "$case_id" "$arm" "$r"
+      else  # bash 3.2 (macOS) has no `wait -n`, so poll the running jobs
+        while [ "$(jobs -rp | wc -l | tr -d " ")" -ge "$PARALLEL" ]; do sleep 5; done
+        run_one "$case_id" "$arm" "$r" &
       fi
-      echo "== $run_id" >&2
-      started=$SECONDS
-      if ! onoda pi run-vte "$case_id" --variant "$arm" --run-id "$run_id" \
-        --store "$OUT/store" --work-dir "$WORK/$run_id" \
-        --live --provider "$PROVIDER" --model "$MODEL" --credential-env "$CREDENTIAL_ENV" \
-        --max-requests "$MAX_REQUESTS" --max-cost-usd "$MAX_COST_USD" \
-        --enable-live-execution --orca-binary "$ORCA_HOME/orca" \
-        --orca-work-root "$ORCA_WORK" --orca-cache "$OUT/orca-cache" \
-        --orca-mpi-home "$MPI_HOME" \
-        --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
-        --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
-        ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} \
-        > "$OUT/$run_id.run.json" 2> "$OUT/$run_id.run.err"; then
-        progress "$run_id" "$started" "run failed, skipped (see $run_id.run.err)"
-        continue
-      fi
-      onoda pi evaluate-vte "$run_id" --store "$OUT/store" \
-        --evaluator-store "$OUT/evaluator" > "$OUT/$run_id.evaluate.json"
-      RUNS+=("$run_id")
-      progress "$run_id" "$started" "$(graded "$OUT/$run_id.run.json" "$OUT/$run_id.evaluate.json")"
     done
   done
 done
-
-onoda vte report "${RUNS[@]}" --store "$OUT/store" --evaluator-store "$OUT/evaluator" \
-  --arm S0 --arm S1 | tee "$OUT/report.json"
+wait
+RUNS=()
+for run_id in "${ALL[@]}"; do
+  [ -s "$OUT/$run_id.evaluate.json" ] && RUNS+=("$run_id")
+done
+[ ${#RUNS[@]} -gt 0 ] || { echo "run.sh: no run was graded" >&2; exit 1; }
+if [ "$PARALLEL" = 1 ]; then
+  onoda vte report "${RUNS[@]}" --store "$OUT/store" --evaluator-store "$OUT/evaluator" \
+    --arm S0 --arm S1 | tee "$OUT/report.json"
+else
+  onoda vte report "${RUNS[@]}" --run-stores "$OUT/runs" --arm S0 --arm S1 | tee "$OUT/report.json"
+fi
