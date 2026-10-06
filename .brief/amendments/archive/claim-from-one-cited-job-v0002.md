@@ -35,3 +35,8 @@ qv5 can be regraded without changing its records. Coverage will drop for both ar
 not told the targets' characters (vte-task-inputs gives counts per spin and irrep only), so a
 correct calculation that names a state's character differently from QUESTDB will now go
 unidentified. That is the paper's identification rule applied without the shortcut.
+
+
+---
+ratified_rev: 0002
+ratified_by: vu1n
