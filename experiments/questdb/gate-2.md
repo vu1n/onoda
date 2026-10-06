@@ -14,9 +14,9 @@ Outputs: Mac `experiments/questdb/runs/gate-1`.
 
 ## What changed since gate 1
 
-- The project memory tier and the `orca_input` description both say to set no
-  state weights: the inputs that ran set none, and ORCA averaged their roots
-  itself (memory-project@3).
+- The project memory tier and the `orca_input` description both say not to
+  hand-write state weights (memory-project@3). Without them ORCA weights each
+  block equally, not each root; the host check warns when roots end up unequal.
 
 Nothing else changed: same grader (v3, 0.3 eV), tools, model and caps.
 

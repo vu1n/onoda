@@ -96,11 +96,13 @@ end
 - Put the ground state first (`mult 1`, `irrep 0`, `nroots 1` leading each
   list). The parser rejects a table whose lowest root is not a singlet ground
   state. [orca_parser]
-- Set no state weights. The inputs above set none and ran; ORCA averaged
-  their roots itself, and the host check after each CASSCF job says whether
-  every root got the same weight. Hand-written weights in `%casscf` failed to
-  parse eight times in one run ("Last token: 0.250", "[", ","), and each
-  failure spent a job. [gate-1 S0-thioacetone-r1]
+- Do not hand-write state weights. They failed to parse eight times in one
+  run ("Last token: 0.250", "[", ","), and each failure spent a job. Without
+  weights, ORCA gives each (mult, irrep) block an equal share and splits it
+  among that block's roots, so blocks of different sizes leave the roots
+  weighted unequally, while QUESTDB's references weight every root equally.
+  The host check after each CASSCF job warns when that happens.
+  [gate-1 S0-thioacetone-r1; fixtures]
 
 ## Getting CASSCF to converge
 
