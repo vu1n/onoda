@@ -168,9 +168,9 @@ def test_stage_refuses_drifted_structure_bytes(tmp_path):
 KETENE_JOBS = {"j0001": VteJob(_out("ketene_f_target"), executed_here=True, cache_hit=False)}
 
 
-def test_supported_unique_irrep_is_identified(evaluator_store):
+def test_supported_claim_with_its_character_is_identified(evaluator_store):
     case = _case("ketene")
-    claim = _claim(case, _state(1, "B1", "6.069", "j0001"))  # no character needed
+    claim = _claim(case, _state(1, "B1", "6.069", "j0001", "pi,3s"))
     e = _grade(evaluator_store, case, claim, KETENE_JOBS, claim_ref="sha256:" + "0" * 64)
 
     assert e.evaluator == VTE_EVALUATOR and e.evaluator_version == VTE_EVALUATOR_VERSION
@@ -180,6 +180,9 @@ def test_supported_unique_irrep_is_identified(evaluator_store):
     assert e.assignments["ref.1B1(pi,3s)"] == "identified"
     assert e.metrics["ref.1B1(pi,3s).error_ev"] == "0.002"  # 6.069 - QUESTDB 6.067
     assert e.metrics["mae_ev"] == "0.002000"
+    assert e.metrics["ref.1B1(pi,3s).accuracy"] == "within"
+    assert e.metrics["accurate"] == "1" and e.metrics["tolerance_ev"] == "0.3"
+    assert e.metrics["tolerance_source"].startswith("doc://onoda/vte-energy-tolerance")
     assert e.metrics["coverage"] == "1" and e.metrics["coverage.total"] == "7"
     assert e.metrics["count.reference.missing"] == "6"
     assert e.metrics["false_success_claims"] == "0"
@@ -189,6 +192,20 @@ def test_supported_unique_irrep_is_identified(evaluator_store):
     assert e.output_refs["job.j0001"] == sha256_digest(_out("ketene_f_target"))
     assert e.reference_version == f"{case.manifest.references.sha256}:{PARSER_ID}"
     assert evaluator_store.has_record("evaluation", e.evaluation_id)
+
+
+@pytest.mark.parametrize("character", ["", "pi,pi*"])
+def test_the_only_row_of_an_irrep_still_needs_its_character(evaluator_store, character):
+    # qv5 (2026-10-05): a bare or wrong label on the lone row of its irrep was
+    # credited with states several eV from the target.
+    case = _case("ketene")
+    claim = _claim(case, _state(1, "B1", "6.069", "j0001", character))
+    e = _grade(evaluator_store, case, claim, KETENE_JOBS)
+    assert e.assignments["claim.01"] == "supported"
+    assert e.assignments["claim.01.identity"] == "unidentified"
+    assert e.metrics["claim.01.identity_reason"] == "character"
+    assert e.assignments["ref.1B1(pi,3s)"] == "unidentified"
+    assert e.metrics["coverage"] == "0" and e.metrics["accurate"] == "0"
 
 
 def test_cache_hit_supports_like_an_execution(evaluator_store):
@@ -291,6 +308,9 @@ def test_character_disambiguates_among_rows_of_one_irrep(evaluator_store):
     assert e.metrics["claim.02.reference"] == "ref.1B2(n,3pz)"
     assert e.metrics["ref.1B2(n,3s).error_ev"] == "0.217"  # 6.914 - 6.697
     assert e.metrics["ref.1B2(n,3pz).error_ev"] == "-3.186"  # 4.614 - 7.800
+    assert e.metrics["ref.1B2(n,3s).accuracy"] == "within"
+    assert e.metrics["ref.1B2(n,3pz).accuracy"] == "outside"  # identified, but the wrong state
+    assert e.metrics["coverage"] == "2" and e.metrics["accurate"] == "1"
     assert e.metrics["abs_error_sum_ev"] == "3.403"
     assert e.metrics["mae_ev"] == "1.701500"
     assert e.metrics["coverage"] == "2"
@@ -299,7 +319,7 @@ def test_character_disambiguates_among_rows_of_one_irrep(evaluator_store):
 
 def test_two_claims_on_one_row_identify_neither(evaluator_store):
     case = _case("ketene")
-    s = _state(1, "B1", "6.069", "j0001")
+    s = _state(1, "B1", "6.069", "j0001", "pi,3s")
     e = _grade(evaluator_store, case, _claim(case, s, s), KETENE_JOBS)
     assert e.assignments["claim.01.identity"] == "unidentified"
     assert e.metrics["claim.02.identity_reason"] == "conflict"

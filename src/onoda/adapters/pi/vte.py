@@ -23,9 +23,9 @@ can reach the bundle.
    exact output bytes, never from anything the agent or a reducer wrote.
 2. Identity. A `supported` claim is identified only when its cited job printed
    irreps (A71): without them the irrep is the agent's own label, which the
-   output cannot confirm. It is then identified with a reference row when its
-   (spin, irrep) picks exactly one row, or `normalize_character` of its
-   character picks exactly one among several. Rows two claims land on are
+   output cannot confirm. It is then identified with a reference row when
+   `normalize_character` of its character picks exactly one row of its
+   (spin, irrep), even when that is the only such row. Rows two claims land on are
    identified by neither. Nothing is ever paired by energy or energy order,
    so two states of one irrep with no usable character stay `unidentified`
    however well their order matches (the paper's rule).
@@ -34,7 +34,8 @@ Each reference row ends `identified`, `unidentified` (a supported claim of
 its spin and irrep exists but could not be pinned to it) or `missing`.
 `coverage` counts identified rows (a count, so it sums across cases; the
 fraction is `coverage` / `coverage.total`); `mae_ev` is over identified rows
-only and `unresolved` when there are none.
+only and `unresolved` when there are none. `accurate` counts identified rows
+within `VTE_TOLERANCE_EV` of the reference (draft decision vte-energy-tolerance).
 
 `evaluate_vte_run` grades a recorded VTE run (its jobs as `_vte_jobs` reads
 them back from the run's receipts) and `vte_report` summarizes graded runs
@@ -73,7 +74,9 @@ from onoda.science.vte import (
 from onoda.store import Store
 
 VTE_EVALUATOR = "vte-claims"
-VTE_EVALUATOR_VERSION = "2"  # 2: identity needs printed irreps (A71)
+VTE_EVALUATOR_VERSION = (
+    "3"  # 2: identity needs printed irreps (A71); 3: character always, tolerance
+)
 CLAIM_VERDICTS = ("supported", "contradicted", "unsupported")
 IDENTITY_VERDICTS = ("identified", "unidentified")
 REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
@@ -82,6 +85,9 @@ REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
 _SYNTHETIC_JOB_LABELS = frozenset({"stand-in", "not-orca", "synthetic"})
 # Parser fields whose Problems make a job's transition energies untrustworthy.
 _BLOCKING_FIELDS = frozenset({"mr_states", "casscf_converged"})
+# Context: doc://onoda/vte-energy-tolerance@draft#identified-within-tolerance — an identified row counts as accurate only within this many eV of its reference
+VTE_TOLERANCE_EV = Decimal("0.3")
+VTE_TOLERANCE_SOURCE = "doc://onoda/vte-energy-tolerance#identified-within-tolerance"
 # Mean places: the inputs print 3; the mean of n of them is rounded, not truncated.
 _MEAN_PLACES = Decimal("0.000001")
 
@@ -181,7 +187,7 @@ def _pt2_method(references: VteReferences) -> str:
     return references.method.split("/", 1)[0]
 
 
-# Context: doc://onoda/vte-grading-contract@0001#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
+# Context: doc://onoda/vte-grading-contract@0002#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
 def _grade_value(
     cs: ClaimedVte,
     jobs: Mapping[str, VteJob],
@@ -240,8 +246,8 @@ def _candidates(
     same = [r for r in rows if r.spin == cs.spin and r.irrep == irrep]
     if not same:
         return [], "no_reference"
-    if len(same) == 1:
-        return same, None
+    # A lone row of its spin and irrep still needs the character: a label alone
+    # credited states several eV from the target (qv5, 2026-10-05).
     character = normalize_character(cs.character)
     picked = [r for r in same if character and r.character == character]
     return (picked, None) if len(picked) == 1 else ([], "character")
@@ -332,6 +338,8 @@ def evaluate_vte_claims(
             assignments[key] = "identified"
             metrics[f"{key}.claim"] = tag
             metrics[f"{key}.error_ev"] = format(error, "f")
+            within = abs(error) <= VTE_TOLERANCE_EV
+            metrics[f"{key}.accuracy"] = "within" if within else "outside"
         elif (row.spin, row.irrep) in supported_identities:
             assignments[key] = "unidentified"
         else:
@@ -347,6 +355,9 @@ def evaluate_vte_claims(
         metrics[f"count.reference.{v}"] = str(ref_verdicts.count(v))
     metrics["coverage"] = str(len(errors))
     metrics["coverage.total"] = str(len(rows))
+    metrics["accurate"] = str(sum(e <= VTE_TOLERANCE_EV for e in errors))
+    metrics["tolerance_ev"] = format(VTE_TOLERANCE_EV, "f")
+    metrics["tolerance_source"] = VTE_TOLERANCE_SOURCE
     metrics["abs_error_sum_ev"] = format(sum(errors, Decimal(0)), "f")
     metrics["mae_ev"] = mean_ev(errors)
     metrics["false_success_claims"] = str(
@@ -460,9 +471,11 @@ def vte_report_runs(
     Each run is read from its own (store, evaluator store), so runs recorded in
     parallel, one store each, are pooled the same way as runs in one store.
     An arm is a run's variant. Per arm: identified reference rows over all
-    rows of its runs (`coverage`), MAE over every identified row of every run,
-    and the false-success claim count. When exactly two arms are compared (or
-    `arms` names two), `common_target_mae_ev` restricts both to targets
+    rows of its runs (`coverage`), how many of those are within the tolerance
+    (`accurate`), MAE over every identified row of every run, the false-success
+    claim count, and the runs that never reported (`runs_without_claim`, so a
+    timed-out run is not read as an agent that found nothing). When exactly
+    two arms are compared (or `arms` names two), `common_target_mae_ev` restricts both to targets
     (case, reference row) each arm identified in at least one run, averaging
     an arm's repeats per target first, so both arms are measured on the same
     states. Values are decimal text; a mean over nothing is `unresolved`.
@@ -483,10 +496,20 @@ def vte_report_runs(
         m = ev.metrics
         synthetic |= m.get("synthetic") == "true"
         a = per_arm.setdefault(
-            arm, {"runs": [], "coverage": 0, "coverage_total": 0, "false_success_claims": 0}
+            arm,
+            {
+                "runs": [],
+                "coverage": 0,
+                "coverage_total": 0,
+                "accurate": 0,
+                "false_success_claims": 0,
+                "runs_without_claim": 0,
+            },
         )
         a["runs"].append(run_id)
         a["coverage"] += int(m["coverage"])
+        a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3
+        a["runs_without_claim"] += m["claim.present"] == "false"  # never reported, e.g. timed out
         a["coverage_total"] += int(m["coverage.total"])
         a["false_success_claims"] += int(m["false_success_claims"])
         by_target = errors.setdefault(arm, {})

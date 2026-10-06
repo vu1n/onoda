@@ -15,7 +15,7 @@ carries: [A58, A63, A64, A71, A73]  # rows of the former docs/ASSUMPTIONS.md reg
 <!-- brief:anchor claim-from-one-cited-job -->
 ## Grade each claimed state from the one job it cites, and identify it only by printed irrep
 
-A reported excitation energy is `supported` only when the cited job, executed or cache-hit in this run, prints that value for a state of the claimed spin (and irrep, when printed) in its transition table. Energies subtracted across two jobs are never accepted. A supported claim identifies a reference row only if that job printed irreps (ran with symmetry) and (spin, irrep), or the normalized character among several, picks exactly one row. Both arms are told this contract in the task instruction.
+A reported excitation energy is `supported` only when the cited job, executed or cache-hit in this run, prints that value for a state of the claimed spin (and irrep, when printed) in its transition table. Energies subtracted across two jobs are never accepted. A supported claim identifies a reference row only if that job printed irreps (ran with symmetry) and its normalized character picks exactly one row of the claimed (spin, irrep), even when that is the only such row. The grader is evaluator version 3. Both arms are told this contract in the task instruction.
 
 **Why.** Without one cited job the grader cannot check the number came from a converged calculation of that state; without a printed irrep the identification rests on the agent's own label.
 
@@ -23,6 +23,9 @@ A reported excitation energy is `supported` only when the cited job, executed or
 - `_grade_value` contradicts a value not printed for that spin/irrep in the cited job; a job this run did not execute or hit is `unsupported`; a parser problem in `mr_states`/`casscf_converged` is `unsupported`; a CASSCF-only match is `contradicted` (`casscf_value`).
 - A job without printed irreps makes the claim `unidentified` with reason `irrep_not_printed` (A71).
 - Rows that two claims land on are identified by neither; nothing is paired by energy order.
+- `_candidates` requires the character to pick the row, even for the only row of its spin and irrep. A bare or different label is `unidentified` with reason `character`.
+- Each identified row also carries an accuracy verdict against the draft decision vte-energy-tolerance. `vte report` adds `accurate` and `runs_without_claim` per arm.
+- `VTE_INSTRUCTION` tells both arms that a state is matched by spin, irrep and character together.
 - `VTE_INSTRUCTION` states the contract identically for both arms (A73).
 - `vte report` pools runs per A63 and declares no winner.
 - Irreps are compared after `normalize_irrep` (prime glyphs only); no per-molecule B1/B2 remapping exists (A64).

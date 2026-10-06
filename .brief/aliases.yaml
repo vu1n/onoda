@@ -25,6 +25,6 @@ record-integrity:
 replay-fails-closed:
   latest: 1
 vte-grading-contract:
-  latest: 1
+  latest: 2
 vte-task-inputs:
   latest: 1

@@ -84,7 +84,7 @@ DEFAULT_INSTRUCTION = (
     "output lists, copying each value and unit exactly as printed."
 )
 
-# Context: doc://onoda/vte-grading-contract@0001#claim-from-one-cited-job — both arms are told the grading contract in the same words
+# Context: doc://onoda/vte-grading-contract@0002#claim-from-one-cited-job — both arms are told the grading contract in the same words
 VTE_INSTRUCTION = (
     "Read the molecule and its target excited states with structure, write SA-CASSCF/SC-NEVPT2 "
     "ORCA inputs and run them with orca_submit, then call report_vtes once with each target "
@@ -93,7 +93,9 @@ VTE_INSTRUCTION = (
     "A value counts only if that one job prints it in its SC-NEVPT2 transition energy table "
     "with the state's irrep: run state-averaged jobs (the ground state and the excited roots "
     "of one spin together) with point-group symmetry on, and do not report differences of "
-    "total energies from separate jobs (A73)."
+    "total energies from separate jobs (A73). A state is matched to a target by its spin, "
+    "irrep and character together, so give the character you assigned from the active "
+    "orbitals as an orbital pair (for example n,pi*)."
 )
 
 # The eight QUESTDB dev cases (A62); dev-only, never part of `cases/` or a split.
