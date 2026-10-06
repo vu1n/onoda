@@ -120,6 +120,9 @@ export function buildOrcaInput(p: InputParams, atoms: string[], gbwJobs: Readonl
 			`  mult ${list((r) => r.mult)}`,
 			`  irrep ${list((r) => r.irrep)}`,
 			`  nroots ${list((r) => r.nroots)}`,
+			// ORCA's default weights each block equally, not each root; bweight in the input's block
+			// order (ORCA 6.1.1 applies it so) gives every root the same weight, as QUESTDB's references do.
+			...(roots.length > 1 ? [`  bweight = ${list((r) => r.nroots)}`] : []),
 			"  trafostep ri",
 			"  orbstep TRAH",
 			`  maxiter ${p.maxiter ?? 150}`,

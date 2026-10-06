@@ -68,7 +68,8 @@ end
 ```
 
 Target job, state-averaged CASSCF with SC-NEVPT2, one block per irrep (comma
-lists of equal length: `mult`, `irrep`, `nroots`):
+lists of equal length: `mult`, `irrep`, `nroots`, and `bweight` repeating
+`nroots`):
 
 ```
 ! aug-cc-pVTZ RIJCOSX AutoAux TightSCF UseSym MORead
@@ -81,6 +82,7 @@ lists of equal length: `mult`, `irrep`, `nroots`):
   mult 1,1
   irrep 0,...
   nroots 1,...
+  bweight = 1,...
   trafostep ri
   orbstep TRAH
   maxiter 150
@@ -96,13 +98,16 @@ end
 - Put the ground state first (`mult 1`, `irrep 0`, `nroots 1` leading each
   list). The parser rejects a table whose lowest root is not a singlet ground
   state. [orca_parser]
-- Do not hand-write state weights. They failed to parse eight times in one
-  run ("Last token: 0.250", "[", ","), and each failure spent a job. Without
-  weights, ORCA gives each (mult, irrep) block an equal share and splits it
-  among that block's roots, so blocks of different sizes leave the roots
-  weighted unequally, while QUESTDB's references weight every root equally.
-  The host check after each CASSCF job warns when that happens.
-  [gate-1 S0-thioacetone-r1; fixtures]
+- Weight every root equally with one line in `%casscf`: `bweight = ` the
+  `nroots` list, in the same order (e.g. `nroots 1,2,1` takes
+  `bweight = 1,2,1`). Without it ORCA gives each block an equal share and
+  splits it among that block's roots, so blocks of different sizes leave the
+  roots unequal, while QUESTDB's references weight every root equally.
+  Per-root `weights[0] = ...` lines do not fix that, and hand-written weights
+  of other shapes failed to parse eight times in one run ("Last token: 0.250",
+  "[", ","). `orca_input` writes the `bweight` line itself. The host check
+  after each CASSCF job says whether every root got the same weight.
+  [gate-1 S0-thioacetone-r1; host test, ORCA 6.1.1]
 
 ## Getting CASSCF to converge
 

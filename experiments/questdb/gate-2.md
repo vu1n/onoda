@@ -14,11 +14,14 @@ Outputs: Mac `experiments/questdb/runs/gate-1`.
 
 ## What changed since gate 1
 
-- The project memory tier and the `orca_input` description both say not to
-  hand-write state weights (memory-project@3). Without them ORCA weights each
-  block equally, not each root; the host check warns when roots end up unequal.
+- Every root gets the same weight: `orca_input` writes `bweight = ` the `nroots`
+  list whenever a job has several root blocks, and the project memory tier gives
+  the same one-line rule (memory-project@3). Without it ORCA weights each block
+  equally, not each root. A host test on ORCA 6.1.1 (`weights-test/run.sh`,
+  formaldehyde, plus a three-block UseSym case) showed `bweight` parses and gives
+  equal per-root weights, and that per-root `weights[0]` lines do not.
 
-Nothing else changed: same grader (v3, 0.3 eV), tools, model and caps.
+Nothing else changed: same grader (v3, 0.3 eV), model and caps, and the tools differ only by that line.
 
 ## Run
 

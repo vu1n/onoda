@@ -522,7 +522,7 @@ def test_orca_input_writes_inputs_that_orca_submit_takes_without_spending_a_job(
         "! aug-cc-pVTZ RIJCOSX AutoAux TightSCF UseSym MORead\n"
         '%moinp "j0001.gbw"\n%maxcore 2000\n%pal nprocs 4 end\n'
         "%scf\n  rotate\n    {7, 9, 90}\n  end\nend\n"
-        "%casscf\n  nel 6\n  norb 5\n  mult 1,1\n  irrep 0,1\n  nroots 1,2\n"
+        "%casscf\n  nel 6\n  norb 5\n  mult 1,1\n  irrep 0,1\n  nroots 1,2\n  bweight = 1,2\n"
         "  trafostep ri\n  orbstep TRAH\n  maxiter 150\n  PTMethod SC_NEVPT2\nend\n"
         f"* xyz 0 1\n{ATOM_LINES}\n*\n"
     ) in built
