@@ -51,6 +51,7 @@ export const TOOL_REPORT = "report_states";
 // VTE tasks (vte_contract.py, A57-A59): the agent runs its own jobs through the host broker.
 export const TOOL_STRUCTURE = "structure";
 export const TOOL_ORCA_SUBMIT = "orca_submit";
+export const TOOL_ORCA_INPUT = "orca_input";
 export const TOOL_ORCA_OUTPUT = "orca_output";
 export const TOOL_REPORT_VTE = "report_vtes";
 export const VTE_TASK_SCHEMA = "onoda.pi-vte-task/1";
