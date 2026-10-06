@@ -23,8 +23,7 @@ alone could not tell a correct assignment from a wrong state under the right lab
 match-by-identity requires a numeric comparison to pass only against a tolerance that names the
 decision that justified it. This is that decision.
 
-**The number.** 0.3 eV is a placeholder until the owner picks a value (the options offered were 0.2,
-0.3 and 0.5 eV). The intent is that it sits above the spread between an agent's own SC-NEVPT2
+**The number.** Owner, 2026-10-06, choosing among 0.2, 0.3 and 0.5 eV: 0.3 eV. The intent is that it sits above the spread between an agent's own SC-NEVPT2
 setup (basis, active space, state averaging) and QUESTDB's, and well below the gap between
 different states of one molecule. No reference or paper fixes it. It is not a chemistry claim.
 
