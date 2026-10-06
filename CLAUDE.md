@@ -29,7 +29,9 @@ first agent adapter; Prime is an optional comparison arm).
   own ORCA inputs; `orca_submit` reaches the host broker
   (`science/orca_broker.py`) over a socket in the Pi work dir, so keep
   `--work-dir` short (AF_UNIX, 104 bytes on macOS). `onoda pi evaluate-vte`
-  grades by state identity, `onoda vte report` summarizes arms; each
+  grades by state identity, `onoda vte report` summarizes arms, `onoda vte audit` counts
+  what the grader still credits when known-wrong variants of real claims are
+  graded (a throwaway store; `label_swap` is measured, not failed); each
   broker reply carries advisory ladder checks (`science/orca_checks.py`, A66, A68)
   that nothing grades; `onoda vte shadow` records what a System One model
   (Jev, Clef) would decide per job, beside the grade (A67);

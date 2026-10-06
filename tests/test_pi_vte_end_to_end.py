@@ -12,6 +12,7 @@ dev-only QUESTDB ketene case; its references are read by the grader only.
 
 from __future__ import annotations
 
+import json
 import shutil
 import stat
 import sys
@@ -422,6 +423,12 @@ def test_cli_run_evaluate_report(short, capsys):
     out = capsys.readouterr().out
     assert '"common_targets": [\n    "questdb-ketene:ref.1B1(pi,3s)"' in out
     assert '"synthetic": true' in out
+
+    audit = ["vte", "audit", "cli-S0", "cli-S1", *common]
+    assert main(audit) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert found["states"] == 2 and found["false_accepts"] == 0
+    assert found["variants"]["casscf_not_converged"] == {"graded": 2, "accepted": 0}
 
     # Without the live-execution switch nothing runs (every setting defaults off).
     off = ["pi", "run-vte", CASE_ID, "--variant", "S0", "--run-id", "off", "--work-dir",

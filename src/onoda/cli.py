@@ -533,6 +533,24 @@ def cmd_pi_evaluate_vte(a) -> Any:
     }
 
 
+def cmd_vte_audit(a) -> Any:
+    from onoda.adapters.pi.vte_audit import audit_runs
+    from onoda.science.vte import load_vte_references
+
+    if (a.store is None) == (a.run_stores is None):
+        raise OnodaError("give exactly one of --store and --run-stores")
+
+    def store_for(run_id: str) -> Store:
+        return _store(a.store or str(Path(a.run_stores) / run_id / "store"))
+
+    def case_for(case_id: str):
+        case = _vte_case(case_id, a.cases_root)
+        return case, load_vte_references(case)
+
+    report = audit_runs(((store_for(r), r) for r in a.run_ids), case_for)
+    return report.as_dict()
+
+
 def cmd_vte_report(a) -> Any:
     from onoda.adapters.pi.vte import vte_report
 
@@ -1309,6 +1327,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--arm", action="append", help="compare these two arms (repeat once); default: all"
     )
     vr.set_defaults(func=cmd_vte_report)
+    va = vt.add_parser(
+        "audit",
+        help="grade known-wrong variants of each run's supported claims and count what the "
+        "grader still credits; writes nothing to the stores",
+    )
+    va.add_argument("run_ids", nargs="+")
+    va.add_argument("--store", help="the runs' store")
+    va.add_argument("--run-stores", help="parallel layout: DIR/<run>/store per run")
+    va.add_argument("--cases-root", help="VTE cases (default cases-dev/questdb)")
+    va.set_defaults(func=cmd_vte_audit)
     vs = vt.add_parser(
         "shadow",
         help="ask a System One model (Jev, Clef) which ladder rule each job of a run calls for; "
