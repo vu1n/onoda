@@ -1,4 +1,4 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@2)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@3)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
@@ -96,6 +96,11 @@ end
 - Put the ground state first (`mult 1`, `irrep 0`, `nroots 1` leading each
   list). The parser rejects a table whose lowest root is not a singlet ground
   state. [orca_parser]
+- Set no state weights. The inputs above set none and ran; ORCA averaged
+  their roots itself, and the host check after each CASSCF job says whether
+  every root got the same weight. Hand-written weights in `%casscf` failed to
+  parse eight times in one run ("Last token: 0.250", "[", ","), and each
+  failure spent a job. [gate-1 S0-thioacetone-r1]
 
 ## Getting CASSCF to converge
 
