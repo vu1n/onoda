@@ -23,7 +23,9 @@
 # experiments/questdb/memory, `none` for no memory),
 # MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (3600 per
 # run; one agent shell command is capped separately, A72), REPORT_REMINDER (off;
-# 1 tells an agent that stops without report_vtes, once, to report). Every ORCA job runs
+# 1 tells an agent that stops without report_vtes, once, to report), ONLY_RUNS (run
+# ids such as "S1-thioacetone-r1", space-separated: run only those, e.g. to rerun
+# one run into a fresh WORK). Every ORCA job runs
 # in the job sandbox (A65), which sees ORCA_HOME, MPI_HOME and its own job dir
 # only, so none of these may sit inside ORCA_HOME or MPI_HOME, and nothing here
 # is written inside the repository.
@@ -128,6 +130,9 @@ for case_id in $CASES; do
   for arm in S0 S1; do
     for r in $(seq 1 "$REPEATS"); do
       run_id="$arm-${case_id#questdb-}-r$r"
+      if [ -n "${ONLY_RUNS:-}" ]; then
+        case " $ONLY_RUNS " in *" $run_id "*) ;; *) continue;; esac
+      fi
       ALL+=("$run_id")
       [ -s "$OUT/$run_id.evaluate.json" ] && continue  # resume: graded by an earlier invocation
       if [ "$PARALLEL" = 1 ]; then
