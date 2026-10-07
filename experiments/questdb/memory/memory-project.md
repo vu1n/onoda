@@ -1,4 +1,4 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@4)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@5)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
@@ -115,10 +115,13 @@ end
   `orbstep TRAH` took 26 min and stopped at a solution 0.12 Eh higher. TRAH
   also landed acetone on a CASSCF solution different from QUESTDB's.
   [gate-2 S0-thioacetone-r1 j0006, host rerun; acetone_g_trah]
-- Use `orbstep TRAH` (orca_input `trah`) only when the default step fails:
-  in aug-cc-pVTZ it failed to converge ethylene's small CASSCF after 75
-  macro-iterations, while the job still ended normally, and TRAH converged it.
-  [ethylene_nevpt2_np4]
+- When the default step fails, rerun the same input with `orbstep TRAH`
+  (orca_input `trah`) from the same starting orbitals. Read the job reply's
+  summary for this: a CASSCF that did not converge usually still ends
+  normally. In aug-cc-pVTZ the default step failed to converge ethylene's
+  small CASSCF after 75 macro-iterations, and TRAH converged it; 8 of 88 jobs
+  in one gate run did not converge with the default step.
+  [ethylene_nevpt2_np4; gate-3]
 - Build starting orbitals in steps and read them with `MORead`, attaching the
   earlier job's `.gbw`: an RHF or valence CASSCF in cc-pVDZ, then the same
   active space in aug-cc-pVTZ, then the state-averaged job. [ketene a-f, acetone a-g]
