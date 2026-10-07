@@ -20,3 +20,4 @@ broker-owns-orca conforms: orca_input only writes input text in the Pi extension
 immutable-single-writer-records conforms: spool.ts only gains the orca_input tool name; orca_input writes no record bytes or events of its own, and its tool result is spooled by the recorder like any other
 live-settings-explicit conforms: run.sh adds PARALLEL (default 1) to run several runs at once, each with its own store and ORCA cache; every live setting is still explicit and ORCA execution still needs ENABLE_LIVE_EXECUTION=1
 broker-owns-orca conforms: only the orca_input description changes (it sets no state weights); ORCA still runs only through orca_submit and the host broker
+broker-owns-orca conforms: only orca_input changes (a trah option and its description); it still runs nothing, and ORCA starts only through orca_submit and the host broker with one max_executions
