@@ -22,7 +22,8 @@
 # MEMORY_DIR (memory-*.md tiers given to both arms, A75; default
 # experiments/questdb/memory, `none` for no memory),
 # MAX_EXECUTIONS (24), MAX_WALL_SECONDS (1800 per ORCA job), TIMEOUT (3600 per
-# run; one agent shell command is capped separately, A72). Every ORCA job runs
+# run; one agent shell command is capped separately, A72), REPORT_REMINDER (off;
+# 1 tells an agent that stops without report_vtes, once, to report). Every ORCA job runs
 # in the job sandbox (A65), which sees ORCA_HOME, MPI_HOME and its own job dir
 # only, so none of these may sit inside ORCA_HOME or MPI_HOME, and nothing here
 # is written inside the repository.
@@ -96,10 +97,11 @@ store_args() {  # run id -> the run's agent store, evaluator store and ORCA cach
   fi
 }
 run_one() {  # case id, arm, repeat
-  local case_id=$1 arm=$2 r=$3 run_id store evaluator cache started ladder=()
+  local case_id=$1 arm=$2 r=$3 run_id store evaluator cache started ladder=() reminder=()
   run_id="$arm-${case_id#questdb-}-r$r"
   read -r store evaluator cache <<< "$(store_args "$run_id")"
   [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
+  [ "${REPORT_REMINDER:-0}" = 1 ] && reminder=(--report-reminder)
   echo "== $run_id" >&2
   started=$SECONDS
   mkdir -p "$(dirname "$store")"
@@ -112,7 +114,7 @@ run_one() {  # case id, arm, repeat
     --orca-mpi-home "$MPI_HOME" \
     --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
     --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
-    ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} \
+    ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} ${reminder[@]+"${reminder[@]}"} \
     > "$OUT/$run_id.run.json" 2> "$OUT/$run_id.run.err"; then
     progress "$run_id" "$started" "run failed, skipped (see $run_id.run.err)"
     return 0

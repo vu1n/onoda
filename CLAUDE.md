@@ -37,7 +37,9 @@ first agent adapter; Prime is an optional comparison arm).
   (Jev, Clef) would decide per job, beside the grade (A67);
   `onoda decide tune` hill-climbs that question wording with GEPA against
   labelled examples (`onoda vte shadow-dataset` labels jobs from the grader, A70);
-  `experiments/questdb/run.sh` is the S0-vs-S1 experiment on the Mac. Cases
+  `experiments/questdb/run.sh` is the S0-vs-S1 experiment on the Mac
+  (`REPORT_REMINDER=1` / `--report-reminder` gives an agent that stops without
+  `report_vtes` one hidden reminder, recorded in the run's config). Cases
   are `cases-dev/questdb/*/*.vte.yaml`; their `references.json` is
   evaluator-only.
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;

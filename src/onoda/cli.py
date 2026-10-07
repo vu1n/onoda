@@ -453,6 +453,7 @@ def cmd_pi_run_vte(a) -> Any:
         timeout_s=a.timeout,
         sandbox=detect_sandbox() if (a.live or a.sandbox) else None,
         orca_mpi_home=Path(a.orca_mpi_home) if a.orca_mpi_home else None,
+        report_reminder=a.report_reminder,
         limits=BrokerLimits(
             max_nprocs=a.orca_max_nprocs,
             max_maxcore_mb=a.orca_max_maxcore_mb,
@@ -1239,6 +1240,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="orca_submit calls per run, cache hits included (A59)",
     )
     rv.add_argument("--orca-cache", help="shared broker cache directory (A59)")
+    rv.add_argument(
+        "--report-reminder",
+        action="store_true",
+        help="tell the agent once to call report_vtes if it stops without a claim",
+    )
     rv.add_argument("--orca-mpi-home", help="MPI prefix the ORCA job sandbox exposes (A65)")
     rv.add_argument(
         "--orca-max-nprocs",

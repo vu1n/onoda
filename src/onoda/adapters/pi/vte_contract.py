@@ -80,6 +80,8 @@ class VteTaskBundle(_Frozen):
     ladder_sha256: str | None = None
     synthetic_ladder: bool = False
     max_executions: int = Field(DEFAULT_MAX_EXECUTIONS, gt=0)
+    # One hidden "call report_vtes now" message when the agent stops without a claim (both arms).
+    report_reminder: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 

@@ -116,7 +116,9 @@ def broker():
     shutil.rmtree(sock_dir)
 
 
-def stage_vte_bundle(dest: Path, *, ladder: bool, max_executions: int) -> V.VteTaskBundle:
+def stage_vte_bundle(
+    dest: Path, *, ladder: bool, max_executions: int, report_reminder: bool = False
+) -> V.VteTaskBundle:
     (dest / "structure").mkdir(parents=True)
     (dest / "structure" / "structure.xyz").write_text(STRUCTURE)
     if ladder:
@@ -133,6 +135,7 @@ def stage_vte_bundle(dest: Path, *, ladder: bool, max_executions: int) -> V.VteT
         ladder_sha256=sha(SYNTHETIC_LADDER.encode()) if ladder else None,
         synthetic_ladder=ladder,
         max_executions=max_executions,
+        report_reminder=report_reminder,
     )
     (dest / "task.json").write_text(bundle.model_dump_json(by_alias=True))
     return bundle
@@ -145,12 +148,18 @@ def run_vte(
     *,
     variant: str = "S0",
     max_executions: int | None = 3,
+    report_reminder: bool = False,
 ) -> Run:
     """`run_pi` for a VTE bundle; `max_executions=None` leaves the policy default."""
     v = C.VARIANTS[variant]
     for d in ("ws", "agent", "sessions", "spool", "home", "bundle"):
         (root / d).mkdir(parents=True)
-    bundle = stage_vte_bundle(root / "bundle", ladder=v.ladder, max_executions=max_executions or 1)
+    bundle = stage_vte_bundle(
+        root / "bundle",
+        ladder=v.ladder,
+        max_executions=max_executions or 1,
+        report_reminder=report_reminder,
+    )
     sol_pi = v.sol_pi_config(
         reducer_provider=C.SCRIPTED_PROVIDER, reducer_model=C.SCRIPTED_REDUCER_MODEL
     )
@@ -302,6 +311,42 @@ def test_vte_run_submits_spools_execute_and_reports_a_claim(tmp_path, broker):
     assert {t["name"] for t in first["tools"]} >= set(V.VTE_TASK_TOOLS)
     assert not {t["name"] for t in first["tools"]} & set(C.TASK_TOOLS)
     assert "onoda-vte-ladder-marker" in first["systemPrompt"]  # S1 gets the ladder
+
+
+REMINDER_MARK = "You stopped without calling report_vtes"
+
+
+def test_an_agent_that_stops_without_a_claim_is_reminded_once(tmp_path, broker):
+    """With `report_reminder`, a settle without report_vtes sends one hidden message
+    and the run goes on; it is spooled in the next request like every other byte."""
+    turns = [
+        turn(call("x1", "orca_submit", input=INPUT)),
+        turn(text("Synthetic scripted stop without a claim.")),
+        turn(call("r1", "report_vtes", states=[vte_state("j0001")])),
+        turn(text("Synthetic scripted run complete.")),
+    ]
+    run = run_vte(tmp_path, turns, broker, report_reminder=True)
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    assert len(run.of("task.claim")) == 1
+    requests = run.of("provider.request")
+    assert len(requests) == 4
+    assert REMINDER_MARK not in run.request_text(1)
+    assert REMINDER_MARK in run.request_text(2)
+
+
+@pytest.mark.parametrize("reminder", [False, True])
+def test_no_reminder_when_off_or_after_a_claim(tmp_path, broker, reminder):
+    """Without the setting the run ends at the first settle; with it, a run that
+    already reported is not reminded."""
+    turns = (
+        [turn(call("r1", "report_vtes", states=[])), turn(text("Synthetic scripted run complete."))]
+        if reminder
+        else [turn(text("Synthetic scripted stop without a claim."))]
+    )
+    run = run_vte(tmp_path, turns, broker, report_reminder=reminder)
+    assert run.lines[-1].status == "settled", run.proc.stderr.decode()
+    assert len(run.of("provider.request")) == len(turns)
+    assert all(REMINDER_MARK not in run.request_text(i) for i in range(len(turns)))
 
 
 def test_broker_checks_are_shown_before_the_output_tail(tmp_path, broker):

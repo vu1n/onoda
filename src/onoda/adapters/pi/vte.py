@@ -119,6 +119,7 @@ def stage_vte_bundle(
     ladder: bytes | None = None,
     synthetic_ladder: bool = False,
     max_executions: int = DEFAULT_MAX_EXECUTIONS,
+    report_reminder: bool = False,
 ) -> VteTaskBundle:
     """Write a `VteTaskBundle` for `case` under `dest`. `dest` must be empty or absent.
 
@@ -151,6 +152,7 @@ def stage_vte_bundle(
         ladder_sha256=sha256_digest(ladder) if ladder is not None else None,
         synthetic_ladder=synthetic_ladder,
         max_executions=max_executions,
+        report_reminder=report_reminder,
     )
     if dest.exists() and any(dest.iterdir()):
         raise OnodaError(f"stage destination {dest} is not empty")
@@ -174,7 +176,10 @@ def stage_vte_bundle(
             path.write_bytes(docs[name])
     if ladder is not None:
         (dest / "ladder.md").write_bytes(ladder)
-    (dest / "task.json").write_bytes(canonical_bytes(bundle.model_dump(mode="json", by_alias=True)))
+    task_json = bundle.model_dump(mode="json", by_alias=True)
+    if not bundle.report_reminder:
+        del task_json["report_reminder"]  # bundles without the reminder keep their earlier bytes
+    (dest / "task.json").write_bytes(canonical_bytes(task_json))
     return bundle
 
 
