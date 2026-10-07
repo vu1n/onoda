@@ -35,8 +35,10 @@ methylenecyclopropene and cyclopropenone, two arms, two repeats each.
 ## Rules fixed before the run
 
 - A run that ends with status `provider-error` is rerun once with the same settings
-  into a separate OUT folder, and the rerun replaces it in the results; the
-  original keeps its record. A second `provider-error` for the same run is reported
+  into a separate folder, and the rerun replaces it in the results; the original
+  keeps its record. The rerun is the command above with only these changed, so it
+  runs that one run and nothing else (for example S1-thioacetone-r1):
+  `WORK=/tmp/qs1r ONLY_RUNS="S1-thioacetone-r1"`. A second `provider-error` for the same run is reported
   as a run without a claim. No other run is rerun: a run that hits the 2-hour limit
   or stops without a claim stays as it is.
 - Nothing about the run (code, memory tiers, caps, model, cases) changes once it
