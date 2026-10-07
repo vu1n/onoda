@@ -495,12 +495,14 @@ def test_orca_input_writes_inputs_that_orca_submit_takes_without_spending_a_job(
         "nel": 6,
         "norb": 5,
         "roots": [{"mult": 1, "irrep": 0, "nroots": 1}, {"mult": 1, "irrep": 1, "nroots": 2}],
+        "trah": True,
     }
     turns = [
         turn(call("b1", "orca_input", method="rhf", basis="cc-pVDZ")),
         turn(call("x1", "orca_submit", input="! RHF cc-pVDZ synthetic\n")),
         turn(
             call("b2", "orca_input", **target),
+            call("b3", "orca_input", **{**target, "trah": False}),
             call("e1", "orca_input", **{**target, "read_orbitals": "j0009"}),
             call("e2", "orca_input", **{**target, "roots": [{"mult": 1, "irrep": 1, "nroots": 1}]}),
             call("e3", "orca_input", method="casscf", basis="cc-pVDZ"),
@@ -526,6 +528,7 @@ def test_orca_input_writes_inputs_that_orca_submit_takes_without_spending_a_job(
         "  trafostep ri\n  orbstep TRAH\n  maxiter 150\n  PTMethod SC_NEVPT2\nend\n"
         f"* xyz 0 1\n{ATOM_LINES}\n*\n"
     ) in built
+    assert "orbstep" not in shown(run, "b3")  # TRAH only when asked for
     for call_id, why in [
         ("e1", "no job"),
         ("e2", "ground state first"),

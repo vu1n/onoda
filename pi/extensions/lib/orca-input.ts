@@ -34,6 +34,7 @@ export interface InputParams {
 	norb?: number;
 	roots?: RootBlock[]; // CASSCF/NEVPT2 blocks, ground state first; default one singlet root of irrep 0
 	maxiter?: number; // %casscf maxiter, default 150
+	trah?: boolean; // %casscf orbstep TRAH, default off: ORCA's default step converged faster and lower on thioacetone
 }
 
 export interface BuiltInput {
@@ -124,7 +125,7 @@ export function buildOrcaInput(p: InputParams, atoms: string[], gbwJobs: Readonl
 			// order (ORCA 6.1.1 applies it so) gives every root the same weight, as QUESTDB's references do.
 			...(roots.length > 1 ? [`  bweight = ${list((r) => r.nroots)}`] : []),
 			"  trafostep ri",
-			"  orbstep TRAH",
+			...(p.trah ? ["  orbstep TRAH"] : []),
 			`  maxiter ${p.maxiter ?? 150}`,
 			...(p.method === "nevpt2" ? ["  PTMethod SC_NEVPT2"] : []),
 			"end",

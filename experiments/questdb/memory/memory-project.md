@@ -1,4 +1,4 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@3)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@4)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
@@ -84,7 +84,6 @@ lists of equal length: `mult`, `irrep`, `nroots`, and `bweight` repeating
   nroots 1,...
   bweight = 1,...
   trafostep ri
-  orbstep TRAH
   maxiter 150
   PTMethod SC_NEVPT2
 end
@@ -111,9 +110,15 @@ end
 
 ## Getting CASSCF to converge
 
-- In aug-cc-pVTZ, ORCA's default orbital step failed to converge a small
-  CASSCF after 75 macro-iterations, and the job still ended normally.
-  `orbstep TRAH` in `%casscf` converged it. [ethylene_nevpt2_np4]
+- Start with ORCA's default orbital step. On thioacetone, a one-root
+  CASSCF(6,4) in aug-cc-pVTZ converged in 93 s with it; the same input with
+  `orbstep TRAH` took 26 min and stopped at a solution 0.12 Eh higher. TRAH
+  also landed acetone on a CASSCF solution different from QUESTDB's.
+  [gate-2 S0-thioacetone-r1 j0006, host rerun; acetone_g_trah]
+- Use `orbstep TRAH` (orca_input `trah`) only when the default step fails:
+  in aug-cc-pVTZ it failed to converge ethylene's small CASSCF after 75
+  macro-iterations, while the job still ended normally, and TRAH converged it.
+  [ethylene_nevpt2_np4]
 - Build starting orbitals in steps and read them with `MORead`, attaching the
   earlier job's `.gbw`: an RHF or valence CASSCF in cc-pVDZ, then the same
   active space in aug-cc-pVTZ, then the state-averaged job. [ketene a-f, acetone a-g]
@@ -127,6 +132,17 @@ end
   [acetone_g_trah]
 - A target with Rydberg character (3s, 3p) needed one more active orbital than
   the valence active space. [ketene_f_target]
+- Each (mult, irrep) block needs active orbitals that can make that symmetry.
+  In one job the active orbitals read from an earlier job were three B1 and
+  two B2 with no A1, so a B1 block had no configurations; ORCA stopped at once
+  with "NORB==0 is invalid" and still exited 0. Check the host's "active
+  orbitals per irrep" line before asking for a block, and bring in the
+  orbital the state needs (for a 3s Rydberg state, the 3s). Turning off `UseSym` avoids the error only by dropping the
+  irreps, and the table then has no symmetry labels to grade.
+  [gate-2 S1-ketene-r1 j0012, host rerun]
+- ORCA has no per-irrep count of active orbitals inside `%casscf` (a nested
+  `nact` block failed: "Unknown identifier in CASSCF block"). Choose the active
+  orbitals with `MORead` and `rotate`. [gate-2 S1-ketene-r1 j0008, j0014]
 
 ## Reporting
 
