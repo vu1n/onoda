@@ -556,7 +556,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 		description:
 			"Write an ORCA input from the choices that matter (method, basis, active space, roots per irrep, orbitals " +
 			"to read and swap) in the syntax that runs on this host: the geometry inline from the structure, " +
-			`%pal nprocs ${INPUT_NPROCS} and %maxcore within the caps, every % block closed, TightSCF, and for CASSCF trafostep ri ` +
+			`%pal nprocs ${INPUT_NPROCS} and %maxcore within the caps, every % block closed, TightSCF, and for CASSCF trafostep ri when ri is on ` +
 			"(orbstep TRAH only with trah). Runs nothing and costs no job: pass the returned input and attach to orca_submit " +
 			"(you may edit the text first). method nevpt2 is state-averaged CASSCF with SC-NEVPT2. roots are blocks " +
 			"of (mult, irrep, nroots), irrep as ORCA's number for the point group, ground state first (mult 1, irrep 0). " +

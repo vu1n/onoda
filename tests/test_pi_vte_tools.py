@@ -503,6 +503,7 @@ def test_orca_input_writes_inputs_that_orca_submit_takes_without_spending_a_job(
         turn(
             call("b2", "orca_input", **target),
             call("b3", "orca_input", **{**target, "trah": False}),
+            call("b4", "orca_input", **{**target, "ri": False}),
             call("e1", "orca_input", **{**target, "read_orbitals": "j0009"}),
             call("e2", "orca_input", **{**target, "roots": [{"mult": 1, "irrep": 1, "nroots": 1}]}),
             call("e3", "orca_input", method="casscf", basis="cc-pVDZ"),
@@ -529,6 +530,8 @@ def test_orca_input_writes_inputs_that_orca_submit_takes_without_spending_a_job(
         f"* xyz 0 1\n{ATOM_LINES}\n*\n"
     ) in built
     assert "orbstep" not in shown(run, "b3")  # TRAH only when asked for
+    no_ri = shown(run, "b4")
+    assert "RIJCOSX" not in no_ri and "trafostep" not in no_ri  # trafostep ri needs the RI basis
     for call_id, why in [
         ("e1", "no job"),
         ("e2", "ground state first"),
