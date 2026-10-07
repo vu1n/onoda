@@ -44,6 +44,7 @@ per arm (A63).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
@@ -426,18 +427,29 @@ def _vte_jobs(store: Store, run_id: str) -> dict[str, VteJob]:
 _FAILED_JOB_FIELDS = frozenset({"termination", "casscf_converged"})
 
 
-def vte_job_counts(store: Store, run_id: str) -> tuple[int, int]:
-    """(jobs, failed jobs) of a VTE run: every broker job it named, cache hits included."""
-    jobs = failed = 0
+class VteJobCounts(NamedTuple):
+    jobs: int
+    failed: int
+    rejected: int  # failed before any SCF or CASSCF iteration: ORCA refused the input
+
+
+def vte_job_counts(store: Store, run_id: str) -> VteJobCounts:
+    """Jobs, failed jobs and rejected inputs of a VTE run: every broker job it named.
+
+    Cache hits are included.
+    """
+    jobs = failed = rejected = 0
     for event in store.events(run_id):
         if event.type != "invocation.committed":
             continue
         receipt = store.receipt(event.payload["invocation_id"])
         if receipt.metadata.get("job_id") is None or "log" not in receipt.outputs:
             continue
+        log = store.get_bytes(receipt.outputs["log"])
         jobs += 1
-        failed += job_failed(receipt.status, store.get_bytes(receipt.outputs["log"]))
-    return jobs, failed
+        failed += job_failed(receipt.status, log)
+        rejected += job_input_rejected(receipt.status, log)
+    return VteJobCounts(jobs, failed, rejected)
 
 
 def job_failed(status: str, output: bytes) -> bool:
@@ -445,6 +457,24 @@ def job_failed(status: str, output: bytes) -> bool:
     if status == "failed":
         return True
     return any(p.field in _FAILED_JOB_FIELDS for p in parse_orca_output(output).problems)
+
+
+# The first line of an SCF iteration table (DIIS/SOSCF), a CASSCF macro-iteration
+# with ORCA's default step, and a TRAH iteration table, as ORCA 6.1.1 prints them.
+_ITERATED = re.compile(
+    rb"^(?:Iteration +Energy \(Eh\)|MACRO-ITERATION +\d+:| +Iter\. +energy )", re.M
+)
+
+
+def job_input_rejected(status: str, output: bytes) -> bool:
+    """Whether a failed job stopped before any SCF or CASSCF iteration: ORCA refused its input.
+
+    A job that iterated and then failed (did not converge, diverged, or was
+    killed at the time limit) is not counted. Neither is an empty output: ORCA
+    prints its header before it reads the input, so an empty log is the broker's
+    (output over the cap, a broker or launch error), not ORCA refusing the input.
+    """
+    return bool(output) and job_failed(status, output) and not _ITERATED.search(output)
 
 
 def evaluate_vte_run(
@@ -506,7 +536,8 @@ def vte_report_runs(
     (`accurate`), MAE over every identified row of every run, the false-success
     claim count, the runs that never reported (`runs_without_claim`, so a
     timed-out run is not read as an agent that found nothing), and the ORCA
-    jobs the arm named with how many failed (`jobs`, `jobs_failed`). When exactly
+    jobs the arm named with how many failed (`jobs`, `jobs_failed`) and how many of
+    those ORCA refused before iterating (`jobs_rejected`). When exactly
     two arms are compared (or `arms` names two), `common_target_mae_ev` restricts both to targets
     (case, reference row) each arm identified in at least one run, averaging
     an arm's repeats per target first, so both arms are measured on the same
@@ -538,11 +569,13 @@ def vte_report_runs(
                 "runs_without_claim": 0,
                 "jobs": 0,
                 "jobs_failed": 0,
+                "jobs_rejected": 0,
             },
         )
-        jobs, failed = vte_job_counts(store, run_id)
-        a["jobs"] += jobs
-        a["jobs_failed"] += failed
+        counts = vte_job_counts(store, run_id)
+        a["jobs"] += counts.jobs
+        a["jobs_failed"] += counts.failed
+        a["jobs_rejected"] += counts.rejected
         a["runs"].append(run_id)
         a["coverage"] += int(m["coverage"])
         a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3

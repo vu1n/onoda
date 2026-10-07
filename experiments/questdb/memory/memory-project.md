@@ -1,4 +1,4 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@5)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@6)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
@@ -18,6 +18,11 @@ others are agent runs).
 - A single-root job prints no transition table, so it cannot be cited for an
   excitation energy. [acetaldehyde runs, 2026-10-04]
 - Every aug-cc-pVTZ CASSCF job here used `trafostep ri` with RIJCOSX. [fixtures]
+- `trafostep ri` needs `RIJCOSX AutoAux` on the `!` line: without them ORCA
+  stops at once ("Trafostep RI is set without a valid RI basis"). Drop the two
+  together, or let `orca_input` build the input (its `ri` option sets both).
+  Three hand-written inputs in two gate runs kept the line without RIJCOSX.
+  [gate-4, gate-4 rerun]
 
 ## Inputs that ran in ORCA 6.1.1
 

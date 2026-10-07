@@ -411,3 +411,35 @@ def test_failed_jobs_are_counted_from_the_broker_and_the_parser(status, name, fa
     from onoda.adapters.pi.vte import job_failed
 
     assert job_failed(status, _out(name)) is failed
+
+
+def _stopped_before_iterating() -> bytes:
+    """ketene_f_target's output cut before its CASSCF iterations, with an input error.
+
+    Synthetic: a constructed output standing in for a job ORCA refused, not a
+    solver result.
+    """
+    lines = _out("ketene_f_target").splitlines(keepends=True)
+    head = lines[
+        : next(i for i, line in enumerate(lines) if line.startswith(b"CAS-SCF ITERATIONS"))
+    ]
+    return b"".join(head) + b"Trafostep RI is set without a valid RI basis\n"
+
+
+@pytest.mark.parametrize(
+    ("status", "output", "rejected"),
+    [
+        ("succeeded", lambda: _out("ketene_f_target"), False),
+        ("succeeded", lambda: _out("ketene_a_rhf"), False),
+        # iterated, then did not converge: the TRAH fallback's case, not a refused input
+        ("succeeded", lambda: _out("ethylene_nevpt2_np4_default_orbstep"), False),
+        ("failed", lambda: _out("ketene_f_target"), False),  # e.g. killed at the time limit
+        ("failed", _stopped_before_iterating, True),
+        ("succeeded", _stopped_before_iterating, True),  # no termination line
+        ("failed", lambda: b"", False),  # no output: the broker's failure, not ORCA's refusal
+    ],
+)
+def test_a_rejected_input_is_a_failed_job_that_never_iterated(status, output, rejected):
+    from onoda.adapters.pi.vte import job_input_rejected
+
+    assert job_input_rejected(status, output()) is rejected
