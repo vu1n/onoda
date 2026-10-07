@@ -27,6 +27,7 @@ from test_pi_end_to_end import (
 
 from onoda.adapters.pi import run as pi_run
 from onoda.adapters.pi.fork import fork_pi_run, fork_point
+from onoda.adapters.pi.ingest import run_vte_claim
 from onoda.adapters.pi.runtime import LiveSettings
 from onoda.errors import CapabilityError, ForkError, ReplayMismatch
 from onoda.records import ForkDeclaration
@@ -225,6 +226,38 @@ def test_a_vte_fork_replays_the_parents_jobs_then_runs_new_ones(short):
         (False, True),
     ]
     assert set(v.jobs(store, "f")) == {"j0001", "j0002", "j0003"}
+
+
+def test_a_vte_fork_keeps_the_parents_report_reminder(short):
+    store, _ = v.stores(short)
+    binary = v.stand_in(short)
+    s = v.script("test_vte_fork_reminder_parent", v.INPUT)
+    v.run(store, short, "p", binary, s, report_reminder=True)
+    at = checkpoint(store, "p", "job-collected")
+    cont = turns_script(
+        "test_vte_fork_reminder_continuation",
+        [{"type": "text", "text": "stopping without a claim"}],
+        [tool("r1", "report_vtes", states=[v.state("j0001")], notes="synthetic scripted claim")],
+        [{"type": "text", "text": "reported"}],
+    )
+    fork_pi_run(
+        store,
+        "p",
+        at,
+        v.case(),
+        new_run_id="f",
+        continuation=cont,
+        reason="the parent's reminder carries into the fork",
+        work_dir=short / "f",
+        orca=v.orca(short, binary),
+        cache_dir=short / "cache",
+        timeout_s=120,
+    )
+    child = store.run_record("f")
+    assert child.config["report_reminder"] is True
+    ends = [e.payload["status"] for e in store.events("f") if e.type == "pi.spool-end"]
+    assert ends == ["settled"]
+    assert run_vte_claim(store, "f") is not None  # reminded, then reported
 
 
 def test_check_prefix_compares_what_each_prefix_tool_call_showed(tmp_path):

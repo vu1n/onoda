@@ -502,6 +502,7 @@ def run_vte_case(
     orca_mpi_home: Path | None = None,
     limits: BrokerLimits = DEFAULT_LIMITS,
     fork: ForkLaunch | None = None,
+    report_reminder: bool = False,
 ) -> PiRun:
     """Run one variant on one VTE case, its ORCA jobs through a host broker; ingest it.
 
@@ -520,6 +521,8 @@ def run_vte_case(
     labelled stand-in runs unconfined on a host that has none. `limits` are
     the broker's input caps. `fork` is as for `run_case`; its broker prefix
     serves the parent's jobs before the fork point, then the broker runs live.
+    `report_reminder` sends the agent one message to call report_vtes when it
+    stops without a claim (recorded in the run's config; replay restages it).
     """
     _check_new_run(store, run_id, variant_id)
     max_requests = _request_cap(live, max_requests)
@@ -540,6 +543,7 @@ def run_vte_case(
         ladder=ladder,
         synthetic_ladder=synthetic_ladder,
         max_executions=max_executions,
+        report_reminder=report_reminder,
     )
     _refuse_references(bundle_dir, case)
     prepared = build_launch(
@@ -585,6 +589,7 @@ def run_vte_case(
         "instruction": instruction,
         "max_requests": max_requests,
         "max_executions": bundle.max_executions,
+        **({"report_reminder": True} if bundle.report_reminder else {}),
         "orca": {
             "binary_sha256": broker.binary_sha256,
             "stand_in": scheduler.settings.stand_in,
@@ -786,7 +791,13 @@ def replay_run_pi(
     broker = None
     recorded_jobs: tuple[BrokerJournalEntry, ...] = ()
     if isinstance(case, LoadedVteCase):
-        stage_vte_bundle(case, work_dir / "bundle", max_executions=cfg["max_executions"], **staging)
+        stage_vte_bundle(
+            case,
+            work_dir / "bundle",
+            max_executions=cfg["max_executions"],
+            report_reminder=cfg.get("report_reminder", False),
+            **staging,
+        )
         _refuse_references(work_dir / "bundle", case)
         broker, recorded_jobs = _replay_broker(store, run_id, cfg, work_dir)
     else:

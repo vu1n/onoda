@@ -409,6 +409,7 @@ def fork_pi_run(
             orca=orca,
             cache_dir=cache_dir,
             max_executions=cfg["max_executions"] + (served if fresh else 0),
+            report_reminder=cfg.get("report_reminder", False),  # the parent's setting
             fork=launch,
             **common,
         )

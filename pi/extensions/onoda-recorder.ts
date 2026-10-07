@@ -81,6 +81,11 @@ function pendingEnd(): PendingEnd | undefined {
 	return (globalThis as Record<symbol, PendingEnd | undefined>)[PENDING_END];
 }
 
+/** Whether an extension has asked for the run to end (a budget, a refused request). */
+export function endRequested(): boolean {
+	return pendingEnd() !== undefined;
+}
+
 function writeEnd(w: SpoolWriter, fallback: EndStatus, reason: string | null): void {
 	const c = counters();
 	if (c.ended) return;

@@ -26,6 +26,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { buildOrcaInput, INPUT_NPROCS, type InputParams, xyzAtomLines } from "./lib/orca-input.ts";
+import { endRequested } from "./onoda-recorder.ts";
 import {
 	BROKER_PROTOCOL,
 	counters,
@@ -79,7 +80,13 @@ interface VteTaskBundle {
 	ladder_sha256?: string | null;
 	synthetic_ladder?: boolean;
 	max_executions: number;
+	report_reminder?: boolean;
 }
+
+/** The one message a run with `report_reminder` gets when its agent stops without calling report_vtes. */
+export const REPORT_REMINDER =
+	"You stopped without calling report_vtes, so nothing has been reported. Call report_vtes now with every " +
+	"target state you identified, each cited to the job that printed it; report no state you did not identify.";
 
 /** orca_broker.py `BrokerReply` (re-exported by vte_contract.py). */
 interface BrokerReply {
@@ -520,6 +527,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 	// Jobs whose reply lists a job.gbw (orca_input's read_orbitals must name one).
 	const gbwJobs = new Set<string>();
 	const atoms = xyzAtomLines(structure.toString("utf8"));
+	let reported = false; // report_vtes recorded a claim
 	if (!socketPath) throw new Error("onoda-task: ONODA_PI_BROKER is not set");
 
 	const targets = task.targets.map((t) => `- ${t.count} ${SPIN_NAMES[t.spin]} ${t.irrep} state${t.count > 1 ? "s" : ""}`);
@@ -556,7 +564,7 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 		description:
 			"Write an ORCA input from the choices that matter (method, basis, active space, roots per irrep, orbitals " +
 			"to read and swap) in the syntax that runs on this host: the geometry inline from the structure, " +
-			`%pal nprocs ${INPUT_NPROCS} and %maxcore within the caps, every % block closed, TightSCF, and for CASSCF trafostep ri ` +
+			`%pal nprocs ${INPUT_NPROCS} and %maxcore within the caps, every % block closed, TightSCF, and for CASSCF trafostep ri when ri is on ` +
 			"(orbstep TRAH only with trah). Runs nothing and costs no job: pass the returned input and attach to orca_submit " +
 			"(you may edit the text first). method nevpt2 is state-averaged CASSCF with SC-NEVPT2. roots are blocks " +
 			"of (mult, irrep, nroots), irrep as ORCA's number for the point group, ground state first (mult 1, irrep 0). " +
@@ -747,9 +755,42 @@ function registerVteTools(pi: ExtensionAPI, w: SpoolWriter, dir: string, raw: Vt
 				notes: params.notes ?? "",
 			};
 			w.line({ type: "task.claim", tool_call_id: toolCallId, claim: w.putJson(claim) });
+			reported = true;
 			return { content: [{ type: "text", text: "Claim recorded." }], details: claim };
 		},
 	});
+
+	if (task.report_reminder) {
+		// Loaded before the recorder: a turn started here keeps the recorder from ending the run at this settle.
+		let reminded = false;
+		let lastStop: string | undefined;
+		let releaseParent: (() => void) | undefined;
+		pi.on("message_end", (event) => {
+			if (event.message.role === "assistant") lastStop = (event.message as { stopReason?: string }).stopReason;
+		});
+		pi.on("agent_settled", async (_event, ctx) => {
+			// The reminder's own settle releases the settle that sent it (SoL-Pi's continuation pattern):
+			// print mode must not dispose the session while the reminded turn runs.
+			const parent = releaseParent;
+			releaseParent = undefined;
+			try {
+				if (reported || reminded || endRequested() || lastStop === "error" || lastStop === "aborted") return;
+				if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
+				reminded = true;
+				const child = new Promise<void>((resolve) => {
+					releaseParent = resolve;
+				});
+				pi.sendMessage({ customType: "onoda-report-reminder", content: REPORT_REMINDER, display: false }, { triggerTurn: true });
+				if (ctx.isIdle() && releaseParent) {
+					releaseParent = undefined;
+					throw new Error("onoda-task: the report reminder did not start a turn");
+				}
+				await child;
+			} finally {
+				parent?.();
+			}
+		});
+	}
 
 	return prompt;
 }

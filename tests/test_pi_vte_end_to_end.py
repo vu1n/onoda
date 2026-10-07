@@ -258,6 +258,25 @@ def test_replay_of_a_run_with_an_execution_matches_with_zero_executions(recorded
     ]
 
 
+def test_a_reminded_run_records_the_setting_and_replays_to_a_match(short):
+    """`report_reminder`: an agent that stops without a claim gets one message, reports,
+    and the run (reminder included) replays from its record."""
+    store, _ = stores(short)
+    binary = stand_in(short)
+    turns = [
+        [tool("x1", "orca_submit", input=INPUT)],
+        [{"type": "text", "text": "stopping without a claim"}],
+        [tool("r1", "report_vtes", states=[state("j0001", "6.069")])],
+        [{"type": "text", "text": "reported"}],
+    ]
+    s = Script.model_validate({"source": "test_reminder", "turns": [{"content": t} for t in turns]})
+    pi = run(store, short, "remind", binary, s, report_reminder=True)
+    assert (pi.ingest.status, pi.ingest.claim is not None) == ("settled", True), pi.stderr_tail
+    assert store.run_record("remind").config["report_reminder"] is True
+    out = pi_run.replay_run_pi(store, "remind", case(), work_dir=short / "replay")
+    assert (out["status"], out["executions"]) == ("match", 0)
+
+
 def test_replay_of_cache_hits_matches_and_executes_nothing(recorded):
     root, store, _, binary, _ = recorded
     # A second run against the shared cache: every job is a hit, nothing executes.

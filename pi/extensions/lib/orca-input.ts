@@ -71,7 +71,8 @@ export function buildOrcaInput(p: InputParams, atoms: string[], gbwJobs: Readonl
 	const attach: BuiltInput["attach"] = [];
 
 	const keywords = [cas ? null : "RHF", p.basis];
-	if (p.ri ?? cas) keywords.push("RIJCOSX", "AutoAux");
+	const ri = p.ri ?? cas;
+	if (ri) keywords.push("RIJCOSX", "AutoAux");
 	keywords.push("TightSCF");
 	if (p.symmetry ?? true) keywords.push("UseSym");
 	if (p.read_orbitals !== undefined) {
@@ -124,7 +125,8 @@ export function buildOrcaInput(p: InputParams, atoms: string[], gbwJobs: Readonl
 			// ORCA's default weights each block equally, not each root; bweight in the input's block
 			// order (ORCA 6.1.1 applies it so) gives every root the same weight, as QUESTDB's references do.
 			...(roots.length > 1 ? [`  bweight = ${list((r) => r.nroots)}`] : []),
-			"  trafostep ri",
+			// trafostep ri needs the AutoAux basis: without it ORCA stops ("Trafostep RI is set without a valid RI basis").
+			...(ri ? ["  trafostep ri"] : []),
 			...(p.trah ? ["  orbstep TRAH"] : []),
 			`  maxiter ${p.maxiter ?? 150}`,
 			...(p.method === "nevpt2" ? ["  PTMethod SC_NEVPT2"] : []),
