@@ -45,7 +45,8 @@ The report reminder fired in neither attempt.
 ## What changed since gate 4
 
 - Check 1 counts inputs ORCA refused, not every failed job: a failed job counts
-  only if it stopped before any SCF or CASSCF iteration (`jobs_rejected` in
+  only if ORCA printed output and stopped before any SCF or CASSCF iteration (an
+  empty output is the broker's failure, not ORCA's refusal; `jobs_rejected` in
   `onoda vte report`, `job_input_rejected` in `src/onoda/adapters/pi/vte.py`). Jobs
   that iterated and then failed (no convergence, divergence, the time limit) are
   reported as `jobs_failed` and not gated. Vu chose this on 2026-10-07.

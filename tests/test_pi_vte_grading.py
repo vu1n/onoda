@@ -436,7 +436,7 @@ def _stopped_before_iterating() -> bytes:
         ("failed", lambda: _out("ketene_f_target"), False),  # e.g. killed at the time limit
         ("failed", _stopped_before_iterating, True),
         ("succeeded", _stopped_before_iterating, True),  # no termination line
-        ("failed", lambda: b"", True),  # no output: nothing shows it iterated
+        ("failed", lambda: b"", False),  # no output: the broker's failure, not ORCA's refusal
     ],
 )
 def test_a_rejected_input_is_a_failed_job_that_never_iterated(status, output, rejected):

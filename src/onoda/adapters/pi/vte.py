@@ -470,10 +470,11 @@ def job_input_rejected(status: str, output: bytes) -> bool:
     """Whether a failed job stopped before any SCF or CASSCF iteration: ORCA refused its input.
 
     A job that iterated and then failed (did not converge, diverged, or was
-    killed at the time limit) is not counted. An empty output (the broker sent
-    none) counts as rejected, since nothing shows it iterated.
+    killed at the time limit) is not counted. Neither is an empty output: ORCA
+    prints its header before it reads the input, so an empty log is the broker's
+    (output over the cap, a broker or launch error), not ORCA refusing the input.
     """
-    return job_failed(status, output) and not _ITERATED.search(output)
+    return bool(output) and job_failed(status, output) and not _ITERATED.search(output)
 
 
 def evaluate_vte_run(
