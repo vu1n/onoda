@@ -172,16 +172,20 @@ end
   your own description of each active orbital before asking for a block.
   [gate-3 S1-thioacetone-r2 j0010; gate-5 S1-ketene-r2 j0012, gate-4
   S0-ketene-r1 j0016]
-- The targets list counts excited states. A block in the ground state's
-  irrep needs one root more than its count: two excited singlet A1 states
-  need `nroots 3` in the singlet A1 block. Asking for 2 there gives only one
+- The targets list counts excited states. The singlet block that holds the
+  ground state needs one root more than its count: two excited singlet A1
+  states need `nroots 3` in the singlet A1 block. Triplet blocks do not hold
+  the ground state, so they need only their count. Asking for 2 there gives only one
   excited A1 state; 9 of 13 thioacetone runs did this.
   [gate-5 S1-thioacetone-r2 j0010]
 - Which states share the average moves the energies. Two jobs with the same
   CAS(8,6) read from the same orbitals put ketene's 1B1 2.5 eV apart: one
   averaged the singlets only, the other added three triplet blocks. Average
   only the states one target group needs, singlets and triplets in separate
-  jobs. [gate-4-rerun S0-ketene-r1 j0005, S0-ketene-r2 j0005]
+  jobs. A triplet job still leads with the singlet ground state (`mult 1`,
+  `irrep 0`, `nroots 1` first, as above), or it prints no excitation
+  energies from S0; the separate triplet job that ran had
+  `mult 1,3,3,3`. [gate-4-rerun S0-ketene-r1 j0005, S0-ketene-r2 j0005]
 
 ## Reporting
 
