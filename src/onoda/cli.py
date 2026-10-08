@@ -1442,7 +1442,7 @@ def build_parser() -> argparse.ArgumentParser:
     vq.set_defaults(func=cmd_vte_shadow_questions)
     vd = vt.add_parser(
         "shadow-dataset",
-        help="label each graded run's cited jobs ready yes/no from the grader (A70)",
+        help="label each graded run's jobs ready yes/no from the grader and parser (A70)",
     )
     vd.add_argument("run_ids", nargs="+")
     vd.add_argument("--store", required=True)

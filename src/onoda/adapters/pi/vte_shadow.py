@@ -293,21 +293,32 @@ def shadow_examples(
 ) -> list[Example]:
     """Labelled examples for `onoda decide tune` (A70), from graded VTE runs.
 
-    One example per job a claim cites: `ready` is "yes" when the grader
-    identified a claim from it, "no" when every claim citing it was rejected.
-    Jobs nothing cites, or whose claims are only unidentified, carry no
-    grader verdict and are left out. The label is the grader's outcome
-    word, never a reference value.
+    `ready` is "yes" for a job the grader identified a claim from, and "no"
+    for a cited job none of whose claims was identified (rejected, or
+    supported but unidentified) and for an uncited job the parser saw fail
+    (no normal termination, SCF or CASSCF not converged). Uncited jobs that
+    finished are left out: nothing says whether they were ready. Labels come
+    from grader outcome words and parser status, never a reference value.
     """
     out = []
     for run_id, case in runs:
         cited = _cited(evaluator_store, run_id)
         for job_id, _job, state in _job_states(store, run_id, case):
             group = _group(cited.get(job_id, []))
-            if group in ("identified", "rejected"):
-                label = "yes" if group == "identified" else "no"
-                out.append(Example(f"{run_id}/{job_id}", state, {"ready": label}))
+            if group == "uncited" and not _failed(state["parser"]):
+                continue
+            label = "yes" if group == "identified" else "no"
+            out.append(Example(f"{run_id}/{job_id}", state, {"ready": label}))
     return out
+
+
+def _failed(parser: Mapping[str, Any]) -> bool:
+    """The parser saw the job fail: no normal termination, SCF or CASSCF not converged."""
+    return (
+        parser["termination"] != "normal"
+        or parser["scf"] == "not_converged"
+        or parser["casscf_converged"] is False
+    )
 
 
 def _latest_shadows(evaluator_store: Store, run_id: str) -> list[Evaluation]:
