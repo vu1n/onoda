@@ -1,4 +1,4 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@8)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@9)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
@@ -6,43 +6,47 @@ and no energy here is a reference value. Each names the job or run it came
 from in brackets (the `tests/fixtures/orca611-nevpt2` jobs ran on the host, the
 others are agent runs).
 
-## Reporting: build a root-identity ledger
+## Plan physical orbital groups before target jobs
 
-- After each target job, record `(job, mult, irrep, root)`, the printed
-  SC-NEVPT2 excitation energy, the dominant CI occupation changes, and the
-  donor/acceptor orbital identities. Keep that root key when NEVPT2 changes
-  the energy order; a table's row number is not its CASSCF root number.
-  Assign character from that root's CI vector and orbital composition, not
-  from energy rank or the number of targets still missing.
-  [gate-6 S1-thioacetone-r1 j0008; codex-hc-0 S1-ketene-r3 j0015, j0016]
-- Decide `pi` versus `n` from the donor's role in the molecule's pi system
-  and its orbital composition and orientation. A heteroatom-rich or
-  lone-pair-like p orbital can still participate in the pi system; atom
-  population alone does not make it `n`. Check the bonded-atom components
-  as well as the dominant atom before naming it.
-  [codex-hc-0 S1-ketene-r1 j0005, S1-ketene-r4 j0008, j0009]
-- Distinguish a compact valence antibonding orbital from a diffuse Rydberg
-  acceptor using orbital composition, then name the resolved Rydberg family
-  `3s` or `3p`, rather than `sigma*`, `ry`, or `rydberg`. When different p
-  acceptors participate, distinguish them as `3px`, `3py`, `3pz` from their
-  printed Cartesian components (no underscore). Keep unneeded axis detail
-  in the ledger/notes when only one p acceptor is involved; do not invent an
-  axis that the orbital evidence does not resolve.
-  [gate-6 S1-thioacetone-r1 j0008; codex-hc-0 S1-ketene-r3 j0015, j0016]
-- Put the compact orbital pair in `character` (`n,pi*`, `pi,3s`); put MO
-  numbers, bond annotations and mixture discussion in `notes`. Preserve real
-  multiple-electron occupation changes when the CI vector shows them.
-  Duplicate identities mean the same `(spin, irrep, character)`, not just
-  the same words in different spin/irrep blocks. Do not invent a new orbital
-  type or choose an active space merely to make all character strings unique:
-  resolve the orbital distinction, or report only the identified subset.
-  [codex-hc-0 S1-ketene-r2 j0005, j0014, S1-ketene-r4 j0008, j0009;
-  S1-thioacetone-r3 j0009]
-- Finish with an actual `report_vtes` call from the verified ledger. A prose
-  promise to inspect or report is not a claim. Do not stop at a single-root
-  preparation job: it prints no excitation table. Leave time to report the
-  supported states already identified when another group cannot be finished.
-  [codex-hc-0 S1-thioacetone-r2 j0005]
+- Before the first target job, write an aug-cc-pVTZ orbital inventory in the
+  workspace: current MO index, irrep, occupation, AO composition and physical
+  role. Then write a target-group plan: spin/irrep/root counts, donor orbitals,
+  specific acceptor orbitals and the resulting `nel`/`norb`. Plan compact
+  valence and diffuse s/p acceptors as separate groups; do not put every target
+  in one average just because the space admits their irreps. The plan must name
+  actual orbitals, not just a CAS size or an irrep distribution.
+  [gates 3-5, inputs; codex-hc-1 S1-ketene-r1 j0005, j0006;
+  S1-thioacetone-r3 j0005, j0006]
+- For each group, select its physical donor/acceptor orbitals first, then derive
+  the active electron/orbital counts and prepare the `MORead`/`rotate` input.
+  Reuse prepared orbitals, but give each acceptor group its own state-averaged
+  target job containing S0 and that group's excited blocks. A diffuse group
+  needs its diffuse acceptors in the actual active window; adding one orbital
+  or increasing `norb` does not establish this. Two spaces of the same size
+  may contain different orbitals. [codex-hc-1 S1-thioacetone-r1 j0005, j0008;
+  S1-thioacetone-r2 j0005, j0006, j0007; gate-5 S1-ketene-r2 j0012,
+  gate-4 S0-ketene-r1 j0016]
+- Verify the inventory again after each `UseSym` re-read and after state
+  averaging, using the printed orbital composition and occupations. The host's
+  counts per irrep are a quick check, not proof of orbital identity. If a planned
+  acceptor moved outside the active window, repair the selection before using
+  that job for the group; an extra computed root cannot substitute for the
+  missing acceptor. [codex-hc-1 S1-thioacetone-r2 j0005-j0007;
+  S1-thioacetone-r3 j0004, j0005; gate-3 S1-thioacetone-r2 j0010]
+- The targets list counts excited states. The singlet block that holds the
+  ground state needs one root more than its count: two excited singlet A1
+  states need `nroots 3` in the singlet A1 block. Triplet blocks do not hold
+  the ground state, so they need only their count. Asking for 2 there gives only one
+  excited A1 state; 9 of 13 thioacetone runs did this.
+  [gate-5 S1-thioacetone-r2 j0010]
+- Which states share the average moves the energies. Two jobs with the same
+  CAS(8,6) read from the same orbitals put ketene's 1B1 2.5 eV apart: one
+  averaged the singlets only, the other added three triplet blocks. Average
+  only the states one target group needs, singlets and triplets in separate
+  jobs. A triplet job still leads with the singlet ground state (`mult 1`,
+  `irrep 0`, `nroots 1` first), or it prints no excitation
+  energies from S0; the separate triplet job that ran had
+  `mult 1,3,3,3`. [gate-4-rerun S0-ketene-r1 j0005, S0-ketene-r2 j0005]
 
 ## Getting excitation energies printed in one job
 
@@ -176,8 +180,6 @@ end
   active space. `%scf rotate {i,j,90} end end` swaps orbitals i and j back.
   Compare the host check "active orbitals per irrep" with what you intended.
   [acetone_g_trah]
-- A target with Rydberg character (3s, 3p) needed one more active orbital than
-  the valence active space. [ketene_f_target]
 - Each (mult, irrep) block needs active orbitals that can make that symmetry.
   In one job the active orbitals read from an earlier job were three B1 and
   two B2 with no A1, so a B1 block had no configurations; ORCA stopped at once
@@ -190,37 +192,8 @@ end
   `nact` block failed: "Unknown identifier in CASSCF block"). Choose the active
   orbitals with `MORead` and `rotate`. [gate-2 S1-ketene-r1 j0008, j0014]
 
-## One active space per group of targets
+## Reporting
 
-- In gates 3 to 5 every run used one active space for all its targets: of
-  101 SC-NEVPT2 inputs, 32 put every target (spin, irrep) in one job and 57
-  one job per spin, and no run changed `nel`/`norb` or the active orbitals
-  per irrep between its cited jobs. Targets that excite into different orbitals
-  (valence pi*, 3s, 3p) need different active spaces. Give each such group
-  its own state-averaged job whose active space holds the orbitals that
-  group excites into, brought in with `MORead` and `rotate`.
-  [gates 3-5, inputs]
-- Check which orbitals are active, not how many per irrep. With "A1 1, B1 2,
-  B2 1" active, a job asked for two singlet B2 roots and reported them as
-  n,3s and n,3p; one b2 and one a1 orbital allow a single b2-to-a1
-  excitation, so the second B2 root came out 4.7 eV higher and is not an
-  n,3p state.
-  Two ketene jobs both had "A1 1, B1 3, B2 2" active and put the triplet A1
-  2 eV apart: the count per irrep does not say which orbitals they are. Read
-  your own description of each active orbital before asking for a block.
-  [gate-3 S1-thioacetone-r2 j0010; gate-5 S1-ketene-r2 j0012, gate-4
-  S0-ketene-r1 j0016]
-- The targets list counts excited states. The singlet block that holds the
-  ground state needs one root more than its count: two excited singlet A1
-  states need `nroots 3` in the singlet A1 block. Triplet blocks do not hold
-  the ground state, so they need only their count. Asking for 2 there gives only one
-  excited A1 state; 9 of 13 thioacetone runs did this.
-  [gate-5 S1-thioacetone-r2 j0010]
-- Which states share the average moves the energies. Two jobs with the same
-  CAS(8,6) read from the same orbitals put ketene's 1B1 2.5 eV apart: one
-  averaged the singlets only, the other added three triplet blocks. Average
-  only the states one target group needs, singlets and triplets in separate
-  jobs. A triplet job still leads with the singlet ground state (`mult 1`,
-  `irrep 0`, `nroots 1` first, as above), or it prints no excitation
-  energies from S0; the separate triplet job that ran had
-  `mult 1,3,3,3`. [gate-4-rerun S0-ketene-r1 j0005, S0-ketene-r2 j0005]
+- Write a state's character as two orbitals separated by a comma (`n,pi*`,
+  `pi,3s`). Give each reported state its own character; two states with the
+  same label cannot both be matched. [ketene live run, 2026-10-03]
