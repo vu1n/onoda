@@ -370,7 +370,11 @@ def tune(
     train, val = split(examples, val_fraction, seed)
     decisions = CachedDecisions(model, cache_dir, spend)
     adapter = DecisionAdapter(questions, decisions)
-    start = seed_candidate(questions)
+    # A question no example labels has nothing to learn from; GEPA would spend reflections on it.
+    labelled = {q for e in examples for q in e.labels}
+    start = {
+        k: v for k, v in seed_candidate(questions).items() if k.removesuffix(SUFFIX) in labelled
+    }
     stop_reason = "reflection budget spent"
 
     def reflect_and_charge(prompt: str) -> str:
@@ -440,8 +444,9 @@ def tune(
     for c in explored:
         c["validation"] = _mean(adapter, c["candidate"], val)
     scores = {"seed": explored[0]["validation"], "best": _mean(adapter, best, val)}
+    best = {**seed_candidate(questions), **best}  # unlabelled questions keep their seed wording
     return TuneResult(
-        seed=start,
+        seed=seed_candidate(questions),
         best=best,
         scores=scores,
         candidates=explored,
