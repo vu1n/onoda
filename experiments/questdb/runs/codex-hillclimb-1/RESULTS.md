@@ -1,18 +1,17 @@
 # QUESTDB memory hill climb 1
 
-In progress. Seed calibration passed; incumbent remains unchanged
-`memory-project@7` at **22/56** pooled mean (historical 23, fresh 21).
-Candidate 1 (`@8`) was rejected at **19/56**: ketene **4/28** and thioacetone
-**15/28**. It failed the 27/56 screen threshold and ketene's 8.5/28 molecule
-minimum. All eight runs settled with claims; no provider errors or timeouts.
-False successes and audit false accepts are both zero. Consecutive rejects: 1.
+In progress. Incumbent remains unchanged `memory-project@7` at **22/56**
+pooled mean (historical 23, fresh 21). Candidate 1 (`@8`) scored 19/56;
+candidate 2 (`@9`) scored 16/56. Both were rejected. All candidate runs settled
+with claims, without provider errors or timeouts; false successes and audit
+false accepts are zero. Consecutive rejects: 2.
 
-Candidate 2 (`@9`) is prepared from the unchanged @7 incumbent. Its single
-intervention is an upfront physical-orbital inventory and target-group plan,
-with selection checked after re-reading and state averaging. It removes the
-one-extra-orbital heuristic; the rejected @8 reporting changes are excluded.
-Both existing memory boundary tests passed (2 passed, 0.04 s) using the exact
-branch source via an explicit Python import path. Diff whitespace check passed.
+Candidate 3 (`@10`) is prepared from the @7 incumbent. Its single intervention
+is a short upfront instruction to decode the converged CI expansion using the
+corresponding final orbital ordering, rather than the initial CI check.
+Both existing memory boundary tests passed (2 passed, 0.04 s), and the diff
+whitespace check passed. The prescribed sandbox preflight remains the single
+successful preflight for this documentation-only search.
 
 ## Batch ledger
 
@@ -23,6 +22,7 @@ S1 only, four repeats each for ketene and thioacetone.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 0 / seed-0 | 79d1f775c01987238783dcfd33b8809abb7dcd9b | @7 | unchanged | 4,4,2,0 | 3,0,4,4 | 21/56 | seed: calibration passed | 0 | 0 | 1 | unresolved; upper bound $2.074485044 | 2h20m33s |
 | 1 / candidate-1 | e58bf29c09ce1a52f272d30e8632b2ca818a7f13 | @8 | upfront CI-backed identity/reporting | 2,0,0,2 | 3,3,4,5 | 19/56 | reject: total and ketene guards | 0 | 0 | 0 | billed-key delta $0.898924500; attribution unresolved | 1h30m32s |
+| 2 / candidate-2 | f549a09ba0f4b2fcee85659722f8fb2c8b3b1622 | @9 | upfront physical-orbital/group plan | 0,0,2,2 | 3,2,4,3 | 16/56 | reject: total and ketene guards | 0 | 0 | 0 | billed-key delta $0.880268391; attribution unresolved | 1h59m02s |
 
 Seed pooled mean: `(23+21)/2 = 22/56`. Molecule means: ketene **9.5/28**,
 thioacetone **12.5/28**. The two comparable 56-slot blocks are 23 and 21,
@@ -89,6 +89,27 @@ physical-orbital planning procedure, based on agents' own inputs and transcripts
 Future pins will use the original checkout's short `.pinned/<sha>` location,
 as the successful seed did.
 
+## Candidate 2 interpretation
+
+Two ketene runs used separate cited target jobs for valence and B1 groups
+(`S1-ketene-r2` j0013–j0016 and `S1-ketene-r3` j0011/j0012/j0016/j0017).
+`S1-ketene-r1` instead split by triplet irrep while retaining one CAS; r4
+planned groups then returned to all-target jobs. Thioacetone r2 and r4 used
+separate additional-target jobs; r1 and r3 returned to all-singlet averages.
+Thus grouping uptake improved in some runs, but the screen did not improve.
+These are exploratory agent behaviors, not chemistry findings.
+
+A specific traceability issue motivates candidate 3. `S1-thioacetone-r3`
+explicitly decoded the `INITIAL CI STATE CHECK` in j0007 (archived scheduler
+job `job-00080/job.out`, lines 955–984). The converged `CAS-SCF STATES FOR BLOCK`
+sections occur later, after the convergence signal, at lines 1764–1803 and
+contain different dominant occupations. The candidate instruction concerns
+which output section and orbital basis to use; it includes no occupation
+strings, target-specific character, energy or ordering.
+
+Candidate 2's short original-checkout pin completed normally: run script,
+report and audit all returned 0. No grading recovery or agent rerun was needed.
+
 ## Final incumbent diff against @7
 
 Empty so far: no candidate has been accepted. Candidate 1's rejected
@@ -127,14 +148,15 @@ held-out spending. No held-out result will be used to edit the memory.
 
 Exact task spend is unresolved: the seed's first billed-key snapshot was taken
 after launch, and key exclusivity has not been confirmed. Candidate 1's billed
-key delta was **$0.898924500**. Across the task, the current conservative budget
-charge is **at most $2.983178083** (startup bound $0.64834000 plus billed-key
-increase since the first snapshot, including inter-batch gaps and other use).
-At least **$12.016821917** remains under the $15 limit. These are billed-key
-measurements and a conservative bound, not Pi's price-table estimate.
+key delta was **$0.898924500**; candidate 2's was **$0.880268391**.
+The current conservative budget charge is **at most $3.939979603**
+(startup bound $0.64834000 plus billed-key increase since the first snapshot,
+including inter-batch gaps and other use). At least **$11.060020397**
+remains under the $15 limit. These are billed-key measurements and a conservative
+bound, not Pi's price-table estimate.
 
-No stopping condition has been reached. Candidate batches scored: 1; accepts: 0;
-consecutive rejects: 1. No confirmation was warranted.
+No stopping condition has been reached. Candidate batches scored: 2; accepts: 0;
+consecutive rejects: 2. No confirmation was warranted.
 
-MAE footnote: fresh seed pooled MAE 0.603926 eV; candidate 1 MAE is retained in
-its report and per-run score records. MAE is ignored for decisions.
+MAE footnote: fresh seed pooled MAE 0.603926 eV; candidate MAEs are retained in
+the batch reports and per-run score records. MAE is ignored for decisions.
