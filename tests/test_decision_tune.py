@@ -112,6 +112,7 @@ def test_the_search_finds_wording_that_reads_the_state(tmp_path):
     )
     assert HINT in result.best["ready.instructions"]
     assert result.best["rule.instructions"] == "Which rule applies?"  # unlabelled: never touched
+    assert all("rule.instructions" not in c["candidate"] for c in result.candidates)  # not searched
     assert Decimal(result.scores["best"]) > Decimal(result.scores["seed"]) == Decimal("0.5")
     assert result.synthetic and result.spend["reflection_calls"] <= 2
     # Reflection is shown the expected answer and the model's answer, worst misses first.
