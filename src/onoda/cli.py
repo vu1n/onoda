@@ -911,23 +911,18 @@ def _live_search(a) -> tuple[Any, Any, Any, Any]:
     return live, reflect, spend, detect_sandbox()
 
 
-def cmd_optimize_compare(a) -> Any:
-    """Gate check of --candidate against --baseline (default: the seed) on the acceptance slice."""
-    from decimal import Decimal
-
-    from onoda.adapters.pi.contract import DECIMAL_RE, SEED_CANDIDATE, HarnessCandidate
+def _compare_runner(a):
+    """The live PiRunner, settings and split shared by `optimize compare` and `optimize noise`."""
+    from onoda.adapters.pi.contract import DECIMAL_RE
     from onoda.adapters.pi.runtime import LiveSettings, detect_sandbox
-    from onoda.optimize.compare import compare_candidates
     from onoda.optimize.contract import GateSpec, SplitAssignment
     from onoda.optimize.pi_runner import PiRunner
     from onoda.science.contract import CASES_ROOT
 
     if not a.live:
-        raise OnodaError("compare runs live only (a scripted check would compare the script)")
+        raise OnodaError("this check runs live only (a scripted check would measure the script)")
     gates = _read_model(GateSpec, a.gates)
     split = _read_model(SplitAssignment, a.split)
-    baseline = _read_model(HarnessCandidate, a.baseline) if a.baseline else SEED_CANDIDATE
-    candidate = _read_model(HarnessCandidate, a.candidate)
     live = LiveSettings(
         provider=a.provider,
         model=a.model,
@@ -953,6 +948,19 @@ def cmd_optimize_compare(a) -> Any:
         timeout_s=a.timeout,
         cases_root=Path(a.cases_root) if a.cases_root else CASES_ROOT,
     )
+    return runner, evaluator_store, gates, split, live
+
+
+def cmd_optimize_compare(a) -> Any:
+    """Gate check of --candidate against --baseline (default: the seed) on the acceptance slice."""
+    from decimal import Decimal
+
+    from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate
+    from onoda.optimize.compare import compare_candidates
+
+    runner, evaluator_store, gates, split, live = _compare_runner(a)
+    baseline = _read_model(HarnessCandidate, a.baseline) if a.baseline else SEED_CANDIDATE
+    candidate = _read_model(HarnessCandidate, a.candidate)
     check = compare_candidates(
         runner,
         check_id=a.check_id,
@@ -968,6 +976,30 @@ def cmd_optimize_compare(a) -> Any:
     digest = evaluator_store.put_json(
         check, visibility="evaluator", labels=["promotion-check"]
     ).digest
+    return {"check": digest, **check}
+
+
+def cmd_optimize_noise(a) -> Any:
+    """A/A check: one candidate (default: the seed) run twice on the acceptance slice."""
+    from decimal import Decimal
+
+    from onoda.adapters.pi.contract import SEED_CANDIDATE, HarnessCandidate
+    from onoda.optimize.compare import noise_check
+
+    runner, evaluator_store, gates, split, live = _compare_runner(a)
+    candidate = _read_model(HarnessCandidate, a.candidate) if a.candidate else SEED_CANDIDATE
+    check = noise_check(
+        runner,
+        check_id=a.check_id,
+        candidate=candidate,
+        cases=split.acceptance,  # never the final slice
+        gates=gates,
+        repeats=a.repeats,
+        max_cost_usd=Decimal(a.compare_max_cost_usd),
+        run_reserve_usd=Decimal(live.max_cost_usd),
+    )
+    check["exploratory_split"] = split.exploratory
+    digest = evaluator_store.put_json(check, visibility="evaluator", labels=["noise-check"]).digest
     return {"check": digest, **check}
 
 
@@ -1522,26 +1554,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ocmp.add_argument("--candidate", required=True, help="HarnessCandidate JSON")
     ocmp.add_argument("--baseline", help="HarnessCandidate JSON (default: the seed candidate)")
-    ocmp.add_argument("--split", required=True, help="onoda.split/1 JSON; runs its acceptance")
-    ocmp.add_argument("--gates", required=True, help="onoda.gate-spec/2 YAML/JSON")
-    ocmp.add_argument("--check-id", required=True)
-    ocmp.add_argument("--store", required=True, help="agent store for the runs")
-    ocmp.add_argument("--evaluator-store", required=True)
-    ocmp.add_argument("--work-dir", required=True)
-    ocmp.add_argument("--repeats", type=int, default=2, help="runs per case per candidate")
-    ocmp.add_argument("--live", action="store_true", help="real agent model (required)")
-    ocmp.add_argument("--provider", help="live: Pi provider for the agent")
-    ocmp.add_argument("--model", help="live: agent model")
-    ocmp.add_argument("--credential-env", help="live: env var holding the agent's API key")
-    ocmp.add_argument("--max-requests", type=int, help="live: request cap per run")
-    ocmp.add_argument("--max-cost-usd", help="live: cost cap per run")
-    ocmp.add_argument("--compare-max-cost-usd", help="live: cost cap for the whole check")
-    ocmp.add_argument("--variant", default="S1r")
-    ocmp.add_argument("--ladder")
-    ocmp.add_argument("--synthetic-ladder", action="store_true")
-    ocmp.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
-    ocmp.add_argument("--cases-root")
+    _live_check_args(ocmp)
     ocmp.set_defaults(func=cmd_optimize_compare)
+    onz = op.add_parser(
+        "noise", help="A/A check: run one candidate twice to measure run-to-run noise"
+    )
+    onz.add_argument("--candidate", help="HarnessCandidate JSON (default: the seed candidate)")
+    _live_check_args(onz)
+    onz.set_defaults(func=cmd_optimize_noise)
     ost = op.add_parser("status", help="candidates, decisions and the final set of a search")
     ost.add_argument("--optimizer-store", required=True)
     ost.add_argument("--search-id", required=True)
@@ -1558,6 +1578,29 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _live_check_args(p) -> None:
+    """Arguments `optimize compare` and `optimize noise` share."""
+    p.add_argument("--split", required=True, help="onoda.split/1 JSON; runs its acceptance")
+    p.add_argument("--gates", required=True, help="onoda.gate-spec/2 YAML/JSON")
+    p.add_argument("--check-id", required=True)
+    p.add_argument("--store", required=True, help="agent store for the runs")
+    p.add_argument("--evaluator-store", required=True)
+    p.add_argument("--work-dir", required=True)
+    p.add_argument("--repeats", type=int, default=2, help="runs per case per side")
+    p.add_argument("--live", action="store_true", help="real agent model (required)")
+    p.add_argument("--provider", help="live: Pi provider for the agent")
+    p.add_argument("--model", help="live: agent model")
+    p.add_argument("--credential-env", help="live: env var holding the agent's API key")
+    p.add_argument("--max-requests", type=int, help="live: request cap per run")
+    p.add_argument("--max-cost-usd", help="live: cost cap per run")
+    p.add_argument("--compare-max-cost-usd", help="live: cost cap for the whole check")
+    p.add_argument("--variant", default="S1r")
+    p.add_argument("--ladder")
+    p.add_argument("--synthetic-ladder", action="store_true")
+    p.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
+    p.add_argument("--cases-root")
 
 
 if __name__ == "__main__":
