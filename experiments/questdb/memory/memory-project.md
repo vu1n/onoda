@@ -1,22 +1,10 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@10)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@7)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
 and no energy here is a reference value. Each names the job or run it came
 from in brackets (the `tests/fixtures/orca611-nevpt2` jobs ran on the host, the
 others are agent runs).
-
-## Use the converged CI expansion
-
-- After confirming CASSCF convergence, assign character from the final
-  `CAS-SCF STATES FOR BLOCK` sections, not from `INITIAL CI STATE CHECK`.
-  Decode the final ground-state and excited-root occupation strings with the
-  active-MO ordering and orbital composition of that same final wavefunction;
-  do not combine early CI digits with a later orbital table. Orbital
-  optimization can change the dominant occupations and orbital ordering, so
-  redo the assignment after convergence. Record `(job, mult, irrep, root)` and
-  pair it with that root's printed SC-NEVPT2 transition energy, preserving the
-  root identifier if energy rows reorder. [codex-hc-2 S1-thioacetone-r3 j0007]
 
 ## Getting excitation energies printed in one job
 
