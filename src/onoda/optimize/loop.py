@@ -15,8 +15,10 @@ search id:
 - the split and gate spec the search runs under (`optimizer.search`); a
   search id is bound to them and refuses to resume under different ones;
 - every candidate as a `CandidateRecord` (`optimizer.candidate`): the seed,
-  each proposal that failed `HarnessCandidate` validation (`invalid`, never
-  run), and each gated proposal (`accepted` / `rejected` with the reasons);
+  each proposal that failed `HarnessCandidate` validation or added an
+  acceptance case id or a long printed value its parent lacked
+  (`diagnostics.leaked_text`; `invalid`, never run), and each gated
+  proposal (`accepted` / `rejected` with the reasons);
 - every feedback packet, i.e. the reflective dataset a proposal came from
   (`optimizer.feedback`);
 - every reflection call's prompt, reply and, for a live model, its receipt
@@ -71,6 +73,7 @@ from onoda.optimize.contract import (
     GateSpec,
     SplitAssignment,
 )
+from onoda.optimize.diagnostics import leaked_text
 from onoda.optimize.gates import DecisionObserver, SolPiGates, non_dominated
 from onoda.store import Store
 
@@ -215,6 +218,10 @@ class _Proposer:
             return refuse("invalid", tuple(str(e["msg"]) for e in exc.errors()), None)
         if child == candidate:
             return refuse("rejected", ("proposal is identical to its parent",), parent)
+        # Context: doc://onoda/optimizer-scope@0002#seed-by-promotion-only — a proposal that adds acceptance case ids or printed values is recorded invalid and never run
+        leaks = leaked_text(candidate, child, self.adapter.cases)
+        if leaks:
+            return refuse("invalid", tuple(f"case-specific text: {x}" for x in leaks), None)
         self.adapter.pending[harness.digest()] = pend
         return new_texts
 

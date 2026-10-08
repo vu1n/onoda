@@ -120,7 +120,8 @@ Decision = Literal["seed", "accepted", "rejected", "invalid"]
 class CandidateRecord(_Frozen):
     """One proposed candidate and what happened to it. Written once, never updated.
 
-    `invalid`: failed `HarnessCandidate` validation and was never run.
+    `invalid`: failed `HarnessCandidate` validation, or added case-specific text
+    (`diagnostics.leaked_text`), and was never run.
     `outcomes`: store digests of the ablation OutcomeVector JSON per evaluated case.
     `feedback`: digest of the reflective-dataset packet the proposal came from.
     """

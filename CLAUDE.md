@@ -24,7 +24,11 @@ first agent adapter; Prime is an optional comparison arm).
   kernel `pi/rlm/onoda_rlm_kernel.py` make variant S1r; `onoda optimize
   seed|split|run|status` runs GEPA (pinned `gepa==0.1.4`) over
   `HarnessCandidate` components; `onoda optimize compare` is the live gate
-  check that promotes a candidate to seed (A54).
+  check that promotes a candidate to seed (A54). `onoda optimize noise` runs
+  one candidate twice (A/A) before a search to show what moves with nothing
+  changed; compare and noise reports carry case-bootstrap intervals and
+  headroom (`optimize/diagnostics.py`), advisory only. A proposal that adds an
+  acceptance case id or a long printed value is recorded `invalid`.
 - QUESTDB slice (VTE): `onoda pi run-vte <case>` runs an agent that writes its
   own ORCA inputs; `orca_submit` reaches the host broker
   (`science/orca_broker.py`) over a socket in the Pi work dir, so keep
