@@ -87,3 +87,22 @@ def test_the_promotion_check_carries_intervals_and_headroom_beside_the_verdict()
     assert result["accepted"]
     assert result["intervals"]["false_success_claims"]["delta"] == "-4"
     assert result["headroom"]["saturated"] is False  # the baseline still has false successes
+
+
+def test_unequal_run_counts_per_case_give_no_interval():
+    base = [vec(case="c1", run="a"), vec(case="c1", run="b")]
+    cand = [vec(case="c1", run="c")]  # one run failed
+    assert intervals(base, cand, ["count.supported"]) == {"count.supported": None}
+
+
+def test_the_cli_module_runs_as_a_script():
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "onoda.cli", "optimize", "noise", "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--compare-max-cost-usd" in out.stdout

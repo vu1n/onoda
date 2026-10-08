@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import random
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 
@@ -89,7 +90,14 @@ def intervals(
     *,
     seed: int = BOOTSTRAP_SEED,
 ) -> dict[str, dict[str, str] | None]:
-    """`bootstrap_delta` for each metric, candidate minus baseline."""
+    """`bootstrap_delta` for each metric, candidate minus baseline.
+
+    All None when a case has a different number of runs on the two sides (a
+    failed run): its sums would differ by the missing sample, not by the change.
+    """
+    baseline, candidate = list(baseline), list(candidate)
+    if Counter(v.case_id for v in baseline) != Counter(v.case_id for v in candidate):
+        return dict.fromkeys(metrics)
     b, k = case_totals(baseline, metrics), case_totals(candidate, metrics)
     return {m: bootstrap_delta(b, k, m, seed=seed) for m in metrics}
 

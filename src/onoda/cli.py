@@ -1580,10 +1580,6 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 def _live_check_args(p) -> None:
     """Arguments `optimize compare` and `optimize noise` share."""
     p.add_argument("--split", required=True, help="onoda.split/1 JSON; runs its acceptance")
@@ -1605,3 +1601,7 @@ def _live_check_args(p) -> None:
     p.add_argument("--synthetic-ladder", action="store_true")
     p.add_argument("--timeout", type=float, default=300, help="seconds per Pi run")
     p.add_argument("--cases-root")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
