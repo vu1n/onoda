@@ -1,10 +1,48 @@
-# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@7)
+# Memory, project tier: QUESTDB excited states with ORCA 6.1.1 (memory-project@8)
 
 Procedures and pitfalls from onoda's own ORCA 6.1.1 runs. They hold for this
 project's molecules in general; none is a result for a particular target state,
 and no energy here is a reference value. Each names the job or run it came
 from in brackets (the `tests/fixtures/orca611-nevpt2` jobs ran on the host, the
 others are agent runs).
+
+## Reporting: build a root-identity ledger
+
+- After each target job, record `(job, mult, irrep, root)`, the printed
+  SC-NEVPT2 excitation energy, the dominant CI occupation changes, and the
+  donor/acceptor orbital identities. Keep that root key when NEVPT2 changes
+  the energy order; a table's row number is not its CASSCF root number.
+  Assign character from that root's CI vector and orbital composition, not
+  from energy rank or the number of targets still missing.
+  [gate-6 S1-thioacetone-r1 j0008; codex-hc-0 S1-ketene-r3 j0015, j0016]
+- Decide `pi` versus `n` from the donor's role in the molecule's pi system
+  and its orbital composition and orientation. A heteroatom-rich or
+  lone-pair-like p orbital can still participate in the pi system; atom
+  population alone does not make it `n`. Check the bonded-atom components
+  as well as the dominant atom before naming it.
+  [codex-hc-0 S1-ketene-r1 j0005, S1-ketene-r4 j0008, j0009]
+- Distinguish a compact valence antibonding orbital from a diffuse Rydberg
+  acceptor using orbital composition, then name the resolved Rydberg family
+  `3s` or `3p`, rather than `sigma*`, `ry`, or `rydberg`. When different p
+  acceptors participate, distinguish them as `3px`, `3py`, `3pz` from their
+  printed Cartesian components (no underscore). Keep unneeded axis detail
+  in the ledger/notes when only one p acceptor is involved; do not invent an
+  axis that the orbital evidence does not resolve.
+  [gate-6 S1-thioacetone-r1 j0008; codex-hc-0 S1-ketene-r3 j0015, j0016]
+- Put the compact orbital pair in `character` (`n,pi*`, `pi,3s`); put MO
+  numbers, bond annotations and mixture discussion in `notes`. Preserve real
+  multiple-electron occupation changes when the CI vector shows them.
+  Duplicate identities mean the same `(spin, irrep, character)`, not just
+  the same words in different spin/irrep blocks. Do not invent a new orbital
+  type or choose an active space merely to make all character strings unique:
+  resolve the orbital distinction, or report only the identified subset.
+  [codex-hc-0 S1-ketene-r2 j0005, j0014, S1-ketene-r4 j0008, j0009;
+  S1-thioacetone-r3 j0009]
+- Finish with an actual `report_vtes` call from the verified ledger. A prose
+  promise to inspect or report is not a claim. Do not stop at a single-root
+  preparation job: it prints no excitation table. Leave time to report the
+  supported states already identified when another group cannot be finished.
+  [codex-hc-0 S1-thioacetone-r2 j0005]
 
 ## Getting excitation energies printed in one job
 
@@ -186,9 +224,3 @@ end
   `irrep 0`, `nroots 1` first, as above), or it prints no excitation
   energies from S0; the separate triplet job that ran had
   `mult 1,3,3,3`. [gate-4-rerun S0-ketene-r1 j0005, S0-ketene-r2 j0005]
-
-## Reporting
-
-- Write a state's character as two orbitals separated by a comma (`n,pi*`,
-  `pi,3s`). Give each reported state its own character; two states with the
-  same label cannot both be matched. [ketene live run, 2026-10-03]
