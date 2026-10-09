@@ -1,9 +1,16 @@
-# Converged CASSCF observation: interrupted comparison
+# Converged CASSCF observation: completed comparison
 
-The observation change is implemented and reviewed in draft PR #46. The live
-comparison is **incomplete**, not a negative accuracy result. A network/DNS
-failure made the added billed-counter monitor unavailable; its fail-closed
-guard stopped the batch. No accuracy conclusion against 22/56 is warranted.
+The authorized eight-run cohort scored **11/56**, versus the unchanged seed
+mean **22/56** (range 21–23). Ketene scored **4/28** versus 9.5/28; thioacetone
+scored **7/28** versus 12.5/28. This batch provides no evidence of an accuracy
+improvement: the pooled loss of 11 exceeds the original four-slot noise rule.
+Two runs reached their two-hour caps without claims and count as zero.
+This is a single development batch, not a confirmed effect or chemistry finding.
+
+The complete pooled audit returned **zero false accepts**. All eight evaluations
+recorded **zero false-success claims**. Six runs settled normally and two timed
+out. The observation was delivered in all 58 converged jobs, so delivery alone
+did not improve this model's score under these fixed resource limits.
 
 Experiment pin: `4e8469d5d1112ddec8f13960f055b9c340c14d22`, based on
 `79d1f775c01987238783dcfd33b8809abb7dcd9b`. `memory-project@7` is byte-for-byte
@@ -11,42 +18,59 @@ unchanged, as are the authoritative parser, grader, references, target inputs,
 ladder, model and run caps. The pre-spend plan is
 [`../../converged-states-1.md`](../../converged-states-1.md).
 
-## Run status
+## Selected results
 
-S1 only, ketene and thioacetone, four repeats each. Started
-2026-10-09T02:23:32.446358Z; the worker recorded its stop at
-2026-10-09T03:19:41.809350Z. Fresh work root: `/tmp/codex-obs-1`.
+S1, DeepSeek v4 Flash through OpenRouter; four repeats per molecule, seven slots
+per run. Grader v3, tolerance 0.3 eV. Selection was fixed before the continuation
+results: retain the two settled original runs and replace the other six as
+authorized. No result was selected by score.
 
-| Run | Status | Within 0.3 eV | Next eligible action |
-|---|---|---:|---|
-| ketene r1 | provider-error: connection error | 0/7 recorded | one provider-error retry allowed |
-| ketene r2 | guard-aborted | not scored | restart requires exception |
-| ketene r3 | settled | 0/7 | retain |
-| ketene r4 | settled | 4/7 | retain |
-| thioacetone r1 | guard-aborted | not scored | restart requires exception |
-| thioacetone r2 | guard-aborted | not scored | restart requires exception |
-| thioacetone r3 | guard-aborted | not scored | restart requires exception |
-| thioacetone r4 | not started | not scored | first attempt remains authorized |
+| Run | Selected attempt | Terminal status | Within 0.3 eV |
+|---|---|---|---:|
+| ketene r1 | restart-1; one provider-error retry | settled | 0/7 |
+| ketene r2 | restart-1; approved guard restart | settled | 0/7 |
+| ketene r3 | batch-1; retained | settled | 0/7 |
+| ketene r4 | batch-1; retained | settled | 4/7 |
+| thioacetone r1 | restart-1; approved guard restart | settled | 4/7 |
+| thioacetone r2 | restart-1; approved guard restart | timeout; no claim | 0/7 |
+| thioacetone r3 | restart-1; approved guard restart | timeout; no claim | 0/7 |
+| thioacetone r4 | restart-1; first attempt | settled | 3/7 |
 
-The two settled runs total **4/14**. The third ingested run ended in a provider
-error, so it is eligible for the protocol's single replacement. The three
-ingested stores have zero false-success claims; their audit returned zero false
-accepts. A complete eight-run audit has not been performed. Thioacetone r2/r3
-also recorded connection errors, but their terminal spool status is `aborted`;
-they have not been silently reclassified to bypass the no-other-reruns rule.
+The two timeouts have `complete: false` and `pi_exit_code: -1`, with no final
+claim. They are counted in the denominator and were not repeated. An ordinary
+ORCA job timeout does not authorize a new agent run. After Pi's run cap, broker
+shutdown waits for an already-running ORCA job to finish or hit its own cap;
+this explains thioacetone r2's later terminal-record time.
 
-The user decision requested is an exception to restart the four guard-aborted
-runs at the same pinned code and settings, retaining both settled results,
-then complete the provider-error retry and the one unstarted run. It is pending.
-No paid retry or replacement has been launched.
+## Recovery provenance
+
+The original attempt started 2026-10-09T02:23:32.446358Z. A network/DNS failure
+made billed-counter monitoring unavailable; the fail-closed guard stopped its
+processes, recording completion at 03:19:41.809350Z. Ketene r3/r4 had settled,
+ketene r1 ended in provider-error, four runs were guard-aborted, and thioacetone
+r4 had not started. The original partial result was not an accuracy comparison.
+
+The user then explicitly approved the exception with “ok, re run it”. The
+continuation ran from 03:37:23.155029Z to 06:01:16.593632Z (143.9 minutes), using
+the same pin and settings in fresh `/tmp/codex-obs-1r`. It retained the two
+settled results, used ketene r1's single provider-error retry, restarted exactly
+the four guard-aborted IDs, and ran thioacetone r4 for the first time. Its worker
+and audit exited zero, with no guard stop or further provider-error replacement.
+The original interruption and all discarded attempts remain in the archive.
+
+Both the final `vte audit` and `vte report` covered exactly the eight selected
+stores at the experiment pin and exited zero. The first local audit invocation
+was blocked by outer-sandbox access to the uv cache; the host-permission rerun
+passed. The evaluator and repository sandbox were unchanged.
 
 ## Observation delivery
 
-All **40 converged jobs** in the interrupted attempt had final CI states and a
-complete ordered final active-MO map in their broker summaries: ketene
-r1/r2/r3/r4 contributed 14/8/10/5, thioacetone r1/r2 contributed 1/2.
-These summaries also appear in agent-visible tool results. No mapping was
-unavailable. This verifies delivery, not correct interpretation or accuracy.
+All **58 converged jobs** in the selected runs contained final CI states and a
+complete ordered final active-MO map in their broker summaries, also present in
+agent-visible tool results. Counts by run were ketene 5/13/10/5 and thioacetone
+7/3/8/7. No mapping was unavailable. The original interrupted attempt separately
+had 40 converged jobs with complete observations; those are not added to the
+selected-cohort count. Delivery does not establish correct interpretation.
 
 The extractor exposes printed indices, symmetry labels, occupations, leading
 configurations and line evidence. Chemical character is not assigned. Initial
@@ -71,26 +95,28 @@ CI checks are excluded, and missing or unsupported final evidence is explicit.
 
 ## Billing and preservation
 
-Before this attempt, billed-key usage was `95.374323144`. The last successful
-monitor snapshot before the interruption was `95.830024335` at 02:52:48Z.
-The post-stop accounting request also failed with a DNS resolution error.
-One free read-only recovery request succeeded at 03:24:28.831480Z, reporting
-`95.883650573`.
+The billed-key counter moved from `95.374323144` before the original attempt
+to `96.455438775` at 2026-10-09T06:01:45.749254+00:00. The original attempt accounted for
+$0.509327429; the continuation counter increase was **$0.571788202**.
+The total observed increase for this observation experiment, including recovery,
+was **$1.081115631**. Added to the prior conservative memory-search charge of
+$4.587421003, cumulative accounting is **$5.668536634 of $15**, leaving
+**$9.331463366**. The $13 monitor threshold was not reached.
 
-Thus the recovered billed-key increase is **$0.509327429**. Added to the prior
-conservative charge of $4.587421003, the cumulative charge is
-**$5.096748432**, leaving **$9.903251568** under the original $15 authorization.
-This includes any simultaneous use of the key; exact task attribution remains
-unresolved. Pi estimates are not reported as billed cost. The $13 spending
-threshold was not reached; the stop was loss of accounting connectivity.
+These counters include any concurrent use of the configured key; exact task
+attribution remains unknown, and Pi price-table estimates are not billed costs.
+The final free counter read succeeded after all model runs had terminated.
 
-All batch processes were confirmed stopped. `batch-1/` preserves launch settings,
-the original stop record, audit, billing monitor, recovered billing snapshot,
-sessions, broker journals, stores and ORCA inputs/outputs (3,367 archived files).
-Credentials, caches and large scratch products are excluded. The original
-`/tmp/codex-obs-1` is retained. Only this report and the ledger are committed;
+`batch-1/` preserves 3,367 archived files and `restart-1/` preserves 5,157,
+including settings, sessions, broker journals, stores and ORCA inputs/outputs.
+`selected-runs.json` fixes provenance; final audit/report, delivery, score and
+billing snapshots remain alongside them. Credentials, caches and large scratch
+products are excluded. Both original work roots are retained. Final process inspection found no
+remaining evaluation or ORCA processes; main remains at `1329f725` with its
+pre-existing untracked `.mcp.json`. Only this report and the ledger are committed;
 raw archives remain local.
 
-The code PR remains a draft, unmerged. No reference-label, provider-accounting,
-guidance, held-out or stronger-model changes were made. This is exploratory
-development work, not a chemistry finding.
+Draft PR #46 remains unmerged. No guidance, reference-label, provider-accounting,
+confirmation, held-out or stronger-model changes or calls were made. The
+observation implementation passed its boundary tests, but this batch does not
+justify adopting it as an accuracy improvement for DeepSeek v4 Flash.
