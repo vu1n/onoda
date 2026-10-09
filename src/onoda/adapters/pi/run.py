@@ -33,6 +33,7 @@ The spool HMAC key of each launch stays in memory and is handed to ingest
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -358,6 +359,8 @@ def _record_driver(
             model=live.model,
             max_cost_usd=live.max_cost_usd,
         )
+        if live.models_json is not None:  # absent for runs on Pi's own catalog
+            config["pi_models_sha256"] = hashlib.sha256(live.models_json.read_bytes()).hexdigest()
 
 
 def _handoff(fork: ForkLaunch | None, script: Script | None, live: LiveSettings | None) -> bool:

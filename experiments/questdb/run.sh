@@ -25,7 +25,9 @@
 # run; one agent shell command is capped separately, A72), REPORT_REMINDER (off;
 # 1 tells an agent that stops without report_vtes, once, to report), ONLY_RUNS (run
 # ids such as "S1-thioacetone-r1", space-separated: run only those, e.g. to rerun
-# one run into a fresh WORK). Every ORCA job runs
+# one run into a fresh WORK), PI_MODELS (a Pi models.json copied into each run's
+# agent dir, for a model the pinned Pi catalog lacks; its sha256 is recorded in the
+# run's config). Every ORCA job runs
 # in the job sandbox (A65), which sees ORCA_HOME, MPI_HOME and its own job dir
 # only, so none of these may sit inside ORCA_HOME or MPI_HOME, and nothing here
 # is written inside the repository.
@@ -99,11 +101,12 @@ store_args() {  # run id -> the run's agent store, evaluator store and ORCA cach
   fi
 }
 run_one() {  # case id, arm, repeat
-  local case_id=$1 arm=$2 r=$3 run_id store evaluator cache started ladder=() reminder=()
+  local case_id=$1 arm=$2 r=$3 run_id store evaluator cache started ladder=() reminder=() models=()
   run_id="$arm-${case_id#questdb-}-r$r"
   read -r store evaluator cache <<< "$(store_args "$run_id")"
   [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
   [ "${REPORT_REMINDER:-0}" = 1 ] && reminder=(--report-reminder)
+  [ -n "${PI_MODELS:-}" ] && models=(--pi-models "$PI_MODELS")
   echo "== $run_id" >&2
   started=$SECONDS
   mkdir -p "$(dirname "$store")"
@@ -117,6 +120,7 @@ run_one() {  # case id, arm, repeat
     --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
     --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
     ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} ${reminder[@]+"${reminder[@]}"} \
+    ${models[@]+"${models[@]}"} \
     > "$OUT/$run_id.run.json" 2> "$OUT/$run_id.run.err"; then
     progress "$run_id" "$started" "run failed, skipped (see $run_id.run.err)"
     return 0
