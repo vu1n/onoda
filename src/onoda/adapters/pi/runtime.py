@@ -477,8 +477,11 @@ def build_launch(
 
     if sol_pi_cfg is not None:
         _write_json(agent_dir / "sol-pi.json", sol_pi_cfg)
+    models_path = agent_dir / "models.json"
     if live is not None and live.models_json is not None:
-        (agent_dir / "models.json").write_bytes(live.models_json.read_bytes())
+        models_path.write_bytes(live.models_json.read_bytes())
+    else:  # a reused work dir must not carry an earlier run's undeclared catalog
+        models_path.unlink(missing_ok=True)
 
     path_aliases = {
         str(workspace_dir): "$WORKSPACE",
