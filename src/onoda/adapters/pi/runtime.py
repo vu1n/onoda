@@ -240,6 +240,10 @@ class LiveSettings:
     credential_env: str | None = None
     max_requests: int | None = None
     max_cost_usd: str | None = None
+    # Optional: a Pi `models.json` copied into the run's fresh agent dir, for a
+    # model the pinned Pi catalog lacks (it would otherwise borrow another
+    # model's API type and prices). None: Pi's own catalog only.
+    models_json: Path | None = None
 
     def validate(self) -> None:
         """Raise `CapabilityError` naming every missing/invalid setting, then check
@@ -263,6 +267,8 @@ class LiveSettings:
             raise CapabilityError(
                 f"live Pi run credential env var {self.credential_env!r} is not set"
             )
+        if self.models_json is not None and not self.models_json.is_file():
+            raise CapabilityError(f"live Pi run models.json {str(self.models_json)!r} not found")
 
 
 @dataclass(frozen=True)
@@ -471,6 +477,11 @@ def build_launch(
 
     if sol_pi_cfg is not None:
         _write_json(agent_dir / "sol-pi.json", sol_pi_cfg)
+    models_path = agent_dir / "models.json"
+    if live is not None and live.models_json is not None:
+        models_path.write_bytes(live.models_json.read_bytes())
+    else:  # a reused work dir must not carry an earlier run's undeclared catalog
+        models_path.unlink(missing_ok=True)
 
     path_aliases = {
         str(workspace_dir): "$WORKSPACE",

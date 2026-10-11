@@ -256,6 +256,56 @@ def test_s0_omits_sol_pi_and_scripted_extension_in_live_mode(tmp_path, monkeypat
     assert run_info["max_cost_usd"] == "2.50"
 
 
+def _live_launch_with_models(tmp_path, models_json, *, bundle_root=None):
+    return build_launch(
+        variant_id="S0",
+        bundle_dir=make_bundle(bundle_root or tmp_path, ladder=False),
+        work_dir=tmp_path / "work",
+        live=LiveSettings(
+            provider="openrouter",
+            model="vendor/new-model",
+            credential_env="MY_KEY",
+            max_requests=5,
+            max_cost_usd="2.50",
+            models_json=models_json,
+        ),
+        max_requests=5,
+        max_acquisitions=0,
+        sandbox=stub_sandbox(tmp_path),
+    )
+
+
+def test_live_models_json_is_copied_into_the_agent_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_KEY", "x")
+    source = tmp_path / "models.json"
+    source.write_text('{"providers": {"openrouter": {"models": []}}}')
+    launch_obj = _live_launch_with_models(tmp_path, source)
+    assert (launch_obj.agent_dir / "models.json").read_bytes() == source.read_bytes()
+
+
+def test_live_without_models_json_writes_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_KEY", "x")
+    launch_obj = _live_launch_with_models(tmp_path, None)
+    assert not (launch_obj.agent_dir / "models.json").exists()
+
+
+def test_reused_work_dir_drops_an_earlier_models_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_KEY", "x")
+    source = tmp_path / "models.json"
+    source.write_text('{"providers": {"openrouter": {"models": []}}}')
+    _live_launch_with_models(tmp_path, source)
+    second = tmp_path / "second"
+    second.mkdir()
+    launch_obj = _live_launch_with_models(tmp_path, None, bundle_root=second)
+    assert not (launch_obj.agent_dir / "models.json").exists()
+
+
+def test_live_refuses_a_missing_models_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_KEY", "x")
+    with pytest.raises(CapabilityError, match="models.json"):
+        _live_launch_with_models(tmp_path, tmp_path / "absent.json")
+
+
 def test_sol_pi_json_written_per_variant(tmp_path):
     bundle_dir = make_bundle(tmp_path, ladder=True)
     launch_obj = build_launch(

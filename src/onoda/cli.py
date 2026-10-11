@@ -342,6 +342,7 @@ def _live_settings(a):
         credential_env=a.credential_env,
         max_requests=a.max_requests,
         max_cost_usd=a.max_cost_usd,
+        models_json=Path(a.pi_models) if getattr(a, "pi_models", None) else None,
     )
 
 
@@ -1252,6 +1253,9 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--model")
     rv.add_argument("--credential-env", help="name of the env var holding the API key")
     rv.add_argument("--max-cost-usd")
+    rv.add_argument(
+        "--pi-models", help="a Pi models.json for the run's agent dir (models Pi's catalog lacks)"
+    )
     rv.add_argument("--max-requests", type=int)
     rv.add_argument(
         "--sandbox", action="store_true", help="run Pi in the sandbox (always on for --live)"
