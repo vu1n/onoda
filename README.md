@@ -226,8 +226,10 @@ per-trial and per-call caps; `onoda optimize status` and the output's
 `spent_usd` show what was spent. `onoda pi run --live` needs the sandbox too,
 and `onoda pi run --sandbox` runs a scripted run inside it.
 
-`onoda optimize compare --candidate cand.json` is the live gate check that
-promotes a candidate to seed (A54), and `onoda optimize noise` runs one
+`onoda optimize compare --candidate cand.json` is the live gate check a
+candidate must pass before it is promoted to seed (A54). It stores a
+`promotion-check` report and its verdict; promoting means then updating
+`seed_candidate.json` and `SEED_DIGEST` in the source. `onoda optimize noise` runs one
 candidate twice (A/A) to show what moves with nothing changed. Both reports
 carry case-bootstrap intervals and headroom (`optimize/diagnostics.py`); these
 are advisory and never change a gate verdict.
@@ -356,7 +358,7 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | Evaluate against a reference | ORCA 6.0 vs 5.0 TD-DFT: exact differences reported, verdict `unresolved` (no justified tolerance, A6) | `tests/test_smoke_cases.py`, `scripts/demo.sh` |
 | Resume | Semantic restart from checkpoints; native session resume refused | T10, T14; `tests/test_jobs.py`, `tests/test_controller.py` |
 | Fork | Quiescent checkpoints; policy, parser, input, calc-config and memory interventions with invalidation | T03, T05, T07; `tests/test_forks.py` |
-| Fork a Pi run | Replays the parent's prefix and continues on a script or a live model; refused on any prefix drift. Not for RLM or imported runs | `tests/test_pi_fork.py` |
+| Fork a Pi run | Replays the parent's prefix and continues on a script or a live model; refused if a replayed tool call returns a different result (a scripted parent's prefix also fails on any context drift). Not for RLM or imported runs | `tests/test_pi_fork.py` |
 | Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. Live runs through OpenRouter (DeepSeek V4 Flash) in ablations, searches and the QUESTDB suite | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
 | Replay an agent run | Re-runs Pi under the recorded responses and fails closed on any change to what the model was shown | `tests/test_pi_end_to_end.py` |
 | Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because the fixture tolerances leave `count.unresolved` undeclared (the chosen ones, A49, are in `gates/`). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
