@@ -51,18 +51,38 @@ starting harness's 49 and 5. On two TD-DFT outputs it never saw, it went from
 The rewrite tells the agent to copy energies and units exactly as printed and
 to take each state's multiplicity only from the output's headers.
 
-Read this as a working loop, not a chemistry result. The agent reads and
-reports finished ORCA outputs; onoda has not yet run ORCA itself. The cases are
-small public regression outputs from cclib, none has had human review, the
-advisory ladder is a synthetic placeholder, and only one cheap model was used.
+Since then onoda has run ORCA itself. On 2026-10-03 it re-executed the M2
+cases with ORCA 6.1.1 on the owner's Mac
+([`experiments/orca-exec/RESULTS.md`](experiments/orca-exec/RESULTS.md)); every
+comparison with the acquired logs is `unresolved` by design (no tolerance, A6).
+In the QUESTDB slice the agent writes and runs its own SA-CASSCF/SC-NEVPT2 jobs.
+Suite 1 (2026-10-07, eight molecules, Baseline S0 against Decision S1, two
+repeats, `deepseek/deepseek-v4-flash`, about $2.73) ended with 0
+false-success claims in both arms and 0 false accepts in the grader audit. S0
+identified 51 of 106 target states, 37 within 0.3 eV; S1 46 of 106, 32 within
+0.3 eV. The spread between repeats is as large as the gap between arms, so this
+declares no winner ([`experiments/questdb/gate-6.md`](experiments/questdb/gate-6.md)
+records the result; [`suite-1.md`](experiments/questdb/suite-1.md) the
+pre-registration).
+
+Read all of this as a working loop, not a chemistry result. The M2 cases are
+small public regression outputs from cclib and none has had human review; the
+QUESTDB ladder is a reconstruction from the paper, not the authors' own; and
+every live result so far comes from DeepSeek models. Claude Opus 5.5 and
+Sonnet 5.5 can now be run through `--pi-models` (below), but no such result has
+landed on main yet.
 
 ## Status
 
 Milestones M0 to M4 of the handoff in [`docs/handoff/`](docs/handoff/) are
 done ([`SOL_PI_DELTA.md`](docs/handoff/SOL_PI_DELTA.md) overrides conflicting
-text there). Before any claim about chemistry: human review of the cases, ORCA
-runs on licensed hardware against the paper's targets, and a real advisory
-ladder. Decisions, including the open ones, are governed docs in
+text there). Past M4: the QUESTDB slice with agent-run ORCA jobs (gates 1 to 6
+and suite 1 in [`experiments/questdb/`](experiments/questdb/)), forks of
+recorded Pi runs, frozen markdown memory tiers for both QUESTDB arms (A75),
+shadow-only System One decision models (A67, A70) and a kypp memory shadow, and
+a Terminal-Bench slice ([`experiments/tb4-slice/`](experiments/tb4-slice/)).
+Before any claim about chemistry: human review of the cases, more and stronger
+models on the QUESTDB suite, and a real advisory ladder. Decisions, including the open ones, are governed docs in
 [`.brief/docs/`](.brief/docs/); [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) maps the
 old A-row ids to them.
 
@@ -126,7 +146,16 @@ onoda pi replay s0 --store ./store-a --work-dir ./replay   # fails closed on any
 # A live run needs every setting stated (A35):
 onoda pi run ... --live --provider P --model M --credential-env P_API_KEY \
   --max-requests 20 --max-cost-usd 5   # S2b/S3 add --reducer-provider R --reducer-model RM
+# Fork a recorded run at a checkpoint: replay the parent's prefix, then continue
+# on a script or (--live, with its own caps) on a real model (A36):
+onoda pi fork s0 --checkpoint <digest> --new-run s0-fork --store ./store-a \
+  --work-dir ./fork --script continuation.json --reason "try a different next step"
 ```
+
+A fork records the parent, checkpoint and prefix, and is refused if any replayed
+tool call shows the child a different result than the parent saw. RLM runs,
+imported runs, finalized checkpoints and live continuations of reducer variants
+are not forkable yet.
 
 M3b ablation (spec format: `tests/ablation_fixtures/spec.yaml`; the chosen tolerances
 are `gates/tolerances.yaml`, zero worsening on every capability metric, A49):
@@ -197,6 +226,14 @@ per-trial and per-call caps; `onoda optimize status` and the output's
 `spent_usd` show what was spent. `onoda pi run --live` needs the sandbox too,
 and `onoda pi run --sandbox` runs a scripted run inside it.
 
+`onoda optimize compare --candidate cand.json` is the live gate check a
+candidate must pass before it is promoted to seed (A54). It stores a
+`promotion-check` report and its verdict; promoting means then updating
+`seed_candidate.json` and `SEED_DIGEST` in the source. `onoda optimize noise` runs one
+candidate twice (A/A) to show what moves with nothing changed. Both reports
+carry case-bootstrap intervals and headroom (`optimize/diagnostics.py`); these
+are advisory and never change a gate verdict.
+
 QUESTDB slice: the agent writes and runs its own SA-CASSCF/SC-NEVPT2 ORCA
 jobs (A57–A62). A VTE case (`cases-dev/questdb/`, dev-only) gives the agent a
 QUESTDB geometry and its target states (counts per spin and irrep, no
@@ -218,6 +255,7 @@ onoda pi run-vte questdb-ketene --variant S0 --run-id k0 --store ./store-a \
 onoda pi evaluate-vte k0 --store ./store-a --evaluator-store ./evaluator
 onoda pi replay k0 --store ./store-a --work-dir ./replay   # broker in replay mode: runs nothing
 onoda vte report k0 k1 --store ./store-a --evaluator-store ./evaluator --arm S0 --arm S1
+onoda vte audit k0 k1 --store ./store-a   # grade known-wrong variants of real claims
 ```
 
 `--work-dir` must be short: the broker socket lives under it and macOS allows
@@ -227,8 +265,33 @@ coverage, MAE over identified states and false-success claims, and, for two
 arms, the MAE over the targets both identified; it declares no winner.
 `experiments/questdb/run.sh` runs Baseline (S0) and Decision (S1, the
 reconstructed ladder `experiments/questdb/ladder-from-paper.md`) over the eight
-cases with repeats on the owner's Mac; it refuses to start unless the model,
-credential, caps and ORCA execution are each set explicitly.
+cases with repeats on the owner's Mac (`PARALLEL=N` runs them side by side, one
+store each); it refuses to start unless the model, credential, caps and ORCA
+execution are each set explicitly. Both arms read the frozen memory tiers in
+`experiments/questdb/memory/` (A75). Each broker reply carries the parser's
+summary of the job (A74) and advisory ladder checks (A66) that nothing grades,
+and the agent can build inputs from chosen parameters with `orca_input`.
+`REPORT_REMINDER=1` (`--report-reminder`) gives an agent that stops without a
+claim one hidden reminder, recorded in the run's config.
+
+Models missing from Pi's built-in catalog, such as Claude Opus 5.5 and
+Sonnet 5.5 on OpenRouter, go in a Pi `models.json` passed to `pi run-vte` with `--pi-models`
+(`PI_MODELS=` for `run.sh`); `experiments/questdb/pi-models-claude-5.5.json`
+is one. It is copied into the run's isolated agent dir, and a reused work dir
+without it drops any earlier run's copy:
+
+```bash
+PI_MODELS=experiments/questdb/pi-models-claude-5.5.json MODEL=anthropic/claude-sonnet-5.5 \
+  PROVIDER=openrouter CREDENTIAL_ENV=OPENROUTER_API_KEY ... experiments/questdb/run.sh
+```
+
+Shadow studies record what other components would have done, beside the grade
+and never shown to the agent: `onoda vte shadow` asks a System One decision
+model (Jev or Clef, `onoda.systemone`) which ladder rule each job calls for
+(A67); `onoda vte shadow-dataset` labels each job ready or not from the grader,
+and `onoda decide tune` hill-climbs the question wording against those labels
+with GEPA (A70); `onoda vte memory-shadow` seeds a fresh kypp store from the
+memory tiers and earlier runs and scores its recall against the tiers.
 
 ## Layout
 
@@ -258,15 +321,27 @@ credential, caps and ORCA execution are each set explicitly.
 | `adapters.pi.ingest` | Spool → run record: decision/tool/acquisition receipts, fused-call decomposition, ObservationPack handles as store digests, compactions, checkpoints |
 | `adapters.pi.task` | Task bundle staging and claim grading against the deterministic parser, in the evaluator store |
 | `adapters.pi.run` | One run end to end (case or VTE task) and replay under recorded responses |
+| `adapters.pi.fork` | Fork a recorded Pi run at a checkpoint: replay the prefix, then continue on a script or a live model (A36) |
+| `adapters.pi.sandbox` | The bubblewrap (Linux) and Seatbelt (macOS) sandbox for Pi runs (A50) |
 | `adapters.pi.vte_contract` | VTE task bundle and claim; re-exports the broker wire protocol |
 | `adapters.pi.vte` | VTE bundle staging, identity grading of a run against the deterministic parser (in the evaluator store) and the per-arm report |
+| `adapters.pi.vte_audit` | Mutation audit of the VTE grader: grade known-wrong variants of real claims and count what it still credits |
+| `adapters.pi.vte_shadow` | Shadow decisions per broker job from a System One model, and the labelled dataset for `decide tune` (A67, A70) |
+| `adapters.pi.vte_memory_shadow` | kypp memory shadow scored against the markdown memory tiers |
+| `adapters.tb` | Terminal-Bench slice: Harbor agent, spend proxy, paired runs per arm |
 | `science.orca_broker` | Host-side ORCA broker for `orca_submit`: wire protocol, cache, attempt cap, journal, replay mode |
+| `science.orca_sandbox` | Sandbox for agent-written ORCA inputs (A65) |
+| `science.orca_summary` | The parser's per-job summary sent with every broker reply (A74) |
+| `science.orca_checks` | Deterministic, advisory ladder checks on each job's output (A66) |
 | `science.vte` | VTE case manifests and evaluator-only reference rows |
 | `pi/extensions/` | onoda's Pi extensions (TypeScript): task tools, scripted provider, recorder writing the fsynced spool |
 | `ablation.contract` | M3b contract: arms, spec, outcome vector, metric names and directions, tolerances, gate result |
 | `ablation.metrics` | One run's outcome vector from the agent store and its claim evaluation; the A15 reducer-loss probe |
 | `ablation.gates` | Two-gate comparison, non-dominated set, S3-vs-sum-of-S2 interaction (pure, `Decimal`) |
 | `ablation.run` | Runs every arm on every case and writes the report to the evaluator store |
+| `optimize` | GEPA search, gates, reflection, `compare` (promotion, A54) and diagnostics (noise, intervals, headroom) |
+| `systemone` | Client for the System One decision models Jev and Clef (A67) |
+| `decision_tune` | GEPA over a decision model's question wording against labelled examples (A70) |
 | `science.runner` | Records a case as a run (acquired or executed), parses it, and evaluates it in a separate store |
 
 ## Capability matrix
@@ -278,19 +353,20 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 |---|---|---|
 | Inspect / replay | Demonstrated on fixture, offline, after import into a fresh store | T01, T09; `tests/test_replay.py`, `tests/test_end_to_end.py` |
 | Reanalyze | Demonstrated for the pure parse step; new derivation receipts, originals untouched | T02; `tests/test_replay.py` |
-| Reexecute | Fixture programs via the mock scheduler. Local ORCA execution is implemented but has only run a labelled stand-in executable; no ORCA was available | `inspect --capabilities`, `tests/test_orca_local.py` |
+| Reexecute | Fixture programs via the mock scheduler; the M2 cases with real ORCA 6.1.1 on the owner's Mac (differences reported, verdicts `unresolved`) | `inspect --capabilities`, `tests/test_orca_local.py`, `experiments/orca-exec/RESULTS.md` |
 | Parse authentic solver output | ORCA 5.0/6.0 TD-DFT, EOM-CCSD, ADC(2), STEOM-CCSD, MP2 outputs; values cross-checked against cclib | `tests/test_orca_parser.py` |
 | Evaluate against a reference | ORCA 6.0 vs 5.0 TD-DFT: exact differences reported, verdict `unresolved` (no justified tolerance, A6) | `tests/test_smoke_cases.py`, `scripts/demo.sh` |
 | Resume | Semantic restart from checkpoints; native session resume refused | T10, T14; `tests/test_jobs.py`, `tests/test_controller.py` |
 | Fork | Quiescent checkpoints; policy, parser, input, calc-config and memory interventions with invalidation | T03, T05, T07; `tests/test_forks.py` |
-| Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. No model has been called | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
+| Fork a Pi run | Replays the parent's prefix and continues on a script or a live model; refused if a replayed tool call returns a different result (a scripted parent's prefix also fails on any context drift). Not for RLM or imported runs | `tests/test_pi_fork.py` |
+| Agent runs (Pi) | Real pinned Pi 0.85.1 and SoL-Pi run offline under a scripted provider, for S0, S1, S2a, S2b, S2d and S3 (S2c's mechanism is loaded inside S3 but never triggered); spooled, ingested, verified by offline replay, claims graded. Live runs through OpenRouter (DeepSeek V4 Flash) in ablations, searches and the QUESTDB suite | `tests/test_pi_extensions.py`, `tests/test_pi_end_to_end.py` |
 | Replay an agent run | Re-runs Pi under the recorded responses and fails closed on any change to what the model was shown | `tests/test_pi_end_to_end.py` |
 | Add-one ablation (M3b) | S1, S2a–d and S3 on a case under one scripted script: outcome vectors, activation per mechanism and model, reducer-loss probe, two-gate comparison against S1, S3 interaction. Measured payload bytes fall under ObservationPack; capability gates stay `unresolved` because the fixture tolerances leave `count.unresolved` undeclared (the chosen ones, A49, are in `gates/`). Synthetic, not a mechanism verdict (A40) | `tests/test_ablation_*.py`, `scripts/demo.sh` |
 | RLM extension (S1r) | Real Pi with `ipython` cells, committed JSON state, a child Pi run recorded as its own run and charged to the parent, replay of the whole tree; scripted provider only | `tests/test_pi_rlm_extension.py`, `tests/test_rlm_end_to_end.py` |
 | Harness optimization (M4) | GEPA proposes candidate components from agent traces; SoL-Pi's gates accept or reject each on acceptance cases only. A scripted two-proposal search on real Pi rejects one (a false success) and accepts one (fewer context bytes). Synthetic, not an improvement (A32) | `tests/test_optimize*.py`, `scripts/demo.sh` |
-| Live search (A51) | Built and tested offline only: OpenRouter reflection with recorded receipts against a fake transport, and the search-wide spend cap. No live search has run yet | `tests/test_live_optimizer.py` |
-| Sandbox (A50) | Scripted Pi runs inside bubblewrap: `bash` and the RLM kernel have no network, no credential and no host files; file tools stay in the workspace and bundle | `tests/test_pi_sandbox.py` |
-| Agent-run ORCA jobs (VTE, A57–A59) | Scripted Pi on real Pi submits jobs through the host broker to a labelled stand-in executable (one execution, one cache hit), claims a state, is graded by identity and replays offline with zero executions (the replay broker serves the recorded outputs and repeats the recorded cache-hit flag, never `executed_here`). The stand-in's outputs are synthetic. No real ORCA job has been run by an agent yet | `tests/test_pi_vte_end_to_end.py` |
+| Live search (A51) | Ran live on 2026-09-27 (above); offline tests use a fake transport for reflection receipts and the search-wide spend cap | `tests/test_live_optimizer.py` |
+| Sandbox (A50) | Pi runs inside bubblewrap (Seatbelt on macOS): `bash` and the RLM kernel have no network, no credential and no host files; file tools stay in the workspace and bundle | `tests/test_pi_sandbox.py` |
+| Agent-run ORCA jobs (VTE, A57–A59) | Scripted Pi on real Pi submits jobs through the host broker to a labelled stand-in executable (one execution, one cache hit), claims a state, is graded by identity and replays offline with zero executions (the replay broker serves the recorded outputs and repeats the recorded cache-hit flag, never `executed_here`). Live: agents wrote and ran real ORCA 6.1.1 jobs in gates 1 to 6 and suite 1 | `tests/test_pi_vte_end_to_end.py`, `experiments/questdb/` |
 | Repeat experiment | Not implemented | — |
 
 ## Acceptance tests
@@ -316,12 +392,11 @@ workflow in `onoda.fixture`; none of these rows is a scientific result.
 | SoL-Pi M1 fixtures (handles, compaction, reducer, fusion) | `test_context.py` |
 | T17 authentic fixed-input case (partial: acquired outputs, not executed here) | `test_orca_parser.py`, `test_smoke_cases.py` |
 | T18 honest partial outputs | `test_orca_parser.py` (truncation, missing diagnostics, malformed numbers, wrong units, conflicting listings), `test_smoke_cases.py` |
-| T19 controlled baseline (partial: Pi instead of Prime; isolated agent dir, no global extensions/skills/context files, pinned context, gateway budget; no network or filesystem sandbox yet) | `test_pi_runtime.py`, `test_pi_extensions.py`, `test_pi_end_to_end.py` |
+| T19 controlled baseline (partial: Pi instead of Prime; isolated agent dir, no global extensions/skills/context files, pinned context, gateway budget; sandboxed when live or with `--sandbox`) | `test_pi_runtime.py`, `test_pi_extensions.py`, `test_pi_end_to_end.py` |
 
-T17 is only partly met: its "execute a reviewed fixed input with authorized
-software" step needs an operator-enabled ORCA and a human case review
-(assumptions A7, A26). T19 is partial (above). T20 needs semantic restart of a
-Pi run, which M3 records the state for but does not implement (A36); T21–T25
+T17 is only partly met: ORCA has now executed the fixed inputs, but none has
+had a human case review (assumptions A7, A26). T19 is partial (above). T20 needs semantic restart of a
+Pi run, which M3 records the state for but does not implement (A36; forks are); T21–T25
 belong to later milestones.
 
 ## Limitations
@@ -330,13 +405,14 @@ belong to later milestones.
   spend. Unknown costs are reported as unknown, never zero.
 - One authoritative writer per run; no locking for concurrent writers.
 - Forks require quiescent checkpoints. In-flight forks are not supported.
-- Live Pi runs have used one cheap model (`deepseek/deepseek-v4-flash`) on
-  unreviewed cases; scripts, claims and ladders in the tests are synthetic.
+- Live results so far use DeepSeek models (`deepseek/deepseek-v4-flash`, with
+  `deepseek/deepseek-v4-pro` for reflection) on unreviewed cases; scripts,
+  claims and ladders in the tests are synthetic.
 - The advisory ladder and allowed documentation are unresolved (A33): S1
   onward, the RLM arm S1r included, refuse to run without an operator-supplied
-  ladder.
-- Pi runs are sandboxed only when asked (`--sandbox`) or live (A50), and only
-  on Linux with bubblewrap. Scripted runs and replay are unsandboxed by
+  ladder. The QUESTDB ladder is a reconstruction from the paper (A61).
+- Pi runs are sandboxed only when asked (`--sandbox`) or live (A50), with
+  bubblewrap on Linux or Seatbelt on macOS. Scripted runs and replay are unsandboxed by
   default. Inside the sandbox the Pi process itself keeps network access to
   reach its provider, and the file-tool path check has a time-of-check gap.
 - The spool's HMAC chain is tamper evidence against the agent's own tools
@@ -345,9 +421,10 @@ belong to later milestones.
   run incomplete.
 - `onoda pi replay` executes the recorded tool calls, so it refuses runs that
   arrived through import; replay only runs you recorded yourself.
-- Fork and resume of Pi runs are not implemented (A36). A real (live)
-  provider's reducer and compaction-summary calls are not spooled (see
-  `docs/ADAPTER_SEAM.md` §2).
+- Resume of Pi runs is not implemented (A36). Forks are, except for RLM runs,
+  imported runs, finalized checkpoints and live continuations of reducer
+  variants. A real (live) provider's reducer and compaction-summary calls are
+  not spooled (see `docs/ADAPTER_SEAM.md` §2).
 - Scientific tolerances, task membership, and the expert convergence check are
   unresolved; see [`.brief/docs/`](.brief/docs/). Upstream
   revisions are pinned in [`provenance/sources.json`](provenance/sources.json).
@@ -367,8 +444,8 @@ belong to later milestones.
   digest, log sha256, a fresh parse). A live run's log has no pinned digest,
   so its execution receipt and stand-in flag are trusted as recorded; do not
   grade live runs from imported bundles you did not produce.
-- A live run's timeout kills the ORCA process group, but ORCA itself has only
-  been simulated by a stand-in executable here.
+- A live run's timeout kills the ORCA process group. Real ORCA has run only on
+  the owner's Mac (ORCA 6.1.1, arm64); CI and the tests use a labelled stand-in.
 
 - An ablation report over scripted runs is synthetic (A40): every arm replays
   the same turns, so capability is identical by construction, and tokens and
@@ -377,7 +454,8 @@ belong to later milestones.
   short. The fixture spec's capability gates stay `unresolved`; `gates/tolerances.yaml` (A49) resolves them.
   The reducer-loss probe (A15) has only seen scripted receipts.
 - Ablations do not resume: one that stops partway keeps its runs, and a rerun
-  needs a new `ablation_id` (A41). Ablations do not run RLM arms yet.
+  needs a new `ablation_id` (A41). An RLM ablation (`rlm: true`) runs every arm
+  on S1r (A55).
 - RLM kernel state is recorded only as JSON committed with `commit_state`
   (A43); anything left only in kernel memory is lost with the process, and
   restarting from committed state is not implemented (A36). The kernel runs
@@ -391,7 +469,7 @@ belong to later milestones.
 
 ## Next
 
-Human review of the M2 cases; ORCA runs on licensed hardware against the
-paper's targets; a real advisory ladder (A33); held-out cases beyond TD-DFT;
-RLM arms in ablations; semantic restart of Pi runs from
-committed state (A36); justified scientific tolerances (A6, A18).
+Human review of the M2 cases; the QUESTDB suite on stronger models (Claude
+Opus 5.5 and Sonnet 5.5 through `--pi-models`); a real advisory ladder (A33);
+held-out cases beyond TD-DFT; semantic restart of Pi runs from committed state
+(A36); justified scientific tolerances (A6, A18).
