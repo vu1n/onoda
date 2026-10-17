@@ -236,10 +236,23 @@ def run_batch(spec):
         stop = f"{type(error).__name__}: {error}"
         (HERE / "STOP").write_text(stop + "\n")
         terminate_owned(active)
+    return finish_batch(spec, done, stop)
+
+
+def finish_batch(spec, done, stop=None):
+    """Offline reporting can resume from partial.json without another agent run."""
+    pin = ROOT / ".pinned" / spec["pin"]
+    batch = HERE / spec["batch"]
+    assert not (batch / "score.json").exists(), "batch already scored"
+    out = batch / "out"
+    molecules = HELDOUT if spec.get("heldout") else SCORING
+    launch = json.loads((batch / "launch.json").read_text())
+    started, sha = launch["started"], spec["sha"]
+    start = Decimal(json.loads((HERE / "budget-start.json").read_text())["usage"])
     if done:
         command(
             pin,
-            ["vte", "report", *done, "--run-stores", str(out / "runs"), "--arm", "S1"],
+            ["vte", "report", *done, "--run-stores", str(out / "runs")],
             batch / "report.json",
         )
         command(

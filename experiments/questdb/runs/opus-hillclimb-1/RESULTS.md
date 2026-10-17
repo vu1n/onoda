@@ -140,3 +140,22 @@ a scheduler concurrency problem, not a sandbox-test failure.
 
 Proposal for Vu: investigate the shared `ORCA_WORK` default in the stock parallel
 runner and possible effects on earlier parallel batches. No scheduler code was edited.
+
+Offline candidate-1 validation: `uv run pytest --basetemp=$PWD/.pt/full`: **1009 passed, 8 skipped, 204.25 s**; Ruff lint and format (237 files) passed; Pi `tsc -p .` passed. Tighten removed an unused import and redundant cost calculation from the launcher; no candidate implementation was changed. Synthetic checks verified accept/reject boundaries, eight distinct scratch paths and termination of an owned process tree.
+
+### Batch seed-1
+
+Commit `ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe`, memory @7: unchanged seed. Score **27**, molecule totals {'ketene': 10, 'thioacetone': 6, 'acetaldehyde': 4, 'diazomethane': 7}. Billed $9.498921400; 3412 seconds. Decision pending review. Stop: none.
+
+- S1-ketene-r1: 5/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-ketene-r2: 5/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-thioacetone-r1: 3/7, found 4, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-acetaldehyde-r2: 2/2, found 2, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-acetaldehyde-r1: 2/2, found 2, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-diazomethane-r1: 5/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-thioacetone-r2: 3/7, found 4, claim True, settled True, false successes 0, audit false accepts 0.
+- S1-diazomethane-r2: 2/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
+
+Decision for seed-1: **second seed required**. ['diazomethane repeats 5 and 2 differ by 3; Opus noise is larger than expected']
+
+Reporting recovery: the pooled report CLI requires either two `--arm` values or none. The launcher now lets it infer the single observed arm. The saved eight graded/audited stores were reported without another model call. First seed: **27/46**. Diazomethane repeats **5 vs 2**, so Opus noise is larger than expected and the prescribed second seed is required. No other molecule varied.
