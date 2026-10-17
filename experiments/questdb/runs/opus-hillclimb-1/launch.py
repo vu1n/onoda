@@ -49,14 +49,19 @@ def command(pin, args, target):
 
 def terminate_owned(active):
     # Pi/ORCA may create new process groups; traverse only these run descendants.
-    rows = subprocess.check_output(["ps", "-axo", "pid=,ppid="], text=True)
-    parents = {int(pid): int(ppid) for pid, ppid in (line.split() for line in rows.splitlines())}
     owned = {proc.pid for proc, _ in active.values()}
-    while True:
-        expanded = owned | {pid for pid, parent in parents.items() if parent in owned}
-        if expanded == owned:
-            break
-        owned = expanded
+    pending = list(owned)
+    while pending:
+        parent = pending.pop()
+        result = subprocess.run(
+            ["pgrep", "-P", str(parent)], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode not in (0, 1):
+            raise RuntimeError(f"cannot enumerate owned children: {result.stderr}")
+        for pid in map(int, result.stdout.split()):
+            if pid not in owned:
+                owned.add(pid)
+                pending.append(pid)
     for sig in (signal.SIGTERM, signal.SIGKILL):
         for pid in sorted(owned, reverse=True):
             try:
@@ -141,6 +146,8 @@ def run_batch(spec):
     last_bill = 0
     try:
         while pending or active:
+            if (HERE / "STOP").exists():
+                raise RuntimeError((HERE / "STOP").read_text().strip())
             if time.time() - last_bill >= 20:
                 usage = billed()  # fail closed when accounting is unavailable
                 append(
@@ -214,7 +221,11 @@ def run_batch(spec):
                 proc = subprocess.Popen(
                     ["bash", "experiments/questdb/run.sh"],
                     cwd=pin,
-                    env={**env, "ONLY_RUNS": rid},
+                    env={
+                        **env,
+                        "ONLY_RUNS": rid,
+                        "ORCA_WORK": str(work / "j" / str(runs.index(rid))),
+                    },
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,

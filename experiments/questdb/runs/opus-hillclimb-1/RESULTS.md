@@ -122,3 +122,21 @@ Not yet run; conditional on acceptance.
 ## Spend and stop reason
 
 Billed-key start: $113.866480116, recorded before the first launch. Total spend and stop reason pending.
+
+## Invalid seed attempt: launcher scratch isolation
+
+Four initial requests shared `/tmp/ohs1/jobs/scheduler.json`. The scheduler uses
+load/allocate/save without a cross-process lock. Only three initial directories were
+created; ketene r2's input digest had no distinct directory. `job-00003/job.out`
+reported a corrupt orbital file. The owned 50-process tree was terminated.
+No run settled or was graded; this attempt is invalid and is not a seed score or
+candidate batch. Billed-key delta: $0.892614800.
+
+The launcher now sets a distinct short `ORCA_WORK` directory per run, retaining
+PARALLEL=4 and all fixed settings. Replacement seed uses fresh `/tmp/ohs3`;
+original evidence remains under `seed-attempt-invalid/` and `/tmp/ohs1`.
+The whole-task billing origin is unchanged. All sandbox tests passed; this was
+a scheduler concurrency problem, not a sandbox-test failure.
+
+Proposal for Vu: investigate the shared `ORCA_WORK` default in the stock parallel
+runner and possible effects on earlier parallel batches. No scheduler code was edited.
