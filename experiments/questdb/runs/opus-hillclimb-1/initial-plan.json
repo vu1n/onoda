@@ -1,0 +1,18 @@
+[
+  {
+    "batch": "seed-1",
+    "pin": "oh0",
+    "sha": "ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe",
+    "memory": "@7",
+    "change": "unchanged seed",
+    "work": "/tmp/ohs1"
+  },
+  {
+    "batch": "candidate-1",
+    "pin": "oh1",
+    "sha": "d9f94f511afb5d51dc541b365170179ed43ea509",
+    "memory": "@7",
+    "change": "PR #46: converged CASSCF states and final active-MO mapping",
+    "work": "/tmp/ohc1"
+  }
+]

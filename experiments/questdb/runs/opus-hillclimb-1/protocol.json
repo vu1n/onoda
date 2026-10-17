@@ -1,0 +1,24 @@
+{
+  "scoring": [
+    "ketene",
+    "thioacetone",
+    "acetaldehyde",
+    "diazomethane"
+  ],
+  "heldout": [
+    "formamide",
+    "acetone",
+    "cyclopropenone",
+    "methylenecyclopropene"
+  ],
+  "repeats": 2,
+  "base_sha": "ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe",
+  "budget_usd": 150,
+  "launch_floor_remaining_usd": 15,
+  "accept_delta": 3,
+  "confirmation_delta": 2,
+  "max_molecule_drop": 1,
+  "max_candidate_batches": 8,
+  "consecutive_reject_limit": 3,
+  "model": "anthropic/claude-opus-5.5:high"
+}
