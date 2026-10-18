@@ -15,7 +15,7 @@ def summary(name: str) -> tuple[str, ...]:
 
 def test_a_symmetric_nevpt2_job_lists_its_states_with_line_numbers():
     lines = summary("ketene_f_target")
-    assert lines[:8] == (
+    assert lines == (
         "termination: normal",
         "final single point energy: -152.195237381698 Eh (line 4465)",
         "symmetry: on, point group C2v",
@@ -27,7 +27,6 @@ def test_a_symmetric_nevpt2_job_lists_its_states_with_line_numbers():
     )
     out = (FIXTURES / "ketene_f_target.out").read_text().splitlines()
     assert "6.069" in out[4264 - 1]  # the line number points at the printed value
-    assert any("Converged CAS-SCF states (final CI" in line for line in lines)
 
 
 def test_without_symmetry_the_states_say_no_irrep_was_printed():

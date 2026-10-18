@@ -15,7 +15,6 @@ import re
 
 from onoda.science.contract import ExcitedState
 from onoda.science.orca_parser import parse_orca_output
-from onoda.science.orca_states import casscf_state_summary
 
 _INPUT_ECHO = re.compile(r"^\|\s*\d+>")
 _USESYM = re.compile(r"^\s*Symmetry handling\s+UseSym\s+\.+\s+(\S+)\s*$")
@@ -42,8 +41,6 @@ def job_summary(log: bytes) -> tuple[str, ...]:
         lines.extend(_state(s) for s in states[:MAX_STATE_LINES])
         if len(states) > MAX_STATE_LINES:
             lines.append(f"- ... {len(states) - MAX_STATE_LINES} more")
-    if obs.casscf_converged is not None:
-        lines.extend(casscf_state_summary(log, converged=obs.casscf_converged is True))
     lines.extend(
         f"problem ({p.field}): {p.detail}" + (f" (line {p.evidence.line})" if p.evidence else "")
         for p in obs.problems

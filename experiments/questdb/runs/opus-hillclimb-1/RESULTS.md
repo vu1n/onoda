@@ -1,32 +1,82 @@
 # QUESTDB Opus memory hill climb 1
 
-Exploratory development work, not a chemistry result. Status: detached seed and candidate-1 sequence running.
+**Stopped at the mandatory audit gate during candidate 1 (#46).** The final
+incumbent is unchanged `memory-project@7`, **28.5/46 accurate slots per batch**
+(mean of seed scores 27 and 30). No guidance change was written or accepted.
+Total billed-key spend: **$25.156561200** of $150. No further paid runs are queued.
 
-## Frozen protocol
+Exploratory development work, not a chemistry result.
 
-Base/current main: `ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe` (verified against GitHub before spend).
-Scoring: ketene, thioacetone, acetaldehyde, diazomethane, two repeats each, S1 only.
-Held out: formamide, acetone, cyclopropenone, methylenecyclopropene, untouched until the final check.
-Settings: OpenRouter `anthropic/claude-opus-5.5:high`, 200 requests, harness cost cap 100,
-7200 seconds, report reminder on, four workers, pinned `pi-models-claude-5.5.json`.
-Score is grader-v3 identified slots within 0.3 eV. Accept at incumbent +3, no molecule
-losing more than one summed slot, all eight runs settled with claims, zero false successes
-and audit false accepts. Confirm at incumbent mean +2 with the same safety/claim guards.
-A seed repeat difference above one on any molecule triggers a second seed batch and mean.
-Stop at eight candidate batches (including confirmations), three consecutive rejected
-candidates, less than $15 remaining of the $150 billed-counter ceiling, or any safety failure.
-Held-out batches are conditional on an accepted candidate and remain subject to the ceiling.
+Candidate 1's diazomethane r1 settled at 5/7 accurate with zero false-success
+claims, but the audit credited **five `other_job` mutations**. The launcher
+stopped immediately on that audit result and terminated the other three runs.
+The incomplete batch cannot establish an accuracy improvement or regression.
+This is not evidence that #46 caused a grader vulnerability; it is a failure of
+this search's required zero-false-accept gate.
+
+## Batch ledger
+
+Counts are slots both identified and within 0.3 eV, grader v3. Each complete
+batch has 46 slots. Entries in molecule columns are r1, r2. `stopped` means no
+settled result; it is not scored as zero. Costs are billed-key counter windows,
+not Pi estimates. Wall time includes grading/reporting and any reporting recovery.
+
+| Batch | Commit | Memory / change | Ketene | Thioacetone | Acetaldehyde | Diazomethane | Score | Decision and why | False successes | Audit false accepts | Billed | Wall |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Invalid seed attempt | ce0e974 | @7; shared scratch | — | — | not started | not started | invalid | Discarded before grading: scheduler race; four runs interrupted | ungraded | ungraded | $0.892615 | 8m39s |
+| Seed 1 | ce0e974 | @7; unchanged | 5,5 | 3,3 | 2,2 | 5,2 | 27/46 | Second seed required: diazomethane spread 3 | 0 | 0 | $9.498921 | 56m52s |
+| Seed 2 | ce0e974 | @7; unchanged | 5,5 | 3,3 | 2,2 | 5,5 | 30/46 | Incumbent mean 28.5/46 | 0 | 0 | $8.026745 | 48m24s |
+| Candidate 1 | d9f94f5 | @7; #46 converged CI + active-MO summaries | 5,5 | stopped,stopped | 2,2 | 5,stopped | Incomplete: 19/32 observed slots | Rejected at mandatory audit gate; no confirmation | 0 in five settled runs | 5 (`other_job`) | $6.414951 | 32m03s |
+
+Full code pins:
+- Seed/current-main base: `ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe`.
+- Candidate 1: `d9f94f511afb5d51dc541b365170179ed43ea509`, PR #46 implementation
+  `4e8469d5d1112ddec8f13960f055b9c340c14d22` rebased onto that main.
+
+The original launcher `candidate-1/score.json` subtotal is 14: it only records
+runs that passed their individual audits. The reconciliation entry in
+`ledger.jsonl` also includes the settled 5/7 run that triggered the stop, giving
+19/32 observed slots. Neither subtotal is a full batch score. Three interrupted
+runs have no claims or grades and cannot satisfy the acceptance rule.
+
+## Frozen protocol and calibration
+
+Scoring: ketene, thioacetone, acetaldehyde, diazomethane; two repeats each, S1 only.
+Held out: formamide, acetone, cyclopropenone, methylenecyclopropene. The split was
+written to `protocol.json` before any spend and never changed.
+
+Fixed settings: `ENABLE_LIVE_EXECUTION=1 PROVIDER=openrouter
+MODEL=anthropic/claude-opus-5.5:high CREDENTIAL_ENV=OPENROUTER_API_KEY
+PI_MODELS=experiments/questdb/pi-models-claude-5.5.json MAX_REQUESTS=200
+MAX_COST_USD=100 TIMEOUT=7200 REPORT_REMINDER=1 PARALLEL=4`.
+The memory, model, task inputs, target lists, grader, normalizer, references,
+ladder, parser and run caps were unchanged. #46 only changed advisory job summaries.
+
+Acceptance required incumbent +3, no molecule losing more than one summed slot,
+every run settled with a claim, zero false successes and zero audit false accepts.
+Confirmation would require incumbent mean +2 and the same safety/claim guards.
+After calibration, screening would require at least 32/46 and confirmation at
+least 31/46. Molecule incumbent means were ketene 10, thioacetone 6,
+acetaldehyde 4, diazomethane 8.5.
+
+**Opus noise is larger than expected on diazomethane.** It scored 5,2,5,5 across
+four seed repeats. Every other molecule repeated identically. Seed-1 diazomethane
+r2 identified five slots but only two were within tolerance; its own notes flag
+poorly optimized diffuse orbitals and discarded unphysical solutions. No claim
+was paired to a reference by energy, and no labels were changed to fix the score.
 
 ## Step 0: diagnosis before edits or spend
+
 
 Source: local `claude-baseline-1/opus/out/runs/<run>` agent stores and evaluator-v3
 claim verdicts. Agent claims, spooled provider responses, original ORCA inputs embedded
 in outputs, converged CI blocks and NEVPT2 transition tables were inspected. `diagnosis/`
 contains local extracted agent-visible evidence. No `references.json` was opened.
 
-Leakage note: the requested older wrong-state report and the first raw evaluator record
-exposed reference labels embedded in prose/keys. Subsequent evaluation reads whitelist
-claim verdicts and numeric aggregates; reference labels are not used in guidance. Agent
+Leakage note: the requested older wrong-state report and raw evaluator records
+exposed reference labels embedded in prose/keys. Evaluation extraction was narrowed
+to claim verdicts and numeric aggregates. No guidance candidate was authored, and
+no exposed reference label was encoded in guidance. Agent
 transcripts themselves also recall supposed literature energies before calculating; those
 are model assertions, not verified reference evidence and not candidate instructions.
 
@@ -77,85 +127,120 @@ orbital order (#46, candidate 1); verify diffuse-orbital identity instead of imp
 remembered labels; diagnose an unstable active space/state average using the agent's
 own controlled calculations. Candidate 1 is evaluated before any memory edit.
 
-## Proposals for Vu
+## Stop evidence and interpretation
 
-- Investigate systematic supported-but-unidentified character claims (two ketene slots,
-  three thioacetone slots per repeat) as a reference/normalizer convention question.
-  No grader, normalizer, references or task input change is authorized or made here.
-- Prior transcripts invoke remembered QUESTDB/literature values before inspecting outputs.
-  Consider how to measure this model-prior contamination separately; no reference lookup
-  is used to tune this search.
+Candidate `S1-diazomethane-r1`: seven reported states, five identified and accurate,
+zero false-success claims. Audit: five accepted `other_job` mutations out of 98
+such variants. All other failure-counting variants accepted zero. `label_swap`
+accepted 2 of 4 and is measured only, per the existing audit contract.
+The evidence is local `candidate-1/S1-diazomethane-r1.audit.json`, its evaluator
+record, and the immutable agent store. No audit or grader code was changed.
 
-## Preflight and provenance
-
-Pinned seed `.pinned/oh0` at the base SHA; `uv sync`, matching Pi lockfile and copied
-installed node_modules. Mac-only sandbox suite: **118 passed, 3 skipped, 15.60 s**.
-Rebased #46: `d9f94f5` (original implementation `4e8469d`); sandbox plus observation
-tests: **149 passed, 3 skipped, 17.33 s**. Launcher lint/format and synthetic
-accept/reject boundary checks passed. `brief check` passed; `brief pin` changed no refs;
-`brief doctor` found zero warnings and two pre-existing draft-decision infos.
-
-The requested `codex/questdb-memory-hillclimb.md` was not found in this checkout or the
-prior local workspace; the previous hill-climb report and supplied conventions were read.
-No kypp tool is exposed. Unrelated `.mcp.json` is untouched.
-
-## Batch ledger
-
-The detached launcher appends each completed batch below and to `ledger.jsonl`.
-It runs each completed run through grading and audit before refilling its four-worker pool.
-Billing is polled every 20 seconds; launches stop at $135 spent, with an emergency
-in-flight stop at $145 to leave billing margin under $150. Counter failure stops the
-owned process trees. No live setting or agent sandbox was changed.
+The launcher created `STOP`, terminated only its owned run process trees, wrote
+the partial batch report/ledger, then exited. The final check found its PID gone
+and no direct children. The three interrupted run JSON files are empty, not results.
+No confirmation, memory candidate or held-out batch was launched after the stop.
 
 ## Final diff against @7
 
-Pending; no guidance edited.
+**Empty.** `experiments/questdb/memory/memory-project.md` is byte-for-byte the
+base @7 file. The unaccepted #46 implementation is removed from the final branch
+diff; its original candidate commit and detached `.pinned/oh1` worktree preserve
+what was evaluated. Final changes are the report, ledger, frozen plans and launcher.
 
 ## Uptake
 
-Pending; no accepted bullet.
+No accepted bullets, so accepted-bullet uptake is not applicable. No memory
+candidate was written: the mandatory stop occurred during the required #46 test.
+The stopped comparison supplies no causal estimate of #46's effect on accuracy.
 
 ## Held-out results
 
-Not yet run; conditional on acceptance.
+Not run. No candidate was accepted, so the held-out condition was never reached.
+The held-out molecules were not used to revise guidance.
+
+## Proposals for Vu
+
+- Investigate the `other_job` audit accepts from candidate-1 diazomethane r1.
+  Determine whether different cited jobs printed equivalent supported states or
+  whether the audit reveals a substantive citation-boundary defect. Do not change
+  grading based on this report alone; this task made no such change.
+- #46 failed this experiment's required gate and was not promoted. This is a
+  reason to close #46 as an unvalidated optimization, or defer it pending a
+  separate audit-contract investigation. The incomplete batch does not show that
+  the observation summaries reduced accuracy or caused the false accepts.
+- Investigate supported-but-unidentified character conventions: two ketene and
+  three thioacetone slots per prior Opus repeat, plus two diazomethane claims in
+  seed-1 r1. These remain reference/normalizer questions; no forced rename was tried.
+- Investigate the stock parallel runner's shared `ORCA_WORK` default. Its local
+  scheduler has no cross-process lock. The first attempt here lost an initial
+  allocation and corrupted an orbital file. Check earlier parallel-run provenance
+  separately; this report does not declare earlier results invalid.
+- Prior Opus transcripts recall supposed literature/QUESTDB values before computing.
+  Consider how to measure model-prior contamination separately. Those assertions
+  were not used as verified reference evidence or encoded in guidance.
+
+## Launcher, recovery and validation
+
+All live runs used pinned detached worktrees, under detached `caffeinate -i`, with
+fresh short `WORK` directories. Seed 1: `/tmp/ohs3`; seed 2: `/tmp/ohs2`;
+candidate 1: `/tmp/ohc1`. Each run gets its own `ORCA_WORK=<WORK>/j/<index>`.
+Pi lockfiles matched the installed runtime before copying node_modules.
+
+The invalid initial `/tmp/ohs1` attempt shared one scheduler directory among four
+runs. Four initial requests produced only three initial job directories; ketene
+r2's input digest had no separate directory. `job-00003/job.out` reported orbital
+file corruption. The owned 50-process tree was stopped before any grade. The
+launcher correction isolated scratch per run; no scheduler or sandbox code changed.
+The invalid attempt remains charged to the total and preserved locally.
+
+Seed-1 pooled reporting initially failed because `vte report --arm S1` is invalid:
+the CLI takes exactly two arms or none. The launcher now infers the observed arm.
+The eight saved graded/audited runs were reported without another paid run. The
+reporting helper supports this offline recovery. Subsequent batches reported
+without the operator delay; seed 2 and candidate 1 proceeded while this session
+was not interacting with them.
+
+The first valid run, seed-1 ketene r1, records
+`pi_models_sha256=92824d2f826cc01649254bad8266b40a6c3cdbbc41eb6133a34791038b14359a`
+in its run config and a nonzero Pi estimate of $0.9259122. All completed runs were
+checked for the same digest and positive estimates. API credentials were never
+printed, committed or included in report artifacts.
+
+Validation actually run:
+- Seed Mac sandbox preflight: **118 passed, 3 skipped**, 15.60 s.
+- Rebased #46 sandbox and observation tests: **149 passed, 3 skipped**, 17.33 s.
+- Rebased #46 full offline suite: **1009 passed, 8 skipped**, 204.25 s.
+- Rebased #46 Ruff lint/format (237 files) and Pi TypeScript check passed.
+- Launcher Ruff lint/format passed. Synthetic checks exercised acceptance boundaries,
+  distinct run scratch paths and owned-process termination; actual isolated live
+  directories and recovered offline reporting additionally verified those boundaries.
+- Brief check passed; pin changed no refs. Doctor found no warnings and two existing
+  draft-decision infos. The draft PR records the final review outcome.
+
+Tighten removed an unused import and redundant cost calculation from the launcher.
+The requested `codex/questdb-memory-hillclimb.md` was absent from the local checkouts;
+the supplied conventions, Mac handoff and previous hill-climb report were followed.
+No kypp tool was exposed. Unrelated `.mcp.json` remains untouched.
+Raw stores and extracted diagnostic evidence remain local under this run directory;
+credential-bearing Pi agent directories under `/tmp` are not committed.
 
 ## Spend and stop reason
 
-Billed-key start: $113.866480116, recorded before the first launch. Total spend and stop reason pending.
+Billed-key counter: **$113.866480116 before launch → $139.023041316 after stop**,
+for **$25.156561200** total. The table's batch windows total $24.833232600;
+$0.323328600 of inter-batch and late billing is also charged to the task. Pi's
+estimates are verification only, not the source of this budget total.
 
-## Invalid seed attempt: launcher scratch isolation
+The launcher polled billing every 20 seconds, refused new launches at $135 spent,
+and had an in-flight stop at $145 to leave billing margin below the $150 ceiling.
+Neither budget threshold was reached. All spend, including the invalid attempt
+and interrupted runs, remains charged. Counter attribution assumes no unrelated
+key use; completed seed-1 Pi estimates matched its billed delta to the cent.
 
-Four initial requests shared `/tmp/ohs1/jobs/scheduler.json`. The scheduler uses
-load/allocate/save without a cross-process lock. Only three initial directories were
-created; ketene r2's input digest had no distinct directory. `job-00003/job.out`
-reported a corrupt orbital file. The owned 50-process tree was terminated.
-No run settled or was graded; this attempt is invalid and is not a seed score or
-candidate batch. Billed-key delta: $0.892614800.
+**Stop reason: five audit false accepts during candidate 1.** One candidate batch
+was started, none completed or accepted. Final incumbent: **@7, 28.5/46 mean**.
+No further spending or scientific changes are authorized by the stopped protocol.
 
-The launcher now sets a distinct short `ORCA_WORK` directory per run, retaining
-PARALLEL=4 and all fixed settings. Replacement seed uses fresh `/tmp/ohs3`;
-original evidence remains under `seed-attempt-invalid/` and `/tmp/ohs1`.
-The whole-task billing origin is unchanged. All sandbox tests passed; this was
-a scheduler concurrency problem, not a sandbox-test failure.
-
-Proposal for Vu: investigate the shared `ORCA_WORK` default in the stock parallel
-runner and possible effects on earlier parallel batches. No scheduler code was edited.
-
-Offline candidate-1 validation: `uv run pytest --basetemp=$PWD/.pt/full`: **1009 passed, 8 skipped, 204.25 s**; Ruff lint and format (237 files) passed; Pi `tsc -p .` passed. Tighten removed an unused import and redundant cost calculation from the launcher; no candidate implementation was changed. Synthetic checks verified accept/reject boundaries, eight distinct scratch paths and termination of an owned process tree.
-
-### Batch seed-1
-
-Commit `ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe`, memory @7: unchanged seed. Score **27**, molecule totals {'ketene': 10, 'thioacetone': 6, 'acetaldehyde': 4, 'diazomethane': 7}. Billed $9.498921400; 3412 seconds. Decision pending review. Stop: none.
-
-- S1-ketene-r1: 5/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-ketene-r2: 5/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-thioacetone-r1: 3/7, found 4, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-acetaldehyde-r2: 2/2, found 2, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-acetaldehyde-r1: 2/2, found 2, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-diazomethane-r1: 5/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-thioacetone-r2: 3/7, found 4, claim True, settled True, false successes 0, audit false accepts 0.
-- S1-diazomethane-r2: 2/7, found 5, claim True, settled True, false successes 0, audit false accepts 0.
-
-Decision for seed-1: **second seed required**. ['diazomethane repeats 5 and 2 differ by 3; Opus noise is larger than expected']
-
-Reporting recovery: the pooled report CLI requires either two `--arm` values or none. The launcher now lets it infer the single observed arm. The saved eight graded/audited stores were reported without another model call. First seed: **27/46**. Diazomethane repeats **5 vs 2**, so Opus noise is larger than expected and the prescribed second seed is required. No other molecule varied.
+MAE was not used in any decision; the existing local reports retain it as a
+secondary diagnostic.
