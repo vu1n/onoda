@@ -26,7 +26,7 @@ not Pi estimates. Wall time includes grading/reporting and any reporting recover
 | Invalid seed attempt | ce0e974 | @7; shared scratch | — | — | not started | not started | invalid | Discarded before grading: scheduler race; four runs interrupted | ungraded | ungraded | $0.892615 | 8m39s |
 | Seed 1 | ce0e974 | @7; unchanged | 5,5 | 3,3 | 2,2 | 5,2 | 27/46 | Second seed required: diazomethane spread 3 | 0 | 0 | $9.498921 | 56m52s |
 | Seed 2 | ce0e974 | @7; unchanged | 5,5 | 3,3 | 2,2 | 5,5 | 30/46 | Incumbent mean 28.5/46 | 0 | 0 | $8.026745 | 48m24s |
-| Candidate 1 | d9f94f5 | @7; #46 converged CI + active-MO summaries | 5,5 | stopped,stopped | 2,2 | 5,stopped | Incomplete: 19/32 observed slots | Rejected at mandatory audit gate; no confirmation | 0 in five settled runs | 5 (`other_job`) | $6.414951 | 32m03s |
+| Candidate 1 | d9f94f5 | @7; #46 converged CI + active-MO summaries | 5,5 | stopped,stopped | 2,2 | 5,stopped | Incomplete: 19/25 observed slots | Rejected at mandatory audit gate; no confirmation | 0 in five settled runs | 5 (`other_job`) | $6.414951 | 32m03s |
 
 Full code pins:
 - Seed/current-main base: `ce0e9744e0b7f6b483724d51c6a0fc8ffa6adffe`.
@@ -36,7 +36,7 @@ Full code pins:
 The original launcher `candidate-1/score.json` subtotal is 14: it only records
 runs that passed their individual audits. The reconciliation entry in
 `ledger.jsonl` also includes the settled 5/7 run that triggered the stop, giving
-19/32 observed slots. Neither subtotal is a full batch score. Three interrupted
+19/25 observed slots. Neither subtotal is a full batch score. Three interrupted
 runs have no claims or grades and cannot satisfy the acceptance rule.
 
 ## Frozen protocol and calibration
