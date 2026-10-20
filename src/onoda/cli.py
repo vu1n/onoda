@@ -586,6 +586,27 @@ def cmd_vte_report(a) -> Any:
     return report
 
 
+def cmd_vte_evidence(a) -> Any:
+    from onoda.science.orca_evidence import build_packet
+
+    try:
+        data = Path(a.output).read_bytes()
+    except OSError as exc:
+        raise OnodaError(f"cannot read ORCA output: {exc}") from exc
+    return build_packet(data, max_evidence_chars=a.max_evidence_chars, synthetic=a.synthetic)
+
+
+def cmd_vte_evidence_check(a) -> Any:
+    from onoda.science.orca_evidence import check_packet
+
+    try:
+        packet = json.loads(Path(a.packet).read_bytes())
+        data = Path(a.output).read_bytes()
+    except (OSError, ValueError, RecursionError) as exc:
+        raise OnodaError(f"cannot read evidence packet/output: {exc}") from exc
+    return check_packet(packet, data)
+
+
 def cmd_vte_memory_shadow(a) -> Any:
     from onoda.adapters.pi import vte_memory_shadow as ms
     from onoda.adapters.pi.contract import REPO_ROOT
@@ -1096,6 +1117,7 @@ def cmd_ablation_show(a) -> Any:
 def build_parser() -> argparse.ArgumentParser:
     from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS
     from onoda.science.orca_broker import DEFAULT_LIMITS
+    from onoda.science.orca_evidence import MAX_EVIDENCE_CHARS
 
     p = argparse.ArgumentParser(prog="onoda", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -1372,6 +1394,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     vt = sub.add_parser("vte", help="QUESTDB vertical-transition-energy runs")
     vt = vt.add_subparsers(dest="vte_command", required=True)
+    ve = vt.add_parser("evidence", help="create an offline source-backed ORCA evidence packet")
+    ve.add_argument("output", help="archived ORCA output; no solver or model is run")
+    ve.add_argument("--max-evidence-chars", type=int, default=MAX_EVIDENCE_CHARS)
+    ve.add_argument("--synthetic", action="store_true", help="declare mutated or stand-in output")
+    ve.set_defaults(func=cmd_vte_evidence)
+    vc = vt.add_parser(
+        "evidence-check",
+        help="check packet integrity against supplied bytes; never a science grade",
+    )
+    vc.add_argument("packet", help="evidence packet JSON")
+    vc.add_argument("output", help="the source output bytes to check against")
+    vc.set_defaults(func=cmd_vte_evidence_check)
     vr = vt.add_parser(
         "report", help="coverage, MAE and false successes per arm over graded VTE runs"
     )
@@ -1581,6 +1615,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"error": type(exc).__name__, "message": str(exc)}), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
+    if args.func is cmd_vte_evidence_check and result["valid"] is not True:
+        return 2
     return 0
 
 

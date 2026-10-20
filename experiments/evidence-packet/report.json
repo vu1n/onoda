@@ -1,0 +1,766 @@
+{
+  "excluded_molecules": [
+    "acetone",
+    "formamide",
+    "cyclopropenone",
+    "methylenecyclopropene"
+  ],
+  "limitations": [
+    "Lexical retention and integrity only; no scientific-ready or harmful-mismatch labels.",
+    "Packet facts are the direct parser baseline; no extraction accuracy gain is claimed.",
+    "An excerpt's verbatim text match cannot verify source line or job identity.",
+    "Presentation is capped at 12000 characters; full packet size is not provider-bounded.",
+    "Logs share molecule lineage; mutations and repeated jobs are not independent samples.",
+    "No training, tuning, calibrated probability, selective-risk or model comparison.",
+    "A consistent substituted packet/source pair needs an independent archive binding.",
+    "Wavefunctions, orbital maps and recorded run/job bindings were not supplied.",
+    "Synthetic status and source authenticity remain caller declarations.",
+    "Clairic/Clef quality, costs and scientific value remain unmeasured."
+  ],
+  "lineage_groups": [
+    "phase-0-2026-10-02:ethylene",
+    "phase-0-2026-10-02:formaldehyde",
+    "phase-0-2026-10-02:ketene"
+  ],
+  "model_arms": {
+    "clairic_then_clef": "not run",
+    "direct_clef": "not run"
+  },
+  "model_cost_usd": null,
+  "model_latency_seconds": null,
+  "molecule_groups": [
+    "ethylene",
+    "formaldehyde",
+    "ketene"
+  ],
+  "provider_calls": 0,
+  "samples": [
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 1,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 441,
+      "legacy_excerpt_retained": 0,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ketene",
+      "molecule": "ketene",
+      "packet_inventory_retained": 1,
+      "packet_presentation_chars": 48,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 1,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 1,
+      "parser_warnings": 0,
+      "path": "tests/fixtures/orca611-nevpt2/ketene_a_rhf.out",
+      "source": "sha256:e3d4b60dd1eb42050777ffd671367c3c1511ba0f7980b939858832e5b04a2016",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 2,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 2380,
+      "legacy_excerpt_retained": 0,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ketene",
+      "molecule": "ketene",
+      "packet_inventory_retained": 2,
+      "packet_presentation_chars": 93,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 2,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 2,
+      "parser_warnings": 1,
+      "path": "tests/fixtures/orca611-nevpt2/ketene_b_valence_dz.out",
+      "source": "sha256:292ba1e9e6a7a599b26ab898dbdcda234f428161c9629fb8629c401347c17a9d",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 1,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 2114,
+      "legacy_excerpt_retained": 0,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ketene",
+      "molecule": "ketene",
+      "packet_inventory_retained": 1,
+      "packet_presentation_chars": 48,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 1,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 1,
+      "parser_warnings": 0,
+      "path": "tests/fixtures/orca611-nevpt2/ketene_c_valence_avtz_nosym.out",
+      "source": "sha256:3ff0a59244e03c92cd528df1e69b26c14383b1f0fa65d6888f15a5ea092c3294",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 1,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 2348,
+      "legacy_excerpt_retained": 0,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ketene",
+      "molecule": "ketene",
+      "packet_inventory_retained": 1,
+      "packet_presentation_chars": 48,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 1,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 1,
+      "parser_warnings": 0,
+      "path": "tests/fixtures/orca611-nevpt2/ketene_d_valence_avtz_sym.out",
+      "source": "sha256:9b2803919b21eaf615bbb86c3fa4c15beb2cebae86e4d14d01acf42e0486110c",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 3,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 3582,
+      "legacy_excerpt_retained": 2,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ketene",
+      "molecule": "ketene",
+      "packet_inventory_retained": 3,
+      "packet_presentation_chars": 150,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 3,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 3,
+      "parser_warnings": 0,
+      "path": "tests/fixtures/orca611-nevpt2/ketene_f_target.out",
+      "source": "sha256:51a44cebb2a22cbf563f32217ccb4d4dbae48463747b6ecbc04b9a73dc07a7e1",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 5,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 2776,
+      "legacy_excerpt_retained": 3,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ethylene",
+      "molecule": "ethylene",
+      "packet_inventory_retained": 5,
+      "packet_presentation_chars": 247,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 5,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 5,
+      "parser_warnings": 1,
+      "path": "tests/fixtures/orca611-nevpt2/ethylene_guess.out",
+      "source": "sha256:cf10fcedcf15f590752c38525a6543ac40534487a44acd845927f1594b1865cd",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 15,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 3338,
+      "legacy_excerpt_retained": 6,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ethylene",
+      "molecule": "ethylene",
+      "packet_inventory_retained": 15,
+      "packet_presentation_chars": 1171,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 15,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 15,
+      "parser_warnings": 8,
+      "path": "tests/fixtures/orca611-nevpt2/ethylene_nevpt2_np4.out",
+      "source": "sha256:d73d1e00485380d1ec488d7ac406a488a0d5d86da8ccf568c233f9a2e020d71d",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 2,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 1402,
+      "legacy_excerpt_retained": 1,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:ethylene",
+      "molecule": "ethylene",
+      "packet_inventory_retained": 2,
+      "packet_presentation_chars": 208,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 2,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 2,
+      "parser_warnings": 1,
+      "path": "tests/fixtures/orca611-nevpt2/ethylene_nevpt2_np4_default_orbstep.out",
+      "source": "sha256:e26be768950fb186ab77f65affca1d1a6a82e84888d17c1b64e25ea2aaade99e",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 6,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 2846,
+      "legacy_excerpt_retained": 4,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:formaldehyde",
+      "molecule": "formaldehyde",
+      "packet_inventory_retained": 6,
+      "packet_presentation_chars": 293,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 6,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 6,
+      "parser_warnings": 1,
+      "path": "tests/fixtures/orca611-nevpt2/formaldehyde_guess.out",
+      "source": "sha256:e10f2de53a15401cea67374fe22c01e66ac994b5cab15af774c1a5929a8ea8a8",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    },
+    {
+      "corruptions": [
+        {
+          "digest_only_rejected": true,
+          "mutation": "source_bytes_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "fact_changed",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_location_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_text_forged",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "evidence_omitted",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "job_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "wavefunction_binding_invented",
+          "rejected": true,
+          "synthetic": true
+        },
+        {
+          "digest_only_rejected": false,
+          "mutation": "presentation_coverage_forged",
+          "rejected": true,
+          "synthetic": true
+        }
+      ],
+      "direct_parser_inventory_retained": 11,
+      "genuine_packet_valid": true,
+      "job_binding": "unavailable",
+      "legacy_excerpt_chars": 3340,
+      "legacy_excerpt_retained": 8,
+      "legacy_warnings_retained": 0,
+      "lineage": "phase-0-2026-10-02:formaldehyde",
+      "molecule": "formaldehyde",
+      "packet_inventory_retained": 11,
+      "packet_presentation_chars": 518,
+      "packet_presentation_omitted": [],
+      "packet_presentation_retained": 11,
+      "parser": "orca-parser@3",
+      "parser_evidence_lines": 11,
+      "parser_warnings": 2,
+      "path": "tests/fixtures/orca611-nevpt2/formaldehyde_nevpt2_np4.out",
+      "source": "sha256:21a4b9b59ba174e91d743f7fff423815e55ea228872799e8aa6ad6cbbc1fc96d",
+      "wavefunction_binding": "unavailable",
+      "zero_budget_packet_valid": true
+    }
+  ],
+  "schema": "onoda.evidence-packet-comparison/1",
+  "solver_calls": 0,
+  "totals": {
+    "authentic_outputs": 10,
+    "digest_only_rejections": 10,
+    "direct_parser_inventory_retained": 47,
+    "genuine_packets_valid": 10,
+    "legacy_excerpt_retained": 24,
+    "legacy_warnings_retained": 0,
+    "packet_inventory_retained": 47,
+    "packet_presentation_retained": 47,
+    "packet_rejections": 80,
+    "parser_evidence_lines": 47,
+    "parser_warnings": 14,
+    "synthetic_corruptions": 80,
+    "zero_budget_packets_valid": 10
+  }
+}
