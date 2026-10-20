@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,24 @@ def test_noncanonical_annotations_are_invalid_instead_of_crashing():
         packet = build_packet(raw)
         packet["unknowns"].append(value)
         assert check_packet(packet, raw)["valid"] is False
+
+
+@pytest.mark.parametrize("field", ["unexpected", "unknowns", "evidence"])
+def test_nested_packet_fields_do_not_amplify_memory_before_rejection(field):
+    packet = build_packet(b"", synthetic=True)
+    nested = {}
+    for _ in range(200):
+        nested = {"x" * 1000: nested}
+    packet[field] = nested
+    # The source is empty: measuring schema rejection, not ORCA-output size.
+    # Eager canonicalization retains ~20 MB of ancestor paths for this 0.2 MB tree.
+    tracemalloc.start()
+    try:
+        assert check_packet(packet, b"")["valid"] is False
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 2 * 1024 * 1024
 
 
 def test_cli_copied_artifacts_validate_and_corrupt_packet_exits_nonzero(tmp_path, capsys):

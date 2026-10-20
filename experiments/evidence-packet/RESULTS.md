@@ -10,11 +10,16 @@ This is an integrity and coverage result. It establishes neither better chemistr
 nor a better scientific decision policy. No Clairic/Clef integration is justified
 by these measurements: deterministic parsing already provides the printed facts.
 
-Validation: 33 focused packet/CLI/archive tests passed; the full offline suite
-with pinned Pi passed **1005 tests, 18 skipped**. Ruff lint/format and the Pi
+Validation: 36 focused packet/CLI/archive tests passed; the full offline suite
+with pinned Pi passed **1008 tests, 18 skipped**. Ruff lint/format and the Pi
 TypeScript check passed. Brief check/pin passed; doctor reported no warnings and
 two existing draft-decision infos. No scientific parser, grader or audit rule was
 changed.
+
+A security regression checks that nested malformed packet fields are rejected
+before canonicalization can amplify memory through cumulative diagnostic paths.
+The fix compares against reconstructed field shapes first; it changes neither
+scientific parsing nor packet facts and introduces no scientific thresholds.
 
 ## Use and reproduce
 

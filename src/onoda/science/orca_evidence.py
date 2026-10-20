@@ -143,17 +143,18 @@ def check_packet(packet: Any, data: bytes) -> dict[str, Any]:
     if not isinstance(packet, dict) or packet.get("schema") != PACKET_SCHEMA:
         return {"valid": False, "errors": ["packet_schema_mismatch"]}
     try:
-        canonical_bytes(packet)
         budget = _budget(packet["presentation"]["max_chars"])
         synthetic = packet["observation"]["synthetic"]
         expected = build_packet(data, max_evidence_chars=budget, synthetic=synthetic)
+        if packet.keys() != expected.keys():
+            errors.append("packet_fields_mismatch")
+        for field, value in expected.items():
+            # Canonicalization builds diagnostic paths recursively. First compare
+            # with the known shape so arbitrary nested input cannot amplify them.
+            if field not in packet or packet[field] != value:
+                errors.append(f"{field}_mismatch")
+            elif canonical_bytes(packet[field]) != canonical_bytes(value):
+                errors.append(f"{field}_mismatch")
     except (OnodaError, KeyError, TypeError, ValueError, RecursionError):
         return {"valid": False, "errors": ["malformed_packet"]}
-    if packet.keys() != expected.keys():
-        errors.append("packet_fields_mismatch")
-    for field in expected:
-        if field not in packet or canonical_bytes(packet[field]) != canonical_bytes(
-            expected[field]
-        ):
-            errors.append(f"{field}_mismatch")
     return {"valid": not errors, "errors": errors}
