@@ -79,7 +79,13 @@ instead (open question 1).
   from the whole input, not just the `!` line, because `orca_input` writes NEVPT2 as
   `PTMethod SC_NEVPT2` inside the `%casscf` block, as the authentic target inputs do. The match
   depends on the input text alone, and a test covers every input `orca_input` can build plus the
-  fixture inputs. That first NEVPT2 job may be a different input in S0 than in S1. A write-up says
+  fixture inputs.
+- Only a single-point energy is eligible. The input's `!` lines must carry none of ORCA's
+  optimisation, frequency, scan or IRC keywords (`Opt`, `OptTS`, `Freq`, `NumFreq`, `IRC`, and the
+  rest of a fixed list the implementation pins and tests), and the input must have no `%geom` block
+  and no `$new_job`. Any other job would go on changing `job.gbw` after the cut (see the
+  invariants). An ineligible NEVPT2 job runs and is served normally, and does not consume the
+  trigger. The first eligible job may be a different input in S0 than in S1. A write-up says
   so.
 - **The fault is transient.** The trigger fires once per run, on one submission. A later
   submission, including an identical resubmission, runs and is served normally (from the run's
@@ -122,9 +128,10 @@ instead (open question 1).
   NEVPT2 does not change the orbitals, so the real job's `job.gbw` is the file the imitated kill
   would have left. Every other product (`job_property.txt` above all, which can hold NEVPT2
   results) is withheld. Withholding `job.gbw` too would be its own tell and a different recovery
-  path. The "NEVPT2 leaves `job.gbw` unchanged" premise is an assumption to check before the
-  pilot: compare the file from a full job against the one from a CASSCF-only run of the same input
-  on the Mac. If they differ, the faulted reply offers no files and the doc says so. The journal
+  path. The "NEVPT2 leaves `job.gbw` unchanged" premise holds only for the single-point inputs the
+  trigger accepts, and it is an assumption to check before the pilot: compare the file from a full
+  job against the one from a CASSCF-only run of the same input on the Mac, for each input shape
+  `orca_input` builds for a single point. If they differ, the faulted reply offers no files and the doc says so. The journal
   records every product's sha256 either way.
 - Neither the injected output nor the job's real output is written to the shared cache. The real
   output stays in the record for audit.
