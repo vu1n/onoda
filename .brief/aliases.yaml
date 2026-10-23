@@ -1,5 +1,7 @@
 agent-sandbox:
   latest: 2
+broker-fault-injection:
+  latest: 1
 case-data-provenance:
   latest: 2
 decision-models-shadow-only:
