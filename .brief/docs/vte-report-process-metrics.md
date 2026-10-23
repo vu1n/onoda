@@ -15,11 +15,11 @@ Each arm in `onoda vte report` carries three descriptive process metrics next to
 accuracy and MAE:
 
 - `jobs_per_accurate`: the arm's broker jobs (cache hits included, as in `jobs`) divided by its
-  `accurate` count, as decimal text; `unresolved` when nothing is accurate. It counts broker
-  calls, not compute: an arm's later runs look cheaper once its earlier runs warmed the cache,
-  so it depends on run order.
+  `accurate` count, as decimal text; `unresolved` when nothing is accurate. It counts the
+  agent's submissions, not compute: a cache hit is one call, like a job ORCA ran.
 - `executed_per_accurate`: the same with only the jobs the arm's runs executed (`jobs_executed`,
-  `executed_here`), which does not move with cache warmth.
+  `executed_here`). This one does depend on the cache, and so on run order: for the same
+  submissions, a warm cache executes fewer jobs.
 - `jobs_failed_share`: `jobs_failed` divided by `jobs`, as decimal text; `unresolved` with no jobs.
   It is a share of jobs, not of runs, and says nothing about recovery.
 - `stability`: per case, each run's `accurate` count in run order (`accurate_per_run`), its range

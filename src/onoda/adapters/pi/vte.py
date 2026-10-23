@@ -571,7 +571,8 @@ def vte_report_runs(
     those ORCA refused before iterating (`jobs_rejected`). Process metrics
     (the Nature Reviews Methods Primer's "cross-run stability" and efficiency,
     doi 10.1038/s43586-026-00534-y): `jobs_per_accurate` (broker calls, cache
-    hits included), `executed_per_accurate` (jobs this arm's runs ran) and
+    hits included), `executed_per_accurate` (jobs this arm's runs ran, so it
+    falls as the cache warms) and
     `jobs_failed_share` (of jobs, not runs) as decimal text, and `stability`,
     each case's accurate count per run in run order with its range (max minus
     min; `unresolved` below two runs). When exactly
@@ -635,7 +636,8 @@ def vte_report_runs(
         a["identified_targets"] = len(errors[arm])
         pre_v3 = any(n is None for v in accurate_by_case[arm].values() for n in v)
         # A run graded before evaluator v3 adds jobs but no accuracy: no ratio over mixed runs.
-        # Broker calls, cache hits included, so it depends on run order; not compute cost.
+        # jobs: submissions, cache hits included. jobs_executed: ORCA runs, fewer on a warm
+        # cache, so that ratio depends on run order.
         a["jobs_per_accurate"] = "unresolved" if pre_v3 else ratio_text(a["jobs"], a["accurate"])
         a["executed_per_accurate"] = (
             "unresolved" if pre_v3 else ratio_text(a["jobs_executed"], a["accurate"])

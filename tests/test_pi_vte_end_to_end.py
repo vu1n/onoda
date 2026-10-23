@@ -226,7 +226,8 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded, monkeypatch
     s1 = report["arms"]["S1"]
     assert (s1["jobs"], s1["jobs_failed"], s1["jobs_rejected"]) == (2, 0, 0)
     assert (s1["jobs_per_accurate"], s1["jobs_failed_share"]) == ("2.000000", "0.000000")
-    assert s1["executed_per_accurate"] == f"{s1['jobs_executed']}.000000"
+    # One job ran ORCA and one was a cache hit: 2 broker calls, 1 execution, 1 accurate.
+    assert (s1["jobs_executed"], s1["executed_per_accurate"]) == (1, "1.000000")
     assert s1["stability"] == {  # one run measures no spread
         "accurate_per_run": {CASE_ID: [1]},
         "accurate_spread": {CASE_ID: "unresolved"},
