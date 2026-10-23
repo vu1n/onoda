@@ -2,7 +2,7 @@
 id: broker-fault-injection
 project: onoda
 type: decision
-status: draft
+status: active
 title: "An opt-in fault plan makes the broker serve a known failure in place of one job's output, recorded as injected, never credited, and measured against clean controls"
 related_code:
   - "src/onoda/science/orca_broker.py"
@@ -181,9 +181,11 @@ instead (open question 1).
 - Attribution of a faulted job's own targets (its `%casscf` root blocks, the case irrep mapping and
   the C2v B1/B2 convention), ordinal triggers, and forks of faulted runs with their trigger state.
 
-### Open questions for the owner (decide before this goes active)
+### Owner decisions (ratified 2026-10-23)
 
-1. Is relying on the agent not knowing the wall limit enough, or should the faulted reply be held
-   until `max_wall_seconds`? Holding costs up to 30 minutes per faulted run at the current
-   setting.
-2. Is the pilot design above (2×2×2×2, first block of 8 checked first) the one to run?
+1. Faulted replies are not held until `max_wall_seconds`. The pilot relies on the agent not
+   knowing the limit, checked by the test above, and the write-up discloses the timing limitation
+   rather than claiming the injection is indistinguishable. If the agent turns out to see elapsed
+   time some other way, this is revisited after the first block of 8.
+2. The pilot design above (2×2×2×2, first block of 8 checked first) is the one to run. Launching
+   it still needs the owner's go-ahead at the time.
