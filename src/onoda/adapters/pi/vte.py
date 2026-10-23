@@ -111,6 +111,35 @@ def mean_ev(values: list[Decimal]) -> str:
     )
 
 
+def ratio_text(numerator: int, denominator: int) -> str:
+    """`numerator / denominator` as decimal text (`_MEAN_PLACES`), or `unresolved` over zero."""
+    if denominator == 0:
+        return "unresolved"
+    return format((Decimal(numerator) / denominator).quantize(_MEAN_PLACES, ROUND_HALF_EVEN), "f")
+
+
+# Context: doc://onoda/vte-report-process-metrics@0001#process-metrics — descriptive only; a run without evaluator-v3 accuracy makes its case's spread unresolved
+def stability(accurate_by_case: Mapping[str, list[int | None]]) -> dict[str, Any]:
+    """Cross-run spread of the accurate count per case: each run's count and max minus min.
+
+    The spread is a range of observed counts, not an uncertainty estimate. A
+    case with fewer than two runs was not measured, and a run graded before
+    evaluator v3 has no accuracy (`None`): either makes its case's spread
+    `unresolved`, and so the arm's largest spread over cases.
+    """
+    spread: dict[str, int | str] = {}
+    for c, v in sorted(accurate_by_case.items()):
+        counts = [n for n in v if n is not None]
+        measured = len(counts) == len(v) >= 2
+        spread[c] = max(counts) - min(counts) if measured else "unresolved"
+    known = [v for v in spread.values() if isinstance(v, int)]
+    return {
+        "accurate_per_run": {c: list(v) for c, v in sorted(accurate_by_case.items())},
+        "accurate_spread": spread,
+        "max_accurate_spread": "unresolved" if len(known) < len(spread) else max(known, default=0),
+    }
+
+
 def stage_vte_bundle(
     case: LoadedVteCase,
     dest: Path,
@@ -431,14 +460,15 @@ class VteJobCounts(NamedTuple):
     jobs: int
     failed: int
     rejected: int  # failed before any SCF or CASSCF iteration: ORCA refused the input
+    executed: int  # ran ORCA in this run: not a cache hit
 
 
 def vte_job_counts(store: Store, run_id: str) -> VteJobCounts:
     """Jobs, failed jobs and rejected inputs of a VTE run: every broker job it named.
 
-    Cache hits are included.
+    Cache hits are included in `jobs`; `executed` counts only the jobs this run ran.
     """
-    jobs = failed = rejected = 0
+    jobs = failed = rejected = executed = 0
     for event in store.events(run_id):
         if event.type != "invocation.committed":
             continue
@@ -449,7 +479,8 @@ def vte_job_counts(store: Store, run_id: str) -> VteJobCounts:
         jobs += 1
         failed += job_failed(receipt.status, log)
         rejected += job_input_rejected(receipt.status, log)
-    return VteJobCounts(jobs, failed, rejected)
+        executed += receipt.metadata.get("executed_here") is True
+    return VteJobCounts(jobs, failed, rejected, executed)
 
 
 def job_failed(status: str, output: bytes) -> bool:
@@ -537,7 +568,14 @@ def vte_report_runs(
     claim count, the runs that never reported (`runs_without_claim`, so a
     timed-out run is not read as an agent that found nothing), and the ORCA
     jobs the arm named with how many failed (`jobs`, `jobs_failed`) and how many of
-    those ORCA refused before iterating (`jobs_rejected`). When exactly
+    those ORCA refused before iterating (`jobs_rejected`). Process metrics
+    (the Nature Reviews Methods Primer's "cross-run stability" and efficiency,
+    doi 10.1038/s43586-026-00534-y): `jobs_per_accurate` (broker calls, cache
+    hits included), `executed_per_accurate` (jobs this arm's runs ran, so it
+    falls as the cache warms) and
+    `jobs_failed_share` (of jobs, not runs) as decimal text, and `stability`,
+    each case's accurate count per run in run order with its range (max minus
+    min; `unresolved` below two runs). When exactly
     two arms are compared (or `arms` names two), `common_target_mae_ev` restricts both to targets
     (case, reference row) each arm identified in at least one run, averaging
     an arm's repeats per target first, so both arms are measured on the same
@@ -547,6 +585,7 @@ def vte_report_runs(
     """
     per_arm: dict[str, dict[str, Any]] = {}
     errors: dict[str, dict[tuple[str, str], list[Decimal]]] = {}
+    accurate_by_case: dict[str, dict[str, list[int | None]]] = {}
     synthetic = False
     for store, evaluator_store, run_id in runs:
         run = store.run_record(run_id)
@@ -570,15 +609,20 @@ def vte_report_runs(
                 "jobs": 0,
                 "jobs_failed": 0,
                 "jobs_rejected": 0,
+                "jobs_executed": 0,
             },
         )
         counts = vte_job_counts(store, run_id)
         a["jobs"] += counts.jobs
         a["jobs_failed"] += counts.failed
         a["jobs_rejected"] += counts.rejected
+        a["jobs_executed"] += counts.executed
         a["runs"].append(run_id)
         a["coverage"] += int(m["coverage"])
         a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3
+        accurate_by_case.setdefault(arm, {}).setdefault(m["case.id"], []).append(
+            int(m["accurate"]) if "accurate" in m else None
+        )
         a["runs_without_claim"] += m["claim.present"] == "false"  # never reported, e.g. timed out
         a["coverage_total"] += int(m["coverage.total"])
         a["false_success_claims"] += int(m["false_success_claims"])
@@ -590,6 +634,16 @@ def vte_report_runs(
     for arm, a in per_arm.items():
         a["mae_ev"] = mean_ev([e for errs in errors[arm].values() for e in errs])
         a["identified_targets"] = len(errors[arm])
+        pre_v3 = any(n is None for v in accurate_by_case[arm].values() for n in v)
+        # A run graded before evaluator v3 adds jobs but no accuracy: no ratio over mixed runs.
+        # jobs: submissions, cache hits included. jobs_executed: ORCA runs, fewer on a warm
+        # cache, so that ratio depends on run order.
+        a["jobs_per_accurate"] = "unresolved" if pre_v3 else ratio_text(a["jobs"], a["accurate"])
+        a["executed_per_accurate"] = (
+            "unresolved" if pre_v3 else ratio_text(a["jobs_executed"], a["accurate"])
+        )
+        a["jobs_failed_share"] = ratio_text(a["jobs_failed"], a["jobs"])
+        a["stability"] = stability(accurate_by_case[arm])
     report: dict[str, Any] = {
         "arms": per_arm,
         "synthetic": synthetic,

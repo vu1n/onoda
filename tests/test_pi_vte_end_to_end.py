@@ -173,7 +173,7 @@ def recorded(short):
     return short, store, evaluator, binary, pi
 
 
-def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
+def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded, monkeypatch):
     root, store, evaluator, binary, pi = recorded
     r = pi.ingest
     assert (r.status, r.complete) == ("settled", True), pi.stderr_tail
@@ -225,6 +225,23 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert report["arms"]["S1"]["accurate"] == 1 and report["arms"]["S1"]["runs_without_claim"] == 0
     s1 = report["arms"]["S1"]
     assert (s1["jobs"], s1["jobs_failed"], s1["jobs_rejected"]) == (2, 0, 0)
+    assert (s1["jobs_per_accurate"], s1["jobs_failed_share"]) == ("2.000000", "0.000000")
+    # One job ran ORCA and one was a cache hit: 2 broker calls, 1 execution, 1 accurate.
+    assert (s1["jobs_executed"], s1["executed_per_accurate"]) == (1, "1.000000")
+    assert s1["stability"] == {  # one run measures no spread
+        "accurate_per_run": {CASE_ID: [1]},
+        "accurate_spread": {CASE_ID: "unresolved"},
+        "max_accurate_spread": "unresolved",
+    }
+
+    # A run graded before evaluator v3 has no `accurate`: its ratio and spread are unresolved.
+    pre_v3 = ev.model_copy(
+        update={"metrics": {k: v for k, v in ev.metrics.items() if k != "accurate"}}
+    )
+    monkeypatch.setattr(pi_vte, "_latest_vte_evaluation", lambda _store, _run_id: pre_v3)
+    old = pi_vte.vte_report(store, evaluator, ["vte"])["arms"]["S1"]
+    assert old["jobs_per_accurate"] == old["executed_per_accurate"] == "unresolved"
+    assert old["stability"]["max_accurate_spread"] == "unresolved"
 
 
 def test_a_run_citing_a_stand_in_job_is_graded_synthetic(recorded, monkeypatch):

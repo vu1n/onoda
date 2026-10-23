@@ -21,6 +21,8 @@ from onoda.adapters.pi.vte import (
     VTE_EVALUATOR_VERSION,
     VteJob,
     evaluate_vte_claims,
+    ratio_text,
+    stability,
     stage_vte_bundle,
 )
 from onoda.adapters.pi.vte_contract import ClaimedVte, VteClaim, VteTaskBundle
@@ -443,3 +445,32 @@ def test_a_rejected_input_is_a_failed_job_that_never_iterated(status, output, re
     from onoda.adapters.pi.vte import job_input_rejected
 
     assert job_input_rejected(status, output()) is rejected
+
+
+def test_process_ratios_are_decimal_text_and_unresolved_over_zero():
+    assert ratio_text(93, 32) == "2.906250"
+    assert ratio_text(9, 93) == "0.096774"
+    assert ratio_text(5, 0) == "unresolved"  # an arm with nothing accurate
+
+
+def test_stability_reports_each_case_per_run_and_its_spread():
+    # Shaped like gate 6 plus the noise run: ketene S0 went 0, 2, 2, 0 accurate.
+    s = stability({"questdb-thioacetone": [4, 5, 5, 4], "questdb-ketene": [0, 2, 2, 0]})
+    assert s == {
+        "accurate_per_run": {
+            "questdb-ketene": [0, 2, 2, 0],
+            "questdb-thioacetone": [4, 5, 5, 4],
+        },
+        "accurate_spread": {"questdb-ketene": 2, "questdb-thioacetone": 1},
+        "max_accurate_spread": 2,
+    }
+    one_run = stability({"questdb-ketene": [5], "questdb-thioacetone": [3, 3]})
+    assert one_run["accurate_spread"] == {"questdb-ketene": "unresolved", "questdb-thioacetone": 0}
+    assert one_run["max_accurate_spread"] == "unresolved"  # one run measures no spread
+
+
+def test_stability_is_unresolved_for_a_run_graded_before_accuracy_existed():
+    s = stability({"questdb-ketene": [5, None], "questdb-thioacetone": [3, 3]})
+    assert s["accurate_per_run"] == {"questdb-ketene": [5, None], "questdb-thioacetone": [3, 3]}
+    assert s["accurate_spread"] == {"questdb-ketene": "unresolved", "questdb-thioacetone": 0}
+    assert s["max_accurate_spread"] == "unresolved"  # never a spread computed from a stand-in 0
