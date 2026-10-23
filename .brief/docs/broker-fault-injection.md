@@ -103,7 +103,9 @@ instead (open question 1).
   the CASSCF converged. If the real job timed out, failed or failed those checks, the trigger does
   not fire. The agent is served the real failure, and the journal records `injected: skipped` with
   the real reason, so a recovery is never credited to an injection layered over a genuine failure.
-  If the NEVPT2 header is absent, the trigger is skipped the same way.
+  If the NEVPT2 header is absent, the trigger is skipped the same way. A skip consumes the trigger:
+  no later job is faulted, and the run is reported under `...:not-fired` with the skip reason, so a
+  run never holds both an uncontrolled failure and a planted fault.
 - The journal reply entry carries `injected: {fault, transform_version, plan_sha256}`, both
   `output_sha256` (served) and `real_output_sha256`, and the scheduler's `real_status` and
   `real_reason`. Ingest checks the spool against the served output, as it does today, and stores
@@ -133,8 +135,10 @@ instead (open question 1).
 
 ### Experiment protocol
 
-- Every pilot run, faulted or clean, starts from the same cache state: a fresh empty cache, or one
-  identical frozen preseed, with that run's writes isolated. Otherwise clean recovery jobs warm the
+- Every pilot run, faulted or clean, starts from a fresh empty cache, with that run's writes
+  isolated. A preseed is not allowed in the pilot: a preseeded NEVPT2 job would be a cache hit in a
+  clean control but executed in a faulted run, so the conditions would differ by more than the
+  fault. Otherwise clean recovery jobs warm the
   cache for the next arm. Run order alternates arms and conditions rather than running all of S0
   before S1.
 - First pilot: `killed-before-nevpt2`; ketene and thioacetone; S0 and S1; clean and faulted; Opus
