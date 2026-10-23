@@ -72,6 +72,9 @@ fault sources from the Mac run stores. That is a later revision of this decision
   writes CASSCF as a `%casscf` block and NEVPT2 as `PTMethod SC_NEVPT2` inside it, as the
   authentic target inputs do. The match is a function of the input text alone, with a test over
   every input `orca_input` can build and the fixture inputs.
+- A submission gets at most one fault. When several unfired triggers match it, the first in plan
+  order fires and the others stay armed for later submissions; the journal names the trigger that
+  fired by its index in the plan.
 - Each trigger fires at most once per run. An identical resubmission of a faulted input (same
   cache key) is served the same fault output again, so a resubmission is not a free fix. It is
   still counted as a job.
@@ -105,9 +108,12 @@ fault sources from the Mac run stores. That is a later revision of this decision
 - Every faulted job counts toward `max_executions` (`orca-broker-boundary`).
 - Every v1 transform is a pure prefix cut of the real output at a parsed marker. If the marker is
   absent, the trigger does not fire, and the journal records `injected: skipped` with the reason.
-- Replay serves the recorded served bytes like any other journaled reply (`replay-fails-closed`).
-  A fork inherits the parent's plan unless the fork declaration changes it, which is a declared
-  fork change.
+- Replay serves the recorded served bytes like any other journaled reply (`replay-fails-closed`),
+  and a replayed entry keeps its `injected` field and `real_output_sha256`, so a fork's replayed
+  prefix is still classified as fault-injected. A fork inherits the parent's plan unless the fork
+  declaration changes it, which is a declared fork change. The fork's trigger state is rebuilt
+  from the replayed prefix: a trigger that fired there stays fired, so the continuation cannot
+  inject it a second time.
 - The `orca_checks` and `summary` lines are computed from the served output, as the agent would see
   them for a real failure of that kind.
 - `vte report` adds per-fault recovery fields for `fault-injected` arms: the accurate count on the
@@ -122,7 +128,11 @@ fault sources from the Mac run stores. That is a later revision of this decision
   A1 roots were requested. A block that requests fewer excited roots than there are rows would
   need energy order to say which rows it served (`match-by-identity` forbids that), so it makes
   the recovery fields `unresolved`. So does an input with no parsable root blocks. A plan may
-  instead name the targets explicitly, which then wins and is recorded.
+  instead name the targets explicitly, which then wins and is recorded. Explicit targets are
+  (spin, irrep) groups from the task manifest the agent already sees (`vte-task-inputs`), never
+  reference row ids, character labels or energies, because the plan's bytes live in the agent
+  store and its export (`evaluator-isolation`). So an explicit target selects every row of its
+  group, and a job that cannot be attributed to whole groups stays `unresolved`.
 - That mapping holds only when the faulted job ran in the case's point group: its input keeps
   symmetry on (`orca_input` omits `UseSym` when `symmetry: false`) and its output prints the
   case's point group. A job without symmetry runs in C1, where `irrep 0` mixes every case irrep,
