@@ -465,3 +465,10 @@ def test_stability_reports_each_case_per_run_and_its_spread():
         "max_accurate_spread": 2,
     }
     assert stability({"questdb-ketene": [5]})["max_accurate_spread"] == 0
+
+
+def test_stability_is_unresolved_for_a_run_graded_before_accuracy_existed():
+    s = stability({"questdb-ketene": [5, None], "questdb-thioacetone": [3, 3]})
+    assert s["accurate_per_run"] == {"questdb-ketene": [5, None], "questdb-thioacetone": [3, 3]}
+    assert s["accurate_spread"] == {"questdb-ketene": "unresolved", "questdb-thioacetone": 0}
+    assert s["max_accurate_spread"] == "unresolved"  # never a spread computed from a stand-in 0

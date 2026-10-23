@@ -118,16 +118,23 @@ def ratio_text(numerator: int, denominator: int) -> str:
     return format((Decimal(numerator) / denominator).quantize(_MEAN_PLACES, ROUND_HALF_EVEN), "f")
 
 
-def stability(accurate_by_case: Mapping[str, list[int]]) -> dict[str, Any]:
+# Context: doc://onoda/vte-report-process-metrics@draft#process-metrics — descriptive only; a run without evaluator-v3 accuracy makes its case's spread unresolved
+def stability(accurate_by_case: Mapping[str, list[int | None]]) -> dict[str, Any]:
     """Cross-run spread of the accurate count per case: each run's count and max minus min.
 
-    A case with one run has spread 0. The largest spread over cases is the arm's.
+    A case with one run has spread 0. A run graded before evaluator v3 has no
+    accuracy (`None`), so its case's spread is `unresolved`, and so is the
+    arm's largest spread over cases.
     """
-    spread = {c: max(v) - min(v) for c, v in sorted(accurate_by_case.items())}
+    spread: dict[str, int | str] = {}
+    for c, v in sorted(accurate_by_case.items()):
+        counts = [n for n in v if n is not None]
+        spread[c] = max(counts) - min(counts) if len(counts) == len(v) else "unresolved"
+    known = [v for v in spread.values() if isinstance(v, int)]
     return {
         "accurate_per_run": {c: list(v) for c, v in sorted(accurate_by_case.items())},
         "accurate_spread": spread,
-        "max_accurate_spread": max(spread.values(), default=0),
+        "max_accurate_spread": "unresolved" if len(known) < len(spread) else max(known, default=0),
     }
 
 
@@ -571,7 +578,7 @@ def vte_report_runs(
     """
     per_arm: dict[str, dict[str, Any]] = {}
     errors: dict[str, dict[tuple[str, str], list[Decimal]]] = {}
-    accurate_by_case: dict[str, dict[str, list[int]]] = {}
+    accurate_by_case: dict[str, dict[str, list[int | None]]] = {}
     synthetic = False
     for store, evaluator_store, run_id in runs:
         run = store.run_record(run_id)
@@ -605,7 +612,7 @@ def vte_report_runs(
         a["coverage"] += int(m["coverage"])
         a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3
         accurate_by_case.setdefault(arm, {}).setdefault(m["case.id"], []).append(
-            int(m.get("accurate", 0))
+            int(m["accurate"]) if "accurate" in m else None
         )
         a["runs_without_claim"] += m["claim.present"] == "false"  # never reported, e.g. timed out
         a["coverage_total"] += int(m["coverage.total"])
