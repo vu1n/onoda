@@ -76,8 +76,9 @@ fault sources from the Mac run stores. That is a later revision of this decision
   order fires and the others stay armed for later submissions; the journal names the trigger that
   fired by its index in the plan.
 - Each trigger fires at most once per run. An identical resubmission of a faulted input (same
-  cache key) is served the same fault output again, so a resubmission is not a free fix. It is
-  still counted as a job.
+  cache key) runs ORCA again, like any job, and is served the same fault applied to its own new
+  output, so a resubmission is not a free fix. Its served bytes are its own run's prefix (start
+  times and timings differ), and it counts as a job.
 - A run whose plan fired is labelled `fault-injected`. Its arm is reported as
   `<variant>+<plan id>@<plan sha256 prefix>`, so an edited plan that keeps its id never pools with
   the old one, and never pools with clean runs of the same variant. A run whose plan never fired
@@ -90,7 +91,11 @@ fault sources from the Mac run stores. That is a later revision of this decision
   shared-cache lookup, so the fault is never applied to an acquired result from an earlier run. The reply's `executed_here`, `cache_hit` and
   `status` describe the served output exactly as the agent saw it.
 - The journal reply entry carries `injected: {fault, transform_version, plan_sha256}` and both
-  `output_sha256` (served) and `real_output_sha256`. Ingest checks the spool against the served
+  `output_sha256` (served) and `real_output_sha256`, plus the scheduler's real `real_status` and
+  `real_reason`. A fault applies only to a job that completed for real: if the real job timed
+  out or failed, the trigger does not fire, the agent is served that real failure, and the
+  journal records `injected: skipped` with the real reason, so a recovery is never credited to an
+  injection layered over a genuine failure. Ingest checks the spool against the served
   output, as today, and stores the real output as a second object of the same receipt.
 - The served output is labelled `fault-injected`, never `synthetic`, `stand-in` or `not-orca`. Those
   labels mean "not a solver or model result" and `_vte_jobs` would turn them into a synthetic
