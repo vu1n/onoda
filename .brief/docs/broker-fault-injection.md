@@ -116,9 +116,16 @@ instead (open question 1).
   observation. `vte report` states that ("fault-injected: real agent and ORCA, one served output
   transformed by plan <sha>") instead of the synthetic note. A run that is also scripted or
   stand-in stays synthetic, as today.
-- A faulted reply offers **no attachable files**. The real job's products, above all its converged
-  `job.gbw`, are withheld, so the agent can't restart from orbitals the imitated kill could not
-  have produced. The journal still records their sha256 values.
+- A faulted reply offers what a real kill at that point would have left, as a real `timeout`
+  reply does (the broker offers whatever files a failed job left behind). For
+  `killed-before-nevpt2`, that is `job.gbw` and nothing else: the CASSCF has converged by then and
+  NEVPT2 does not change the orbitals, so the real job's `job.gbw` is the file the imitated kill
+  would have left. Every other product (`job_property.txt` above all, which can hold NEVPT2
+  results) is withheld. Withholding `job.gbw` too would be its own tell and a different recovery
+  path. The "NEVPT2 leaves `job.gbw` unchanged" premise is an assumption to check before the
+  pilot: compare the file from a full job against the one from a CASSCF-only run of the same input
+  on the Mac. If they differ, the faulted reply offers no files and the doc says so. The journal
+  records every product's sha256 either way.
 - Neither the injected output nor the job's real output is written to the shared cache. The real
   output stays in the record for audit.
 - The plan and the real output never reach the agent: not through a live tool, not through the Pi
