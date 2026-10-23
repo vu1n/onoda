@@ -63,7 +63,9 @@ fault sources from the Mac run stores. That is a later revision of this decision
 ### The fault plan
 
 - A YAML file given with `--fault-plan`, plus `FAULT_PLAN=` in `run.sh`. It is off by default
-  (`live-off-by-default`), and the run config pins its sha256.
+  (`live-off-by-default`), and the run config pins its sha256. The plan's canonical bytes are
+  also committed to the run's store as an object the run config cites, so a fork on another
+  machine inherits the plan itself, not just its hash.
 - Each trigger names a fault id and a deterministic match. v1 offers two matches: the n-th
   submission that got a job, or the first job whose input requests a CASSCF or an NEVPT2
   calculation. The method is read from the whole input, not just the `!` line: `orca_input`
@@ -74,13 +76,15 @@ fault sources from the Mac run stores. That is a later revision of this decision
   cache key) is served the same fault output again, so a resubmission is not a free fix. It is
   still counted as a job.
 - A run whose plan fired is labelled `fault-injected`. Its arm is reported as
-  `<variant>+<plan id>`, never pooled with clean runs of the same variant. A run whose plan never
-  fired (no matching submission) is reported separately as `<variant>+<plan id>:not-fired`, not
-  as a recovery, and not as a clean run either.
+  `<variant>+<plan id>@<plan sha256 prefix>`, so an edited plan that keeps its id never pools with
+  the old one, and never pools with clean runs of the same variant. A run whose plan never fired
+  (no matching submission) is reported separately as `...:not-fired`, not as a recovery, and not
+  as a clean run either.
 
 ### Invariant
 
-- The broker runs every faulted job for real. The reply's `executed_here`, `cache_hit` and
+- The broker runs every faulted job for real. A submission that matches a trigger skips the
+  shared-cache lookup, so the fault is never applied to an acquired result from an earlier run. The reply's `executed_here`, `cache_hit` and
   `status` describe the served output exactly as the agent saw it.
 - The journal reply entry carries `injected: {fault, transform_version, plan_sha256}` and both
   `output_sha256` (served) and `real_output_sha256`. Ingest checks the spool against the served
@@ -119,6 +123,10 @@ fault sources from the Mac run stores. That is a later revision of this decision
   need energy order to say which rows it served (`match-by-identity` forbids that), so it makes
   the recovery fields `unresolved`. So does an input with no parsable root blocks. A plan may
   instead name the targets explicitly, which then wins and is recorded.
+- That mapping holds only when the faulted job ran in the case's point group: its input keeps
+  symmetry on (`orca_input` omits `UseSym` when `symmetry: false`) and its output prints the
+  case's point group. A job without symmetry runs in C1, where `irrep 0` mixes every case irrep,
+  so its recovery fields are `unresolved` unless the plan names targets.
 
 ### Open questions for the owner (decide before this goes active)
 
