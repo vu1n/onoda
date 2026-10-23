@@ -625,7 +625,9 @@ def vte_report_runs(
     for arm, a in per_arm.items():
         a["mae_ev"] = mean_ev([e for errs in errors[arm].values() for e in errs])
         a["identified_targets"] = len(errors[arm])
-        a["jobs_per_accurate"] = ratio_text(a["jobs"], a["accurate"])
+        pre_v3 = any(n is None for v in accurate_by_case[arm].values() for n in v)
+        # A run graded before evaluator v3 adds jobs but no accuracy: no ratio over mixed runs.
+        a["jobs_per_accurate"] = "unresolved" if pre_v3 else ratio_text(a["jobs"], a["accurate"])
         a["jobs_failed_share"] = ratio_text(a["jobs_failed"], a["jobs"])
         a["stability"] = stability(accurate_by_case[arm])
     report: dict[str, Any] = {

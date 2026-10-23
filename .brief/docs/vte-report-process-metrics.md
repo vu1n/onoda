@@ -36,5 +36,6 @@ threshold is attached: nothing here says how large a spread is acceptable.
 - These metrics are descriptive. They never enter a grade, a promotion gate or an arm verdict.
 - `accurate` is the evaluator v3 count under `vte-energy-tolerance`; nothing new is graded.
 - A run whose evaluation predates evaluator v3 has no accuracy, so its case's `accurate_spread`,
-  and the arm's `max_accurate_spread`, are `unresolved`, never computed from a stand-in zero.
+  the arm's `max_accurate_spread` and the arm's `jobs_per_accurate` are `unresolved`, never
+  computed from a stand-in zero.
 - Values are integers or decimal text, never floats (`record-integrity`).

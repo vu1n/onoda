@@ -173,7 +173,7 @@ def recorded(short):
     return short, store, evaluator, binary, pi
 
 
-def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
+def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded, monkeypatch):
     root, store, evaluator, binary, pi = recorded
     r = pi.ingest
     assert (r.status, r.complete) == ("settled", True), pi.stderr_tail
@@ -231,6 +231,15 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
         "accurate_spread": {CASE_ID: 0},
         "max_accurate_spread": 0,
     }
+
+    # A run graded before evaluator v3 has no `accurate`: its ratio and spread are unresolved.
+    pre_v3 = ev.model_copy(
+        update={"metrics": {k: v for k, v in ev.metrics.items() if k != "accurate"}}
+    )
+    monkeypatch.setattr(pi_vte, "_latest_vte_evaluation", lambda _store, _run_id: pre_v3)
+    old = pi_vte.vte_report(store, evaluator, ["vte"])["arms"]["S1"]
+    assert old["jobs_per_accurate"] == "unresolved"
+    assert old["stability"]["max_accurate_spread"] == "unresolved"
 
 
 def test_a_run_citing_a_stand_in_job_is_graded_synthetic(recorded, monkeypatch):
