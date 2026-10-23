@@ -81,11 +81,14 @@ instead (open question 1).
   depends on the input text alone, and a test covers every input `orca_input` can build plus the
   fixture inputs.
 - Only a single-point energy is eligible, and eligibility is a positive allowlist, not a list
-  of exclusions: every `!` keyword must be on a pinned list of method, basis, auxiliary-basis,
-  grid, convergence and print keywords (plus an explicit `SP` or `Energy`); every `%` block must be
-  one of `%casscf`, `%scf`, `%pal`, `%maxcore` or `%output`, and within them nothing may set a run
-  type other than an energy (a `%method` block, and so any `RunTyp`, makes the input ineligible);
-  and there is no `$new_job`. Anything not on the list is ineligible, so a run type the list did
+  of exclusions. Every `!` keyword must be on a pinned list: method, basis, auxiliary-basis, RI,
+  grid, convergence, symmetry, print and orbital-reading keywords (`MORead`), plus an optional `SP`
+  or `Energy`. With no run-type keyword, ORCA runs a single point, so none is required. Every `%`
+  block or directive must be one of `%casscf`, `%scf`, `%pal`, `%maxcore`, `%moinp` or `%output`,
+  and none of them may set a run type other than an energy. A `%method` block, and so any
+  `RunTyp`, makes the input ineligible, and so does `$new_job`. The list must cover every input
+  `orca_input` builds, and a test checks that each one is eligible, so that standard runs are not
+  left `:not-fired`. Anything not on the list is ineligible, so a run type the list did
   not anticipate fails closed. Any other job could go on changing `job.gbw` after the cut (see the
   invariants). An ineligible NEVPT2 job runs and is served normally, and does not consume the
   trigger. The first eligible job may be a different input in S0 than in S1. A write-up says
