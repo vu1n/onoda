@@ -122,7 +122,9 @@ fault sources from the Mac run stores. That is a later revision of this decision
   that fired there stays fired, so the continuation cannot inject it a second time. A fork
   declaration may change the plan only when the replayed prefix holds no injected entry, and the
   new plan then starts with every trigger armed; a fork that changes the plan after an injection
-  is refused.
+  is refused. Ordinals always count submissions from the start of the run, replayed prefix
+  included, so a new plan whose ordinal trigger names a submission the prefix already holds is
+  refused too, rather than left to finish `:not-fired`.
 - The `orca_checks` and `summary` lines are computed from the served output, as the agent would see
   them for a real failure of that kind.
 - `vte report` adds per-fault recovery fields for `fault-injected` arms: the accurate count on the
@@ -146,6 +148,10 @@ fault sources from the Mac run stores. That is a later revision of this decision
   symmetry on (`orca_input` omits `UseSym` when `symmetry: false`) and its output prints the
   case's point group. A job without symmetry runs in C1, where `irrep 0` mixes every case irrep,
   so its recovery fields are `unresolved` unless the plan names targets.
+- A numeric `%casscf` irrep becomes a case irrep through the same irrep-label mapping the grader
+  uses for printed roots, never a fresh one. Where that mapping is not verified for a molecule
+  (the axis-dependent B1/B2 swap that `A64` leaves open per C2v molecule), the affected groups
+  are `unresolved`, not assigned by the label's name.
 
 ### Open questions for the owner (decide before this goes active)
 
