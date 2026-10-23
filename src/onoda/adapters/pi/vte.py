@@ -118,7 +118,7 @@ def ratio_text(numerator: int, denominator: int) -> str:
     return format((Decimal(numerator) / denominator).quantize(_MEAN_PLACES, ROUND_HALF_EVEN), "f")
 
 
-# Context: doc://onoda/vte-report-process-metrics@draft#process-metrics — descriptive only; a run without evaluator-v3 accuracy makes its case's spread unresolved
+# Context: doc://onoda/vte-report-process-metrics@0001#process-metrics — descriptive only; a run without evaluator-v3 accuracy makes its case's spread unresolved
 def stability(accurate_by_case: Mapping[str, list[int | None]]) -> dict[str, Any]:
     """Cross-run spread of the accurate count per case: each run's count and max minus min.
 

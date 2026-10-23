@@ -2,7 +2,7 @@
 id: vte-report-process-metrics
 project: onoda
 type: decision
-status: draft
+status: active
 title: "vte report shows per-arm process metrics: jobs per accurate state, failed-job share, cross-run stability"
 related_code:
   - "src/onoda/adapters/pi/vte.py"

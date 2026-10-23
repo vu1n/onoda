@@ -26,5 +26,7 @@ replay-fails-closed:
   latest: 1
 vte-grading-contract:
   latest: 2
+vte-report-process-metrics:
+  latest: 1
 vte-task-inputs:
   latest: 1
