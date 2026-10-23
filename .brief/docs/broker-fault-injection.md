@@ -91,6 +91,11 @@ fault sources from the Mac run stores. That is a later revision of this decision
   observation. `vte report` states that classification ("fault-injected: real agent and ORCA, one
   served output transformed by plan <sha>") instead of the synthetic note. A run that is also
   scripted or stand-in stays synthetic as today.
+- A faulted reply offers **no attachable files**: the real job's products (its converged `job.gbw`
+  above all) are withheld, so the agent cannot restart from orbitals the imitated kill could not
+  have produced. A real wall-time kill may leave a partial `job.gbw` behind, so a faulted job gives
+  the agent less than a real failure might, never more. The journal still records the real
+  products' sha256 values.
 - An injected output is never written to the shared cache. The job's real output is not cached
   either, so a later clean run can't be served bytes a faulted run produced.
 - Every faulted job counts toward `max_executions` (`orca-broker-boundary`).
@@ -104,13 +109,16 @@ fault sources from the Mac run stores. That is a later revision of this decision
 - `vte report` adds per-fault recovery fields for `fault-injected` arms: the accurate count on the
   faulted job's targets, jobs and requests after the fault, and whether the claim notes or report
   text mention the failure. These are descriptive, like the process metrics.
-- **The faulted job's targets** are every reference row whose (spin, irrep) the faulted input
-  requested roots for, read from its `%casscf` `mult`/`irrep`/`nroots` blocks, with the case's
-  point group. This is a deterministic rule from the input text, and it needs no character and no
-  energy (`match-by-identity`). Where one (spin, irrep) has several rows (thioacetone's two singlet
-  A1 and two singlet B2), all of them count, so the denominator is the number of those rows. An
-  input with no parsable root blocks makes the recovery fields `unresolved` for that run. The plan
-  may instead name the targets explicitly, which then wins and is recorded.
+- **The faulted job's targets** come from its `%casscf` `mult`/`irrep`/`nroots` blocks, read with
+  the case's point group. For each (spin, irrep) block, the excited roots requested are `nroots`,
+  minus one for the block that holds the closed-shell ground state (singlet, totally symmetric
+  irrep), so the builder's default `mult 1, irrep 0, nroots 1` requests none. A block attributes
+  its reference rows only when its excited roots cover all of them: then every row of that
+  (spin, irrep) counts, including both of thioacetone's singlet A1 rows when two or more excited
+  A1 roots were requested. A block that requests fewer excited roots than there are rows would
+  need energy order to say which rows it served (`match-by-identity` forbids that), so it makes
+  the recovery fields `unresolved`. So does an input with no parsable root blocks. A plan may
+  instead name the targets explicitly, which then wins and is recorded.
 
 ### Open questions for the owner (decide before this goes active)
 
