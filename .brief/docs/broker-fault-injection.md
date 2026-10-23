@@ -80,10 +80,13 @@ instead (open question 1).
   `PTMethod SC_NEVPT2` inside the `%casscf` block, as the authentic target inputs do. The match
   depends on the input text alone, and a test covers every input `orca_input` can build plus the
   fixture inputs.
-- Only a single-point energy is eligible. The input's `!` lines must carry none of ORCA's
-  optimisation, frequency, scan or IRC keywords (`Opt`, `OptTS`, `Freq`, `NumFreq`, `IRC`, and the
-  rest of a fixed list the implementation pins and tests), and the input must have no `%geom` block
-  and no `$new_job`. Any other job would go on changing `job.gbw` after the cut (see the
+- Only a single-point energy is eligible, and eligibility is a positive allowlist, not a list
+  of exclusions: every `!` keyword must be on a pinned list of method, basis, auxiliary-basis,
+  grid, convergence and print keywords (plus an explicit `SP` or `Energy`); every `%` block must be
+  one of `%casscf`, `%scf`, `%pal`, `%maxcore` or `%output`, and within them nothing may set a run
+  type other than an energy (a `%method` block, and so any `RunTyp`, makes the input ineligible);
+  and there is no `$new_job`. Anything not on the list is ineligible, so a run type the list did
+  not anticipate fails closed. Any other job could go on changing `job.gbw` after the cut (see the
   invariants). An ineligible NEVPT2 job runs and is served normally, and does not consume the
   trigger. The first eligible job may be a different input in S0 than in S1. A write-up says
   so.
