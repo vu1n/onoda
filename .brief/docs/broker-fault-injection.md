@@ -92,8 +92,10 @@ fault sources from the Mac run stores. That is a later revision of this decision
   `status` describe the served output exactly as the agent saw it.
 - The journal reply entry carries `injected: {fault, transform_version, plan_sha256}` and both
   `output_sha256` (served) and `real_output_sha256`, plus the scheduler's real `real_status` and
-  `real_reason`. A fault applies only to a job that completed for real: if the real job timed
-  out or failed, the trigger does not fire, the agent is served that real failure, and the
+  `real_reason`. A fault applies only to a job that succeeded by the deterministic parser
+  (`orca-parser-authoritative`), not by scheduler status: ORCA terminated normally and the CASSCF
+  converged. If the real job timed out, failed or did not pass those parser checks, the trigger
+  does not fire, the agent is served that real failure, and the
   journal records `injected: skipped` with the real reason, so a recovery is never credited to an
   injection layered over a genuine failure. Ingest checks the spool against the served
   output, as today, and stores the real output as a second object of the same receipt.
@@ -115,10 +117,12 @@ fault sources from the Mac run stores. That is a later revision of this decision
   absent, the trigger does not fire, and the journal records `injected: skipped` with the reason.
 - Replay serves the recorded served bytes like any other journaled reply (`replay-fails-closed`),
   and a replayed entry keeps its `injected` field and `real_output_sha256`, so a fork's replayed
-  prefix is still classified as fault-injected. A fork inherits the parent's plan unless the fork
-  declaration changes it, which is a declared fork change. The fork's trigger state is rebuilt
-  from the replayed prefix: a trigger that fired there stays fired, so the continuation cannot
-  inject it a second time.
+  prefix is still classified as fault-injected. A fork inherits the parent's plan. Its trigger
+  state is rebuilt from the replayed prefix, keyed by `(plan_sha256, trigger index)`: a trigger
+  that fired there stays fired, so the continuation cannot inject it a second time. A fork
+  declaration may change the plan only when the replayed prefix holds no injected entry, and the
+  new plan then starts with every trigger armed; a fork that changes the plan after an injection
+  is refused.
 - The `orca_checks` and `summary` lines are computed from the served output, as the agent would see
   them for a real failure of that kind.
 - `vte report` adds per-fault recovery fields for `fault-injected` arms: the accurate count on the
