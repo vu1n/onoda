@@ -225,6 +225,12 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded):
     assert report["arms"]["S1"]["accurate"] == 1 and report["arms"]["S1"]["runs_without_claim"] == 0
     s1 = report["arms"]["S1"]
     assert (s1["jobs"], s1["jobs_failed"], s1["jobs_rejected"]) == (2, 0, 0)
+    assert (s1["jobs_per_accurate"], s1["jobs_failed_share"]) == ("2.000000", "0.000000")
+    assert s1["stability"] == {
+        "accurate_per_run": {CASE_ID: [1]},
+        "accurate_spread": {CASE_ID: 0},
+        "max_accurate_spread": 0,
+    }
 
 
 def test_a_run_citing_a_stand_in_job_is_graded_synthetic(recorded, monkeypatch):

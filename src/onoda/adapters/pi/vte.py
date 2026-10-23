@@ -111,6 +111,26 @@ def mean_ev(values: list[Decimal]) -> str:
     )
 
 
+def ratio_text(numerator: int, denominator: int) -> str:
+    """`numerator / denominator` as decimal text (`_MEAN_PLACES`), or `unresolved` over zero."""
+    if denominator == 0:
+        return "unresolved"
+    return format((Decimal(numerator) / denominator).quantize(_MEAN_PLACES, ROUND_HALF_EVEN), "f")
+
+
+def stability(accurate_by_case: Mapping[str, list[int]]) -> dict[str, Any]:
+    """Cross-run spread of the accurate count per case: each run's count and max minus min.
+
+    A case with one run has spread 0. The largest spread over cases is the arm's.
+    """
+    spread = {c: max(v) - min(v) for c, v in sorted(accurate_by_case.items())}
+    return {
+        "accurate_per_run": {c: list(v) for c, v in sorted(accurate_by_case.items())},
+        "accurate_spread": spread,
+        "max_accurate_spread": max(spread.values(), default=0),
+    }
+
+
 def stage_vte_bundle(
     case: LoadedVteCase,
     dest: Path,
@@ -537,7 +557,11 @@ def vte_report_runs(
     claim count, the runs that never reported (`runs_without_claim`, so a
     timed-out run is not read as an agent that found nothing), and the ORCA
     jobs the arm named with how many failed (`jobs`, `jobs_failed`) and how many of
-    those ORCA refused before iterating (`jobs_rejected`). When exactly
+    those ORCA refused before iterating (`jobs_rejected`). Process metrics
+    (the Nature Reviews Methods Primer's "cross-run stability" and efficiency,
+    doi 10.1038/s43586-026-00534-y): `jobs_per_accurate` and
+    `jobs_failed_share` as decimal text, and `stability`, each case's accurate
+    count per run in run order with its spread (max minus min). When exactly
     two arms are compared (or `arms` names two), `common_target_mae_ev` restricts both to targets
     (case, reference row) each arm identified in at least one run, averaging
     an arm's repeats per target first, so both arms are measured on the same
@@ -547,6 +571,7 @@ def vte_report_runs(
     """
     per_arm: dict[str, dict[str, Any]] = {}
     errors: dict[str, dict[tuple[str, str], list[Decimal]]] = {}
+    accurate_by_case: dict[str, dict[str, list[int]]] = {}
     synthetic = False
     for store, evaluator_store, run_id in runs:
         run = store.run_record(run_id)
@@ -579,6 +604,9 @@ def vte_report_runs(
         a["runs"].append(run_id)
         a["coverage"] += int(m["coverage"])
         a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3
+        accurate_by_case.setdefault(arm, {}).setdefault(m["case.id"], []).append(
+            int(m.get("accurate", 0))
+        )
         a["runs_without_claim"] += m["claim.present"] == "false"  # never reported, e.g. timed out
         a["coverage_total"] += int(m["coverage.total"])
         a["false_success_claims"] += int(m["false_success_claims"])
@@ -590,6 +618,9 @@ def vte_report_runs(
     for arm, a in per_arm.items():
         a["mae_ev"] = mean_ev([e for errs in errors[arm].values() for e in errs])
         a["identified_targets"] = len(errors[arm])
+        a["jobs_per_accurate"] = ratio_text(a["jobs"], a["accurate"])
+        a["jobs_failed_share"] = ratio_text(a["jobs_failed"], a["jobs"])
+        a["stability"] = stability(accurate_by_case[arm])
     report: dict[str, Any] = {
         "arms": per_arm,
         "synthetic": synthetic,
