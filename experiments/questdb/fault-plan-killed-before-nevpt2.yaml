@@ -1,0 +1,7 @@
+# The pilot's fault plan (broker-fault-injection): the first eligible single-point
+# NEVPT2 job of a run is executed, then served cut before its NEVPT2 section as a
+# wall-time kill. Use as FAULT_PLAN=experiments/questdb/fault-plan-killed-before-nevpt2.yaml.
+schema: onoda.fault-plan/1
+id: kill-nevpt2
+fault: killed-before-nevpt2
+trigger: first-eligible-nevpt2

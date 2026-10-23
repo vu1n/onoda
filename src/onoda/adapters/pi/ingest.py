@@ -148,6 +148,7 @@ from onoda.records import (
     TaskManifest,
     Usage,
 )
+from onoda.science.orca_faults import FAULT_LABEL
 from onoda.science.orca_local import job_labels as scheduler_job_labels
 from onoda.store import Store, check_safe_id, record_ref
 
@@ -1241,7 +1242,9 @@ class _Writer:
     def on_execute(self, line: TaskExecute) -> None:
         """A broker job: executed here, an earlier job's bytes served from the cache,
         or a job nothing ran for (only `executed_here` makes an execution receipt)."""
-        stand_in = bool(getattr(self.broker[line.job_id], "stand_in", False))
+        entry = self.broker[line.job_id]
+        stand_in = bool(getattr(entry, "stand_in", False))
+        injected = getattr(entry, "injected", None)
         if line.executed_here:
             operation, kind, job_labels = EXECUTE, "execution", []
         elif line.cache_hit:
@@ -1254,6 +1257,20 @@ class _Writer:
             job_labels += scheduler_job_labels(stand_in)
         if stand_in:  # a stand-in's observations are synthetic, executed or cached
             job_labels.append("synthetic")
+        fault: dict[str, Any] = {}
+        if injected is not None:
+            fault["injected"] = injected.model_dump(mode="json", exclude_none=True)
+        if injected is not None and injected.outcome == "fired":
+            # Context: doc://onoda/broker-fault-injection@0001#injected-faults — the served output is labelled fault-injected, never synthetic; the real output is pinned beside it
+            job_labels.append(FAULT_LABEL)
+            real = entry.real_output_sha256
+            if real is None or not self.store.has_object(real):
+                raise IntegrityError(
+                    f"job {line.job_id}: the real output behind its fault is not committed"
+                )
+            fault.update(
+                real_output=real, real_status=entry.real_status, real_reason=entry.real_reason
+            )
         inp = self.obj(line.input, "text/plain", ["orca-input", *self.synthetic], encoding="utf-8")
         output = self.obj(line.output, "text/plain", ["job-output", *job_labels])
         spec = StepSpec.new(
@@ -1277,6 +1294,7 @@ class _Writer:
                 "tool_call_id": line.tool_call_id,
                 "stand_in": stand_in,
                 "broker_journal": "agrees",
+                **fault,
             },
             labels=list(dict.fromkeys([*job_labels, *self.synthetic])),
             usage=Usage(units={}, measured=False, simulated=self.scripted, cost_usd=None),

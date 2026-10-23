@@ -55,6 +55,13 @@ them (a Hartree-Fock energy), and `summary` (A74): the deterministic parser's
 reading of the output (termination, symmetry, CASSCF convergence, transition
 energies with their line numbers). Replays recompute both from the same bytes.
 
+A live broker may carry a fault plan (`orca_faults`, broker-fault-injection,
+off by default): the first eligible NEVPT2 submission skips the cache, runs,
+and is served the real output cut before NEVPT2 as a `timeout`, with only
+`job.gbw`; the journal entry's `injected` and `real_*` fields pin what was
+done and what really ran, and the real output is kept under `real/` beside
+the journal, never in the cache. A fault plan refuses replay and fork prefixes.
+
 Only `completed` jobs are cached. ORCA exits 0 on many failed calculations,
 so a cached output is not a converged one; that is for the parser and grader.
 
@@ -75,7 +82,7 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, BinaryIO, Literal
+from typing import Annotated, Any, BinaryIO, Literal
 
 from pydantic import AfterValidator, Field, ValidationError, model_validator
 
@@ -83,6 +90,17 @@ from onoda.canonical import DIGEST_PREFIX, digest_of, sha256_digest
 from onoda.errors import CapabilityError, IntegrityError, OnodaError
 from onoda.records import Frozen as _Frozen
 from onoda.science.orca_checks import JobFacts, job_checks, job_facts
+from onoda.science.orca_faults import (
+    SERVED_FILES,
+    SERVED_REASON,
+    SERVED_STATUS,
+    TRANSFORM_VERSION,
+    FaultPlan,
+    cut_before_nevpt2,
+    ineligible,
+    not_a_success,
+    requests_nevpt2,
+)
 from onoda.science.orca_local import (
     FILE_NAME_RE,
     OrcaLocalScheduler,
@@ -282,6 +300,22 @@ class ProducedFile(_Frozen):
     sha256: str
 
 
+class InjectedFault(_Frozen):
+    """A fault plan's verdict on the job it triggered on (broker-fault-injection).
+
+    `fired`: the agent was served the transformed output and the entry's
+    `real_*` fields pin what the job really produced. `skipped`: the real job
+    was not a parser success (or had no NEVPT2 header), so it was served as
+    is and `skip_reason` says why; the trigger is consumed either way.
+    """
+
+    fault: str
+    transform_version: str
+    plan_sha256: str
+    outcome: Literal["fired", "skipped"]
+    skip_reason: str | None = None
+
+
 class BrokerJournalEntry(_Frozen):
     """One line of `broker.jsonl`: a request as received or the reply sent for it.
 
@@ -316,6 +350,12 @@ class BrokerJournalEntry(_Frozen):
     sandbox: str | None = None  # the job sandbox an executed job ran in (A65)
     checks: tuple[str, ...] = ()  # what the reply told the agent about its output (A66)
     summary: tuple[str, ...] = ()  # the same for the parser summary (A74)
+    # A fault plan's trigger job: what was injected, and the real job behind a fired one.
+    injected: InjectedFault | None = None
+    real_output_sha256: str | None = None
+    real_status: Literal["completed", "failed"] | None = None
+    real_reason: str | None = None
+    real_files: tuple[ProducedFile, ...] = ()
 
     @model_validator(mode="after")
     def _consistent(self) -> BrokerJournalEntry:
@@ -331,6 +371,11 @@ class BrokerJournalEntry(_Frozen):
         _check_outcome(self.status, self.job_id, self.executed_here, self.cache_hit)
         if self.replay and self.executed_here:
             raise ValueError("replay never executes")
+        fired = self.injected is not None and self.injected.outcome == "fired"
+        if fired != (self.real_output_sha256 is not None and self.real_status is not None):
+            raise ValueError("a fired fault, and only one, pins the real output and status")
+        if self.injected is not None and (self.status == "refused" or self.cache_hit):
+            raise ValueError("a fault applies only to a job this run executed")
         return self
 
 
@@ -398,6 +443,9 @@ class ReplayJob:
     # replays with neither flag set (replay never executes), a hit as a hit.
     cache_hit: bool = True
     reason: str | None = None
+    # A fault-injected job replays its served bytes and keeps its journal facts.
+    injected: InjectedFault | None = None
+    real: tuple[str, str, str | None, tuple[ProducedFile, ...]] | None = None
 
 
 @dataclass
@@ -430,8 +478,13 @@ class BrokerReplay:
             if e.binary_sha256 is not None:
                 binaries.add(e.binary_sha256)
             stand_ins.add(bool(e.stand_in))
+            real = None
+            if e.real_output_sha256 is not None and e.real_status is not None:
+                real = (e.real_output_sha256, e.real_status, e.real_reason, e.real_files)
             jobs.setdefault(e.key, []).append(
-                ReplayJob(e.status, data, e.files, e.stand_in, e.cache_hit, e.reason)
+                ReplayJob(
+                    e.status, data, e.files, e.stand_in, e.cache_hit, e.reason, e.injected, real
+                )
             )
         if len(binaries) > 1:
             raise OnodaError(f"replay: journal names {len(binaries)} ORCA binaries, need one")
@@ -599,9 +652,13 @@ class OrcaBroker:
         max_executions: int = DEFAULT_MAX_EXECUTIONS,
         job_sandbox: JobSandbox | None = None,
         limits: BrokerLimits | None = DEFAULT_LIMITS,
+        fault_plan: tuple[FaultPlan, str] | None = None,
     ):
         if (scheduler is None) == (replay is None):
             raise OnodaError("a broker runs either a scheduler or a replay, exactly one")
+        if fault_plan is not None and (scheduler is None or prefix is not None):
+            # Context: doc://onoda/broker-fault-injection@0001#injected-faults — v1 refuses a fork or restart of a fault-injected run
+            raise OnodaError("a fault plan needs a fresh live run: no replay and no fork prefix")
         if prefix is not None and scheduler is None:
             raise OnodaError("a replay prefix needs a scheduler to continue with")
         if replay is not None and (cache_dir is not None or job_sandbox is not None):
@@ -641,6 +698,11 @@ class OrcaBroker:
         # Set when an exception escaped a submission: what ran is then not on record,
         # so every later submission is refused (fail closed).
         self._broken = False
+        # The fault plan (plan, sha256 of its canonical bytes) and its one-shot trigger.
+        self.fault_plan = fault_plan
+        self._fault_armed = fault_plan is not None
+        self.fault_job: str | None = None  # the job the trigger was consumed on
+        self.real_dir = self.journal_path.parent / "real"  # host-side, never in the Pi work dir
         self._seq = 0
         self._lock = threading.Lock()
         self._server: socketserver.UnixStreamServer | None = None
@@ -754,6 +816,8 @@ class OrcaBroker:
         duration_ms: int | None = None,
         reason: str | None = None,
         sandbox: str | None = None,
+        injected: InjectedFault | None = None,
+        real: tuple[str, str, str | None, tuple[ProducedFile, ...]] | None = None,
     ) -> BrokerReply:
         self._jobs[job_id] = _Job(files=files)
         output_sha = sha256_digest(log)
@@ -781,6 +845,11 @@ class OrcaBroker:
             sandbox=sandbox,
             checks=checks,
             summary=summary,
+            injected=injected,
+            real_output_sha256=real[0] if real else None,
+            real_status=real[1] if real else None,
+            real_reason=real[2] if real else None,
+            real_files=real[3] if real else (),
         )
         return BrokerReply(
             status=status,
@@ -825,6 +894,8 @@ class OrcaBroker:
             cache_hit=rec.cache_hit,
             stand_in=rec.stand_in,
             reason=rec.reason,
+            injected=rec.injected,
+            real=rec.real,
         )
 
     def _serve_live(
@@ -836,7 +907,13 @@ class OrcaBroker:
         attached: dict[str, tuple[str, Path | None]],
     ) -> BrokerReply:
         assert self._scheduler is not None
-        if self._cache is not None:
+        # Context: doc://onoda/broker-fault-injection@0001#injected-faults — the trigger job skips the cache both ways, so a fault applies only to a job this run executed
+        trigger = (
+            self._fault_armed
+            and requests_nevpt2(request.input)
+            and ineligible(request.input) is None
+        )
+        if self._cache is not None and not trigger:
             try:
                 hit = self._cache.get(key)
             except _CacheCorrupt as exc:
@@ -898,7 +975,7 @@ class OrcaBroker:
                 log = sched.collect(sid)["log"]
                 produced = {n: p for n, p in sched.produced_files(sid).items() if attachable(n)}
                 files = {n: (sha256_digest(read_produced(p)), p) for n, p in produced.items()}
-            if status == "completed" and self._cache is not None:
+            if status == "completed" and self._cache is not None and not trigger:
                 self._cache.put(
                     key, log, produced, binary=self.binary_sha256, stand_in=bool(meta["stand_in"])
                 )
@@ -920,6 +997,23 @@ class OrcaBroker:
                 scheduler_job_id=sid,
                 reason="broker_error",
                 sandbox=self.job_sandbox.kind if self.job_sandbox is not None else None,
+                injected=self._consume(job_id, "broker_error") if trigger else None,
+            )
+        if trigger:
+            return self._inject(
+                request,
+                job_id=job_id,
+                key=key,
+                status=status,
+                input_sha=input_sha,
+                log=log,
+                files=files,
+                executed_here=executed,
+                stand_in=bool(meta["stand_in"]),
+                scheduler_job_id=sid,
+                duration_ms=meta["duration_ms"],
+                reason=meta["reason"],
+                sandbox=meta["sandbox"],
             )
         return self._reply(
             request,
@@ -936,6 +1030,76 @@ class OrcaBroker:
             duration_ms=meta["duration_ms"],
             reason=meta["reason"],
             sandbox=meta["sandbox"],
+        )
+
+    def _consume(self, job_id: str, skip_reason: str | None) -> InjectedFault:
+        """Disarm the one-shot trigger on `job_id`; `skip_reason` None means it fired."""
+        assert self.fault_plan is not None
+        plan, plan_sha = self.fault_plan
+        self._fault_armed = False
+        self.fault_job = job_id
+        return InjectedFault(
+            fault=plan.fault,
+            transform_version=TRANSFORM_VERSION,
+            plan_sha256=plan_sha,
+            outcome="fired" if skip_reason is None else "skipped",
+            skip_reason=skip_reason,
+        )
+
+    def _inject(
+        self,
+        request: BrokerSubmit,
+        *,
+        job_id: str,
+        status: Literal["completed", "failed"],
+        log: bytes,
+        files: dict[str, tuple[str, Path | None]],
+        reason: str | None,
+        **rest: Any,
+    ) -> BrokerReply:
+        """Serve the trigger job: the fault over a parser success, else the real job (skipped).
+
+        The real output is written under `real_dir` (outside the Pi work dir)
+        before the reply is journaled, so the record can always pin it.
+        """
+        # Context: doc://onoda/broker-fault-injection@0001#injected-faults — fire only over a parser success; a skip consumes the trigger and serves the real job
+        if status != "completed":
+            skip = f"real job {status}" + (f" ({reason})" if reason else "")
+        else:
+            skip = not_a_success(log)
+        cut = cut_before_nevpt2(log) if skip is None else None
+        if skip is None and cut is None:
+            skip = "no NEVPT2 section header"
+        injected = self._consume(job_id, skip)
+        if skip is not None or cut is None:
+            return self._reply(
+                request,
+                job_id=job_id,
+                status=status,
+                log=log,
+                files=files,
+                reason=reason,
+                cache_hit=False,
+                injected=injected,
+                **rest,
+            )
+        real_sha = sha256_digest(log)
+        self.real_dir.mkdir(parents=True, exist_ok=True)
+        _write_synced(self.real_dir / real_sha.removeprefix(DIGEST_PREFIX), log)
+        real_files = tuple(
+            ProducedFile(name=n, sha256=sha) for n, (sha, _) in sorted(files.items())
+        )
+        return self._reply(
+            request,
+            job_id=job_id,
+            status=SERVED_STATUS,
+            log=cut,
+            files={n: v for n, v in files.items() if n in SERVED_FILES},
+            reason=SERVED_REASON,
+            cache_hit=False,
+            injected=injected,
+            real=(real_sha, status, reason, real_files),
+            **rest,
         )
 
     @property

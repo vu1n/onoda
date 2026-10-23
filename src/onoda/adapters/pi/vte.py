@@ -548,6 +548,41 @@ def _latest_vte_evaluation(evaluator_store: Store, run_id: str) -> Evaluation:
     return ev
 
 
+def arm_key(config: Mapping[str, Any]) -> str:
+    """A run's arm: its variant, or `<variant>+<plan id>@<plan sha256 prefix>` under a fault plan.
+
+    A faulted run never pools with clean runs of its variant, nor with runs of
+    an edited plan; a run whose plan never fired is `...:not-fired`.
+    """
+    plan = config.get("fault_plan")
+    if plan is None:
+        return config["variant"]
+    # Context: doc://onoda/broker-fault-injection@0001#injected-faults — faulted arms are keyed by plan id and sha; not-fired runs are reported apart
+    key = f"{config['variant']}+{plan['id']}@{plan['sha256'].removeprefix('sha256:')[:12]}"
+    fired = config.get("fault_injection", {}).get("outcome") == "fired"
+    return key if fired else key + ":not-fired"
+
+
+def fault_aftermath(store: Store, run_id: str) -> tuple[int, int] | None:
+    """(broker jobs, agent requests) a run spent after its fault was served; None if none fired."""
+    injection = store.run_record(run_id).config.get("fault_injection", {})
+    if injection.get("outcome") != "fired":
+        return None
+    jobs = requests = 0
+    after = False
+    for event in store.events(run_id):
+        if event.type != "invocation.committed":
+            continue
+        meta = store.receipt(event.payload["invocation_id"]).metadata
+        if meta.get("job_id") == injection["job_id"]:
+            after = True
+        elif after and meta.get("job_id") is not None:
+            jobs += 1
+        elif after and meta.get("role") == "agent":
+            requests += 1
+    return jobs, requests
+
+
 def vte_report(
     store: Store, evaluator_store: Store, run_ids: Iterable[str], *, arms: tuple[str, ...] = ()
 ) -> dict[str, Any]:
@@ -581,7 +616,10 @@ def vte_report_runs(
     an arm's repeats per target first, so both arms are measured on the same
     states. Values are decimal text; a mean over nothing is `unresolved`.
     Runs graded as synthetic make the report synthetic: not a chemistry or
-    mechanism result.
+    mechanism result. Runs under a fault plan form their own arms (`arm_key`),
+    reported beside their clean controls with `fault`: the jobs and agent
+    requests spent after the fault (descriptive, never a verdict), and why any
+    run's plan did not fire.
     """
     per_arm: dict[str, dict[str, Any]] = {}
     errors: dict[str, dict[tuple[str, str], list[Decimal]]] = {}
@@ -591,7 +629,7 @@ def vte_report_runs(
         run = store.run_record(run_id)
         if run.config.get("task_kind") != "vte":
             raise OnodaError(f"run {run_id} is not a VTE run")
-        arm = run.config["variant"]
+        arm = arm_key(run.config)
         if arms and arm not in arms:
             continue
         ev = _latest_vte_evaluation(evaluator_store, run_id)
@@ -612,6 +650,28 @@ def vte_report_runs(
                 "jobs_executed": 0,
             },
         )
+        if (plan := run.config.get("fault_plan")) is not None:
+            f = a.setdefault(
+                "fault",
+                {
+                    "note": (
+                        "fault-injected: real agent and ORCA, one served output transformed "
+                        f"by plan {plan['sha256']}"
+                    ),
+                    "jobs_after_fault": 0,
+                    "requests_after_fault": 0,
+                    "not_fired": [],
+                },
+            )
+            if (after := fault_aftermath(store, run_id)) is not None:
+                f["jobs_after_fault"] += after[0]
+                f["requests_after_fault"] += after[1]
+            else:
+                injection = run.config.get("fault_injection", {})
+                f["not_fired"].append(
+                    {"run": run_id, "outcome": injection.get("outcome", "not-triggered")}
+                    | ({"reason": injection["skip_reason"]} if "skip_reason" in injection else {})
+                )
         counts = vte_job_counts(store, run_id)
         a["jobs"] += counts.jobs
         a["jobs_failed"] += counts.failed
