@@ -226,10 +226,11 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded, monkeypatch
     s1 = report["arms"]["S1"]
     assert (s1["jobs"], s1["jobs_failed"], s1["jobs_rejected"]) == (2, 0, 0)
     assert (s1["jobs_per_accurate"], s1["jobs_failed_share"]) == ("2.000000", "0.000000")
-    assert s1["stability"] == {
+    assert s1["executed_per_accurate"] == f"{s1['jobs_executed']}.000000"
+    assert s1["stability"] == {  # one run measures no spread
         "accurate_per_run": {CASE_ID: [1]},
-        "accurate_spread": {CASE_ID: 0},
-        "max_accurate_spread": 0,
+        "accurate_spread": {CASE_ID: "unresolved"},
+        "max_accurate_spread": "unresolved",
     }
 
     # A run graded before evaluator v3 has no `accurate`: its ratio and spread are unresolved.
@@ -238,7 +239,7 @@ def test_vte_run_executes_hits_the_cache_claims_and_grades(recorded, monkeypatch
     )
     monkeypatch.setattr(pi_vte, "_latest_vte_evaluation", lambda _store, _run_id: pre_v3)
     old = pi_vte.vte_report(store, evaluator, ["vte"])["arms"]["S1"]
-    assert old["jobs_per_accurate"] == "unresolved"
+    assert old["jobs_per_accurate"] == old["executed_per_accurate"] == "unresolved"
     assert old["stability"]["max_accurate_spread"] == "unresolved"
 
 

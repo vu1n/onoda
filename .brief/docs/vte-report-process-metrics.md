@@ -15,11 +15,17 @@ Each arm in `onoda vte report` carries three descriptive process metrics next to
 accuracy and MAE:
 
 - `jobs_per_accurate`: the arm's broker jobs (cache hits included, as in `jobs`) divided by its
-  `accurate` count, as decimal text; `unresolved` when nothing is accurate.
+  `accurate` count, as decimal text; `unresolved` when nothing is accurate. It counts broker
+  calls, not compute: an arm's later runs look cheaper once its earlier runs warmed the cache,
+  so it depends on run order.
+- `executed_per_accurate`: the same with only the jobs the arm's runs executed (`jobs_executed`,
+  `executed_here`), which does not move with cache warmth.
 - `jobs_failed_share`: `jobs_failed` divided by `jobs`, as decimal text; `unresolved` with no jobs.
+  It is a share of jobs, not of runs, and says nothing about recovery.
 - `stability`: per case, each run's `accurate` count in run order (`accurate_per_run`), its range
   (`accurate_spread`, max minus min), and the largest range over the arm's cases
-  (`max_accurate_spread`).
+  (`max_accurate_spread`). A case with fewer than two runs was not measured: its range is
+  `unresolved`, never 0.
 
 **Why.** The Nature Reviews Methods Primer *Agentic AI systems for scientific discovery*
 (doi 10.1038/s43586-026-00534-y, Results and Outlook) asks agentic results to report cross-run
@@ -30,12 +36,15 @@ per-case spread is what a reader needs to judge whether a gap between arms is no
 **The measure.** The range of the accurate count is chosen because it needs no distributional
 assumption and stays meaningful at 2 to 4 repeats, which is what batches have. The largest range
 over cases is a one-number summary only; the per-case values are always shown with it. No
-threshold is attached: nothing here says how large a spread is acceptable.
+threshold is attached: nothing here says how large a spread is acceptable. The range describes
+what was observed; it is not an uncertainty estimate, and equal counts can hide different
+accurate states.
 
 ### Invariant
 - These metrics are descriptive. They never enter a grade, a promotion gate or an arm verdict.
 - `accurate` is the evaluator v3 count under `vte-energy-tolerance`; nothing new is graded.
 - A run whose evaluation predates evaluator v3 has no accuracy, so its case's `accurate_spread`,
-  the arm's `max_accurate_spread` and the arm's `jobs_per_accurate` are `unresolved`, never
+  the arm's `max_accurate_spread` and the arm's `jobs_per_accurate` and `executed_per_accurate`
+  are `unresolved`, never
   computed from a stand-in zero.
 - Values are integers or decimal text, never floats (`record-integrity`).

@@ -122,14 +122,16 @@ def ratio_text(numerator: int, denominator: int) -> str:
 def stability(accurate_by_case: Mapping[str, list[int | None]]) -> dict[str, Any]:
     """Cross-run spread of the accurate count per case: each run's count and max minus min.
 
-    A case with one run has spread 0. A run graded before evaluator v3 has no
-    accuracy (`None`), so its case's spread is `unresolved`, and so is the
-    arm's largest spread over cases.
+    The spread is a range of observed counts, not an uncertainty estimate. A
+    case with fewer than two runs was not measured, and a run graded before
+    evaluator v3 has no accuracy (`None`): either makes its case's spread
+    `unresolved`, and so the arm's largest spread over cases.
     """
     spread: dict[str, int | str] = {}
     for c, v in sorted(accurate_by_case.items()):
         counts = [n for n in v if n is not None]
-        spread[c] = max(counts) - min(counts) if len(counts) == len(v) else "unresolved"
+        measured = len(counts) == len(v) >= 2
+        spread[c] = max(counts) - min(counts) if measured else "unresolved"
     known = [v for v in spread.values() if isinstance(v, int)]
     return {
         "accurate_per_run": {c: list(v) for c, v in sorted(accurate_by_case.items())},
@@ -458,14 +460,15 @@ class VteJobCounts(NamedTuple):
     jobs: int
     failed: int
     rejected: int  # failed before any SCF or CASSCF iteration: ORCA refused the input
+    executed: int  # ran ORCA in this run: not a cache hit
 
 
 def vte_job_counts(store: Store, run_id: str) -> VteJobCounts:
     """Jobs, failed jobs and rejected inputs of a VTE run: every broker job it named.
 
-    Cache hits are included.
+    Cache hits are included in `jobs`; `executed` counts only the jobs this run ran.
     """
-    jobs = failed = rejected = 0
+    jobs = failed = rejected = executed = 0
     for event in store.events(run_id):
         if event.type != "invocation.committed":
             continue
@@ -476,7 +479,8 @@ def vte_job_counts(store: Store, run_id: str) -> VteJobCounts:
         jobs += 1
         failed += job_failed(receipt.status, log)
         rejected += job_input_rejected(receipt.status, log)
-    return VteJobCounts(jobs, failed, rejected)
+        executed += receipt.metadata.get("executed_here") is True
+    return VteJobCounts(jobs, failed, rejected, executed)
 
 
 def job_failed(status: str, output: bytes) -> bool:
@@ -566,9 +570,11 @@ def vte_report_runs(
     jobs the arm named with how many failed (`jobs`, `jobs_failed`) and how many of
     those ORCA refused before iterating (`jobs_rejected`). Process metrics
     (the Nature Reviews Methods Primer's "cross-run stability" and efficiency,
-    doi 10.1038/s43586-026-00534-y): `jobs_per_accurate` and
-    `jobs_failed_share` as decimal text, and `stability`, each case's accurate
-    count per run in run order with its spread (max minus min). When exactly
+    doi 10.1038/s43586-026-00534-y): `jobs_per_accurate` (broker calls, cache
+    hits included), `executed_per_accurate` (jobs this arm's runs ran) and
+    `jobs_failed_share` (of jobs, not runs) as decimal text, and `stability`,
+    each case's accurate count per run in run order with its range (max minus
+    min; `unresolved` below two runs). When exactly
     two arms are compared (or `arms` names two), `common_target_mae_ev` restricts both to targets
     (case, reference row) each arm identified in at least one run, averaging
     an arm's repeats per target first, so both arms are measured on the same
@@ -602,12 +608,14 @@ def vte_report_runs(
                 "jobs": 0,
                 "jobs_failed": 0,
                 "jobs_rejected": 0,
+                "jobs_executed": 0,
             },
         )
         counts = vte_job_counts(store, run_id)
         a["jobs"] += counts.jobs
         a["jobs_failed"] += counts.failed
         a["jobs_rejected"] += counts.rejected
+        a["jobs_executed"] += counts.executed
         a["runs"].append(run_id)
         a["coverage"] += int(m["coverage"])
         a["accurate"] += int(m.get("accurate", 0))  # absent before evaluator v3
@@ -627,7 +635,11 @@ def vte_report_runs(
         a["identified_targets"] = len(errors[arm])
         pre_v3 = any(n is None for v in accurate_by_case[arm].values() for n in v)
         # A run graded before evaluator v3 adds jobs but no accuracy: no ratio over mixed runs.
+        # Broker calls, cache hits included, so it depends on run order; not compute cost.
         a["jobs_per_accurate"] = "unresolved" if pre_v3 else ratio_text(a["jobs"], a["accurate"])
+        a["executed_per_accurate"] = (
+            "unresolved" if pre_v3 else ratio_text(a["jobs_executed"], a["accurate"])
+        )
         a["jobs_failed_share"] = ratio_text(a["jobs_failed"], a["jobs"])
         a["stability"] = stability(accurate_by_case[arm])
     report: dict[str, Any] = {
