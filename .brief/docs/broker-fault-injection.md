@@ -86,9 +86,12 @@ instead (open question 1).
   or `Energy`. With no run-type keyword, ORCA runs a single point, so none is required. Every `%`
   block or directive must be one of `%casscf`, `%scf`, `%pal`, `%maxcore`, `%moinp` or `%output`,
   and none of them may set a run type other than an energy. A `%method` block, and so any
-  `RunTyp`, makes the input ineligible, and so does `$new_job`. The list must cover every input
-  `orca_input` builds, and a test checks that each one is eligible, so that standard runs are not
-  left `:not-fired`. Anything not on the list is ineligible, so a run type the list did
+  `RunTyp`, makes the input ineligible, and so does `$new_job`. Basis names are on the list
+  by name: the pinned Dunning and Karlsruhe families the QUESTDB cases use, not whatever matches
+  `orca_input`'s `BASIS_RE`. So a token like `Opt` passed as a basis is ineligible. A test checks
+  that every input `orca_input` builds with a listed basis is eligible. A run whose first NEVPT2
+  job used an unlisted basis is `:not-fired` with that reason, and the first block of 8 is checked
+  for exactly that before the rest of the pilot runs. Anything not on the list is ineligible, so a run type the list did
   not anticipate fails closed. Any other job could go on changing `job.gbw` after the cut (see the
   invariants). An ineligible NEVPT2 job runs and is served normally, and does not consume the
   trigger. The first eligible job may be a different input in S0 than in S1. A write-up says
