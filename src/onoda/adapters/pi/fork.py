@@ -118,6 +118,9 @@ def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
         raise ForkError(f"run {parent_run_id} is not a Pi run; see `onoda fork`")
     if "parent_run" in cfg or VARIANTS[cfg["variant"]].rlm:
         raise ForkError(f"run {parent_run_id} is an RLM run; RLM runs cannot be forked yet")
+    # Context: doc://onoda/broker-fault-injection@0001#injected-faults — v1 refuses a fork or restart of a fault-injected run
+    if "fault_plan" in cfg:
+        raise ForkError(f"run {parent_run_id} carries a fault plan; it cannot be forked yet")
     if parent_run_id in imported_runs(store):
         raise ForkError(
             f"run {parent_run_id} was imported; a fork re-executes its recorded tool calls, "

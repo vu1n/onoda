@@ -277,7 +277,9 @@ claim one hidden reminder, recorded in the run's config.
 Models missing from Pi's built-in catalog, such as Claude Opus 5.5 and
 Sonnet 5.5 on OpenRouter, go in a Pi `models.json` passed to `pi run-vte` with `--pi-models`
 (`PI_MODELS=` for `run.sh`); `experiments/questdb/pi-models-claude-5.5.json`
-is one. It is copied into the run's isolated agent dir, and a reused work dir
+is one, and `pi-models-claude-5.5-anthropic.json` is Opus 5.5 on the
+Anthropic API directly (`PROVIDER=anthropic CREDENTIAL_ENV=ANTHROPIC_API_KEY
+MODEL=claude-opus-5-5:high`). It is copied into the run's isolated agent dir, and a reused work dir
 without it drops any earlier run's copy:
 
 ```bash

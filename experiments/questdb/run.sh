@@ -27,7 +27,11 @@
 # ids such as "S1-thioacetone-r1", space-separated: run only those, e.g. to rerun
 # one run into a fresh WORK), PI_MODELS (a Pi models.json copied into each run's
 # agent dir, for a model the pinned Pi catalog lacks; its sha256 is recorded in the
-# run's config). Every ORCA job runs
+# run's config), FAULT_PLAN (off; a fault plan file, broker-fault-injection: every
+# case, arm and repeat then runs twice, clean as `<arm>-<case>-r<n>` and faulted as
+# `<arm>-fault-<case>-r<n>`, each from a fresh empty ORCA cache of its own, in an
+# order that alternates arms and conditions, and the report keeps every arm).
+# Every ORCA job runs
 # in the job sandbox (A65), which sees ORCA_HOME, MPI_HOME and its own job dir
 # only, so none of these may sit inside ORCA_HOME or MPI_HOME, and nothing here
 # is written inside the repository.
@@ -93,20 +97,31 @@ progress() {  # run id, start (SECONDS), what happened
 mkdir -p "$OUT" "$WORK" "$ORCA_WORK"
 PARALLEL="${PARALLEL:-1}"
 case "$PARALLEL" in ''|*[!0-9]*|0) echo "run.sh: PARALLEL must be a positive integer" >&2; exit 2;; esac
+if [ -n "${FAULT_PLAN:-}" ]; then
+  [ -f "$FAULT_PLAN" ] || { echo "run.sh: no fault plan at $FAULT_PLAN" >&2; exit 2; }
+  FAULT_PLAN="$(cd "$(dirname "$FAULT_PLAN")" && pwd)/$(basename "$FAULT_PLAN")"
+fi
 store_args() {  # run id -> the run's agent store, evaluator store and ORCA cache
-  if [ "$PARALLEL" = 1 ]; then
+  if [ "$PARALLEL" = 1 ] && [ -n "${FAULT_PLAN:-}" ]; then
+    # Context: doc://onoda/broker-fault-injection@0001#injected-faults — pilot runs start from a fresh empty cache, no preseed
+    echo "$OUT/store $OUT/evaluator $OUT/orca-caches/$1"
+  elif [ "$PARALLEL" = 1 ]; then
     echo "$OUT/store $OUT/evaluator $OUT/orca-cache"
   else  # a store takes one writer at a time, so parallel runs get one each
     echo "$OUT/runs/$1/store $OUT/runs/$1/evaluator $OUT/runs/$1/orca-cache"
   fi
 }
-run_one() {  # case id, arm, repeat
-  local case_id=$1 arm=$2 r=$3 run_id store evaluator cache started ladder=() reminder=() models=()
-  run_id="$arm-${case_id#questdb-}-r$r"
+run_id_of() {  # case id, arm, repeat, condition (clean|fault)
+  if [ "$4" = fault ]; then echo "$2-fault-${1#questdb-}-r$3"; else echo "$2-${1#questdb-}-r$3"; fi
+}
+run_one() {  # case id, arm, repeat, condition (clean|fault)
+  local case_id=$1 arm=$2 r=$3 cond=${4:-clean} run_id store evaluator cache started ladder=() reminder=() models=() fault=()
+  run_id="$(run_id_of "$case_id" "$arm" "$r" "$cond")"
   read -r store evaluator cache <<< "$(store_args "$run_id")"
   [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
   [ "${REPORT_REMINDER:-0}" = 1 ] && reminder=(--report-reminder)
   [ -n "${PI_MODELS:-}" ] && models=(--pi-models "$PI_MODELS")
+  [ "$cond" = fault ] && fault=(--fault-plan "$FAULT_PLAN")
   echo "== $run_id" >&2
   started=$SECONDS
   mkdir -p "$(dirname "$store")"
@@ -120,7 +135,7 @@ run_one() {  # case id, arm, repeat
     --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
     --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
     ${DOCS[@]+"${DOCS[@]}"} ${ladder[@]+"${ladder[@]}"} ${reminder[@]+"${reminder[@]}"} \
-    ${models[@]+"${models[@]}"} \
+    ${models[@]+"${models[@]}"} ${fault[@]+"${fault[@]}"} \
     > "$OUT/$run_id.run.json" 2> "$OUT/$run_id.run.err"; then
     progress "$run_id" "$started" "run failed, skipped (see $run_id.run.err)"
     return 0
@@ -129,24 +144,37 @@ run_one() {  # case id, arm, repeat
     --evaluator-store "$evaluator" > "$OUT/$run_id.evaluate.json"
   progress "$run_id" "$started" "$(graded "$OUT/$run_id.run.json" "$OUT/$run_id.evaluate.json")"
 }
-ALL=()
-for case_id in $CASES; do
-  for arm in S0 S1; do
-    for r in $(seq 1 "$REPEATS"); do
-      run_id="$arm-${case_id#questdb-}-r$r"
-      if [ -n "${ONLY_RUNS:-}" ]; then
-        case " $ONLY_RUNS " in *" $run_id "*) ;; *) continue;; esac
-      fi
-      ALL+=("$run_id")
-      [ -s "$OUT/$run_id.evaluate.json" ] && continue  # resume: graded by an earlier invocation
-      if [ "$PARALLEL" = 1 ]; then
-        run_one "$case_id" "$arm" "$r"
-      else  # bash 3.2 (macOS) has no `wait -n`, so poll the running jobs
-        while [ "$(jobs -rp | wc -l | tr -d " ")" -ge "$PARALLEL" ]; do sleep 5; done
-        run_one "$case_id" "$arm" "$r" &
-      fi
+PLANNED=()  # "case arm repeat condition", in run order
+if [ -z "${FAULT_PLAN:-}" ]; then
+  for case_id in $CASES; do
+    for arm in S0 S1; do
+      for r in $(seq 1 "$REPEATS"); do PLANNED+=("$case_id $arm $r clean"); done
     done
   done
+else  # repeat by repeat, so the first block holds one run per cell; arms and conditions alternate
+  for r in $(seq 1 "$REPEATS"); do
+    for case_id in $CASES; do
+      if [ $((r % 2)) = 1 ]; then order="S0:clean S1:fault S1:clean S0:fault"
+      else order="S1:clean S0:fault S0:clean S1:fault"; fi
+      for cell in $order; do PLANNED+=("$case_id ${cell%%:*} $r ${cell##*:}"); done
+    done
+  done
+fi
+ALL=()
+for planned in "${PLANNED[@]}"; do
+  read -r case_id arm r cond <<< "$planned"
+  run_id="$(run_id_of "$case_id" "$arm" "$r" "$cond")"
+  if [ -n "${ONLY_RUNS:-}" ]; then
+    case " $ONLY_RUNS " in *" $run_id "*) ;; *) continue;; esac
+  fi
+  ALL+=("$run_id")
+  [ -s "$OUT/$run_id.evaluate.json" ] && continue  # resume: graded by an earlier invocation
+  if [ "$PARALLEL" = 1 ]; then
+    run_one "$case_id" "$arm" "$r" "$cond"
+  else  # bash 3.2 (macOS) has no `wait -n`, so poll the running jobs
+    while [ "$(jobs -rp | wc -l | tr -d " ")" -ge "$PARALLEL" ]; do sleep 5; done
+    run_one "$case_id" "$arm" "$r" "$cond" &
+  fi
 done
 wait
 RUNS=()
@@ -154,9 +182,11 @@ for run_id in "${ALL[@]}"; do
   [ -s "$OUT/$run_id.evaluate.json" ] && RUNS+=("$run_id")
 done
 [ ${#RUNS[@]} -gt 0 ] || { echo "run.sh: no run was graded" >&2; exit 1; }
+ARMS=(--arm S0 --arm S1)
+[ -n "${FAULT_PLAN:-}" ] && ARMS=()  # faulted arms are keyed by plan, beside their clean controls
 if [ "$PARALLEL" = 1 ]; then
   onoda vte report "${RUNS[@]}" --store "$OUT/store" --evaluator-store "$OUT/evaluator" \
-    --arm S0 --arm S1 | tee "$OUT/report.json"
+    ${ARMS[@]+"${ARMS[@]}"} | tee "$OUT/report.json"
 else
-  onoda vte report "${RUNS[@]}" --run-stores "$OUT/runs" --arm S0 --arm S1 | tee "$OUT/report.json"
+  onoda vte report "${RUNS[@]}" --run-stores "$OUT/runs" ${ARMS[@]+"${ARMS[@]}"} | tee "$OUT/report.json"
 fi

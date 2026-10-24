@@ -43,7 +43,10 @@ first agent adapter; Prime is an optional comparison arm).
   labelled examples (`onoda vte shadow-dataset` labels jobs from the grader, A70);
   `experiments/questdb/run.sh` is the S0-vs-S1 experiment on the Mac
   (`REPORT_REMINDER=1` / `--report-reminder` gives an agent that stops without
-  `report_vtes` one hidden reminder, recorded in the run's config). Cases
+  `report_vtes` one hidden reminder, recorded in the run's config).
+  `--fault-plan` (`FAULT_PLAN=` in run.sh, off by default) serves one planned
+  failure over a real job (`science/orca_faults.py`); faulted runs are their
+  own report arms and cannot be forked. Cases
   are `cases-dev/questdb/*/*.vte.yaml`; their `references.json` is
   evaluator-only.
 - Scientific cases: `cases/**/*.case.yaml` pin authentic outputs by sha256;

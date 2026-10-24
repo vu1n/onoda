@@ -22,3 +22,4 @@ live-settings-explicit conforms: run.sh adds PARALLEL (default 1) to run several
 broker-owns-orca conforms: only the orca_input description changes (it sets no state weights); ORCA still runs only through orca_submit and the host broker
 broker-owns-orca conforms: only orca_input changes (a trah option and its description); it still runs nothing, and ORCA starts only through orca_submit and the host broker with one max_executions
 broker-owns-orca conforms: only orca_input changes (trafostep ri only with RIJCOSX AutoAux); it runs nothing, and ORCA starts only through orca_submit and the host broker
+immutable-single-writer-records conforms: fork.py only adds a refusal to fork a run that carries a fault plan, before any record is read for the fork or written; no record, object or event changes and forks still start only from declared quiescent checkpoints

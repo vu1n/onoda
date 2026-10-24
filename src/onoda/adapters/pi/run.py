@@ -59,8 +59,8 @@ from onoda.adapters.pi.task import check_doc_name, stage_bundle
 from onoda.adapters.pi.vte import stage_vte_bundle
 from onoda.adapters.pi.vte_contract import DEFAULT_MAX_EXECUTIONS, ENV_BROKER, VteTaskBundle
 from onoda.budgets import child_links
-from onoda.canonical import canonical_bytes, sha256_digest
-from onoda.errors import CapabilityError, OnodaError, ReplayMismatch
+from onoda.canonical import DIGEST_PREFIX, canonical_bytes, sha256_digest
+from onoda.errors import CapabilityError, IntegrityError, OnodaError, ReplayMismatch
 from onoda.portability import imported_runs
 from onoda.records import ForkDeclaration, TaskManifest
 from onoda.science.contract import CASES_ROOT, LoadedCase
@@ -74,6 +74,7 @@ from onoda.science.orca_broker import (
     parse_journal,
     read_journal,
 )
+from onoda.science.orca_faults import FAULT_LABEL, load_fault_plan
 from onoda.science.orca_local import OrcaLocalScheduler, OrcaSettings
 from onoda.science.orca_sandbox import host_job_sandbox
 from onoda.science.vte import REFERENCES_SCHEMA, LoadedVteCase
@@ -320,6 +321,7 @@ def _ingest_launch(
     config: dict[str, Any],
     broker_journal: tuple[BrokerJournalEntry, ...] | None = None,
     fork: str | None = None,
+    labels: tuple[str, ...] = (),
 ) -> PiRun:
     """Ingest a finished launch's spool as `run_id`, against the broker journal if given."""
     if not (result.spool_dir / SPOOL_EVENTS).is_file():
@@ -330,6 +332,8 @@ def _ingest_launch(
     journal = {} if broker_journal is None else {"broker_journal": broker_journal}
     if fork is not None:
         journal["fork"] = fork
+    if labels:
+        journal["labels"] = labels
     ingested = ingest_spool(
         store,
         result.spool_dir,
@@ -506,6 +510,7 @@ def run_vte_case(
     limits: BrokerLimits = DEFAULT_LIMITS,
     fork: ForkLaunch | None = None,
     report_reminder: bool = False,
+    fault_plan: bytes | None = None,
 ) -> PiRun:
     """Run one variant on one VTE case, its ORCA jobs through a host broker; ingest it.
 
@@ -526,8 +531,20 @@ def run_vte_case(
     serves the parent's jobs before the fork point, then the broker runs live.
     `report_reminder` sends the agent one message to call report_vtes when it
     stops without a claim (recorded in the run's config; replay restages it).
+
+    `fault_plan` (a plan file's bytes, off by default) makes the broker serve
+    one planned failure (`science.orca_faults`); the config pins the plan's
+    canonical bytes, and `fault_injection` records what the trigger did, with
+    the real output behind a fired fault committed beside the journal. Such a
+    run cannot be a fork, and cannot be forked.
     """
     _check_new_run(store, run_id, variant_id)
+    plan = None
+    if fault_plan is not None:
+        # Context: doc://onoda/broker-fault-injection@0001#injected-faults — opt-in plan, pinned by sha256; v1 refuses forks of or into fault-injected runs
+        if fork is not None:
+            raise OnodaError("a fault plan needs a fresh run; a fork cannot carry one")
+        plan = load_fault_plan(fault_plan)
     max_requests = _request_cap(live, max_requests)
     scheduler = OrcaLocalScheduler(orca)  # resolves the settings; fails closed
     job_sandbox = host_job_sandbox(
@@ -572,6 +589,7 @@ def run_vte_case(
         max_executions=bundle.max_executions,
         job_sandbox=job_sandbox,
         limits=limits,
+        fault_plan=(plan[0], sha256_digest(plan[1])) if plan is not None else None,
     )
     # Refusals happen above; only a launchable run commits anything.
     task = _commit_vte_task(
@@ -606,6 +624,14 @@ def run_vte_case(
         config["sandbox"] = sandbox.kind
     if reducer is not None:
         config.update(reducer_provider=reducer[0], reducer_model=reducer[1])
+    if plan is not None:
+        config["fault_plan"] = {
+            "id": plan[0].id,
+            "fault": plan[0].fault,
+            "sha256": store.put_bytes(
+                plan[1], media_type="application/json", labels=["fault-plan"]
+            ).digest,
+        }
     fork_digest = _commit_fork(store, fork, task, config) if fork is not None else None
     _record_driver(store, config, script, live)
     result = _launch_with_broker(prepared, broker, timeout_s)
@@ -614,6 +640,9 @@ def run_vte_case(
     config["broker_journal"] = store.put_bytes(
         journal, media_type="application/jsonl", labels=["broker-journal"]
     ).digest
+    entries = parse_journal(journal, str(broker.journal_path))
+    if plan is not None:
+        config["fault_injection"] = _fault_injection(store, broker, entries)
     return _ingest_launch(
         store,
         prepared,
@@ -621,9 +650,39 @@ def run_vte_case(
         run_id=run_id,
         task=task,
         config=config,
-        broker_journal=parse_journal(journal, str(broker.journal_path)),
+        broker_journal=entries,
         fork=fork_digest,
+        labels=(FAULT_LABEL,)
+        if config.get("fault_injection", {}).get("outcome") == "fired"
+        else (),
     )
+
+
+def _fault_injection(
+    store: Store, broker: OrcaBroker, entries: Iterable[BrokerJournalEntry]
+) -> dict[str, Any]:
+    """What a run's fault plan did: fired on a job, skipped (and why), or never triggered.
+
+    A fired fault's real output is committed here, from the broker's host-side
+    copy, before the run is ingested; the journal entry pins its sha256.
+    """
+    hit = [e for e in entries if e.event == "reply" and e.injected is not None]
+    if not hit:
+        return {"outcome": "not-triggered"}
+    (e,) = hit  # one trigger per run
+    assert e.injected is not None
+    out: dict[str, Any] = {"outcome": e.injected.outcome, "job_id": e.job_id}
+    if e.injected.skip_reason is not None:
+        out["skip_reason"] = e.injected.skip_reason
+    if e.real_output_sha256 is not None:
+        path = broker.real_dir / e.real_output_sha256.removeprefix(DIGEST_PREFIX)
+        real = store.put_bytes(
+            path.read_bytes(), media_type="text/plain", labels=["fault-real-output"]
+        ).digest
+        if real != e.real_output_sha256:
+            raise IntegrityError(f"real output of {e.job_id} does not match the broker journal")
+        out["real_output"] = real
+    return out
 
 
 def _recorded_requests(store: Store, run_id: str) -> dict[str, list[str]]:
