@@ -42,7 +42,8 @@
 # $OUT/<run>.run.err. Rerunning with the same OUT resumes: a run that already
 # has its evaluate JSON is not run again. PARALLEL (1) runs that many runs at
 # once; above 1 each run gets its own agent store, evaluator store and ORCA
-# cache under $OUT/runs/<run>/ (a store takes one writer at a time), and the
+# cache under $OUT/runs/<run>/ (a store takes one writer at a time), its own
+# ORCA job root $ORCA_WORK/<run> (so no two brokers share scheduler state), and the
 # report pools them. Each ORCA job may use up to 4 processes (the broker's
 # cap), so PARALLEL=4 fills 16 cores.
 set -euo pipefail
@@ -115,9 +116,12 @@ run_id_of() {  # case id, arm, repeat, condition (clean|fault)
   if [ "$4" = fault ]; then echo "$2-fault-${1#questdb-}-r$3"; else echo "$2-${1#questdb-}-r$3"; fi
 }
 run_one() {  # case id, arm, repeat, condition (clean|fault)
-  local case_id=$1 arm=$2 r=$3 cond=${4:-clean} run_id store evaluator cache started ladder=() reminder=() models=() fault=()
+  local case_id=$1 arm=$2 r=$3 cond=${4:-clean} run_id jobs store evaluator cache started ladder=() reminder=() models=() fault=()
   run_id="$(run_id_of "$case_id" "$arm" "$r" "$cond")"
   read -r store evaluator cache <<< "$(store_args "$run_id")"
+  jobs="$ORCA_WORK"
+  # Parallel runs each get their own ORCA job root, so no two brokers share scheduler state.
+  [ "$PARALLEL" = 1 ] || jobs="$ORCA_WORK/$run_id"
   [ "$arm" = S1 ] && ladder=(--ladder "$LADDER")
   [ "${REPORT_REMINDER:-0}" = 1 ] && reminder=(--report-reminder)
   [ -n "${PI_MODELS:-}" ] && models=(--pi-models "$PI_MODELS")
@@ -130,7 +134,7 @@ run_one() {  # case id, arm, repeat, condition (clean|fault)
     --live --provider "$PROVIDER" --model "$MODEL" --credential-env "$CREDENTIAL_ENV" \
     --max-requests "$MAX_REQUESTS" --max-cost-usd "$MAX_COST_USD" \
     --enable-live-execution --orca-binary "$ORCA_HOME/orca" \
-    --orca-work-root "$ORCA_WORK" --orca-cache "$cache" \
+    --orca-work-root "$jobs" --orca-cache "$cache" \
     --orca-mpi-home "$MPI_HOME" \
     --max-wall-seconds "${MAX_WALL_SECONDS:-1800}" \
     --max-executions "${MAX_EXECUTIONS:-24}" --timeout "${TIMEOUT:-3600}" \
