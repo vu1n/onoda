@@ -949,7 +949,6 @@ class OrcaBroker:
 
         job_id = self._allocate()
         sched = self._scheduler
-        before = sched.executions
         # An exception up to here escapes and closes the broker: whether ORCA ran is unknown.
         assert self.limits is not None  # a live broker always has them
         sid = sched.submit(
@@ -960,7 +959,8 @@ class OrcaBroker:
             wrapper=self.job_sandbox,
             max_file_bytes=self.limits.max_output_bytes,
         )
-        executed = sched.executions > before
+        # Read from this job's own record: parallel runs may share the scheduler's work root.
+        executed = sched.executed(sid)
         try:
             status = sched.status(sid)
             if status not in ("completed", "failed"):

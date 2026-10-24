@@ -844,3 +844,29 @@ def test_replies_carry_checks_that_use_earlier_jobs_and_replay_identically(tmp_p
         r.summary for r in recorded
     ]
     assert [r.summary for r in replayed] == [r.summary for r in recorded]
+
+
+def test_schedulers_sharing_a_work_root_never_lose_or_share_a_job(tmp_path):
+    """Parallel runs once shared one work root: unlocked saves lost jobs and corrupted
+    scheduler.json, and two runs could get the same job dir. Each job is now its own."""
+    import threading
+
+    binary = stand_in(tmp_path)
+    scheds = [scheduler(tmp_path, binary) for _ in range(4)]
+    ids: list[str] = []
+
+    def work(n: int) -> None:
+        for i in range(3):
+            sid = scheds[n].submit(f"k{n}-{i}", "orca", {"input": INPUT.encode()}, {})
+            ids.append(sid)
+            assert scheds[n].executed(sid)
+
+    threads = [threading.Thread(target=work, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(ids) == len(set(ids)) == 12
+    state = json.loads((tmp_path / "work" / "scheduler.json").read_text())
+    assert sorted(state["jobs"]) == sorted(ids) and state["executions"] == 12
+    assert runs(binary) == 12

@@ -25,6 +25,8 @@ without re-executing anything.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -33,7 +35,9 @@ import resource
 import signal
 import stat
 import subprocess
+import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -204,9 +208,26 @@ class OrcaLocalScheduler:
         return json.loads(self._state_path.read_text())
 
     def _save(self, state: dict[str, Any]) -> None:
-        tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, sort_keys=True))
+        # A temp file of its own, so a writer never replaces the state with another's half file.
+        fd, tmp = tempfile.mkstemp(dir=self.root, prefix=".scheduler.", suffix=".tmp")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(state, sort_keys=True))
         os.replace(tmp, self._state_path)
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Hold the work root's lock across a load, change and save of its state.
+
+        Schedulers in several processes may share one work root (parallel
+        runs); without the lock two of them could lose each other's updates
+        or number two jobs alike.
+        """
+        with open(self.root / "scheduler.lock", "a") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
     def submit(
         self,
@@ -237,36 +258,60 @@ class OrcaLocalScheduler:
             if not FILE_NAME_RE.match(name) or name in _JOB_FILES:
                 raise OnodaError(f"extra input file name {name!r} is not allowed")
 
-        state = self._load()
-        if key in state["by_key"]:
-            existing = state["by_key"][key]
-            if state["jobs"][existing]["status"] == "submitted":
-                raise SubmissionUncertain(
-                    f"job {existing!r} for key {key!r} is submitted with no terminal "
-                    "marker (controller crashed mid-run); reconcile before retrying"
-                )
-            return existing
-
-        job_id = f"job-{len(state['jobs']) + 1:05d}"
-        job_dir = self.root / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
+        binary = self._settings.binary
+        command = [binary, "job.inp"]
+        binary_sha256 = sha256_file(binary)
+        with self._locked():
+            state = self._load()
+            if key in state["by_key"]:
+                existing = state["by_key"][key]
+                if state["jobs"][existing]["status"] == "submitted":
+                    raise SubmissionUncertain(
+                        f"job {existing!r} for key {key!r} is submitted with no terminal "
+                        "marker (controller crashed mid-run); reconcile before retrying"
+                    )
+                return existing
+            job_id, job_dir = self._new_job_dir(len(state["jobs"]) + 1)
+            # Persist submission intent BEFORE launching, so a crash mid-run is
+            # visible as `submitted` with no terminal marker, never a silent re-run.
+            state["jobs"][job_id] = self._submitted(
+                key, program, command, binary_sha256, extra, wrapper, max_file_bytes
+            )
+            state["by_key"][key] = job_id
+            self._save(state)
         inp_path = job_dir / "job.inp"
         inp_path.write_bytes(inputs["input"])
         for name, data in extra.items():
             (job_dir / name).write_bytes(data)
+        return self._run(job_id, job_dir, command, wrapper, max_file_bytes)
 
-        binary = self._settings.binary
-        command = [binary, "job.inp"]
-        binary_sha256 = sha256_file(binary)
+    def _new_job_dir(self, n: int) -> tuple[str, Path]:
+        """The next job id whose directory this call created; never one that already exists."""
+        while True:
+            job_id = f"job-{n:05d}"
+            try:
+                (self.root / job_id).mkdir()
+            except FileExistsError:
+                n += 1
+                continue
+            return job_id, self.root / job_id
 
-        # Persist submission intent BEFORE launching, so a crash mid-run is
-        # visible as `submitted` with no terminal marker, never a silent re-run.
-        state["jobs"][job_id] = {
+    def _submitted(
+        self,
+        key: str,
+        program: str,
+        command: list[str],
+        binary_sha256: str,
+        extra: dict[str, bytes],
+        wrapper: JobWrapper | None,
+        max_file_bytes: int | None,
+    ) -> dict[str, Any]:
+        return {
             "key": key,
             "program": program,
             "status": "submitted",
             "command": command,
-            "binary": binary,
+            "binary": command[0],
             "binary_sha256": binary_sha256,
             "max_wall_seconds": self._settings.max_wall_seconds,
             "stand_in": self._settings.stand_in,
@@ -277,9 +322,15 @@ class OrcaLocalScheduler:
             "sandbox": wrapper.kind if wrapper is not None else None,
             "max_file_bytes": max_file_bytes,
         }
-        state["by_key"][key] = job_id
-        self._save(state)
 
+    def _run(
+        self,
+        job_id: str,
+        job_dir: Path,
+        command: list[str],
+        wrapper: JobWrapper | None,
+        max_file_bytes: int | None,
+    ) -> str:
         out_path = job_dir / "job.out"
         err_path = job_dir / "job.err"
         prefix: list[str] = []
@@ -329,15 +380,17 @@ class OrcaLocalScheduler:
             # not stay `submitted` forever.
             outcome = {"status": "failed", "reason": f"launch_error: {exc}", "executed": False}
 
-        state = self._load()
-        job = state["jobs"][job_id]
-        job["duration_ms"] = int((time.monotonic() - start) * 1000)
-        job["status"] = outcome["status"]
-        job["reason"] = outcome["reason"]
-        job["returncode"] = outcome.get("returncode")
-        if outcome["executed"]:
-            state["executions"] += 1
-        self._save(state)
+        with self._locked():
+            state = self._load()
+            job = state["jobs"][job_id]
+            job["duration_ms"] = int((time.monotonic() - start) * 1000)
+            job["status"] = outcome["status"]
+            job["reason"] = outcome["reason"]
+            job["returncode"] = outcome.get("returncode")
+            job["executed"] = outcome["executed"]
+            if outcome["executed"]:
+                state["executions"] += 1
+            self._save(state)
 
         return job_id
 
@@ -392,10 +445,11 @@ class OrcaLocalScheduler:
     def cancel(self, job_id: str) -> None:
         # submit() runs synchronously to completion, so there is never a job
         # actually mid-flight to cancel by the time a caller can call this.
-        state = self._load()
-        if state["jobs"][job_id]["status"] == "submitted":
-            state["jobs"][job_id]["status"] = "cancelled"
-            self._save(state)
+        with self._locked():
+            state = self._load()
+            if state["jobs"][job_id]["status"] == "submitted":
+                state["jobs"][job_id]["status"] = "cancelled"
+                self._save(state)
 
     def job_metadata(self, job_id: str) -> dict[str, Any]:
         job = self._load()["jobs"][job_id]
@@ -411,6 +465,10 @@ class OrcaLocalScheduler:
             "reason": job["reason"],
             "sandbox": job.get("sandbox"),
         }
+
+    def executed(self, job_id: str) -> bool:
+        """Whether this job's own subprocess ran (not counted from the shared total)."""
+        return self._load()["jobs"][job_id].get("executed") is True
 
     @property
     def executions(self) -> int:
