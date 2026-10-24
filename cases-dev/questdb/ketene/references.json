@@ -31,10 +31,11 @@
       "label": "1A2(p,3p)",
       "spin": 1,
       "irrep": "A2",
-      "character": "p,3p",
+      "character": "pi,3p",
       "energy_ev": "7.262",
       "active_space": "(4,3,3,0)",
-      "state_average": "(1,0,0,2)"
+      "state_average": "(1,0,0,2)",
+      "notes": "character corrected from the label's bare p: MAIN/Ketene.json types it p3p (pi,3p)"
     },
     {
       "label": "3A2(\uf070,\uf070*)",
@@ -49,10 +50,11 @@
       "label": "3A1(p,\uf070*)",
       "spin": 3,
       "irrep": "A1",
-      "character": "p,pi*",
+      "character": "pi,pi*",
       "energy_ev": "5.693",
       "active_space": "(4,3,2,0)",
-      "state_average": "(2,0,0,0)"
+      "state_average": "(2,0,0,0)",
+      "notes": "character corrected from the label's bare p: MAIN/Ketene.json types it ppi (pi,pi*)"
     },
     {
       "label": "3B1(\uf070,3s)",

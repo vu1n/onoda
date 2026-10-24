@@ -51,6 +51,8 @@ _TO_RE = re.compile(r"(?<=\S)\s+to\s+(?=\S)", re.IGNORECASE)
 _PRIMES = {"’": "'", "‘": "'", "”": "''", "“": "''", '"': "''"}
 _DECIMAL_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)$")
 _IRREP_RE = re.compile(r"^[A-Z][a-z0-9]*'{0,2}$")
+# A Rydberg p orbital's axis (`3pz`) repeats what the irrep already says.
+_P_AXIS_RE = re.compile(r"(?<=\dp)[xyz]")
 _LABEL_RE = re.compile(r"^(?P<spin>[13])(?P<irrep>[A-Z][a-z0-9]*'{0,2})\((?P<char>[^()]+)\)$")
 
 
@@ -82,6 +84,16 @@ def normalize_character(text: str) -> str:
     for k, v in _GREEK.items():
         out = out.replace(k, v)
     return out
+
+
+def identity_character(text: str) -> str:
+    """The character as the grader compares it: `normalize_character`, Rydberg p axis dropped.
+
+    `n,3pz` and `n,3p` compare equal: within one point-group irrep a p
+    orbital's axis is fixed, so the suffix adds nothing the irrep does not.
+    Reference keys and reports keep the full `normalize_character` text.
+    """
+    return _P_AXIS_RE.sub("", normalize_character(text))
 
 
 def parse_state_label(label: str) -> tuple[int, str, str] | None:
@@ -143,6 +155,11 @@ class VteReferenceRow(_Frozen):
     energy_ev: str  # decimal text, the reference method's excitation energy
     active_space: str = ""  # QUESTDB's per-irrep orbital counts, verbatim
     state_average: str = ""  # QUESTDB's per-irrep root counts, verbatim
+    # Other characters that name this same state (`identity_character` text),
+    # each with the reason in `notes`; e.g. sulfur's first Rydberg shell is
+    # 4s/4p where QUESTDB writes 3s/3p.
+    aliases: tuple[str, ...] = ()
+    notes: str = ""  # why `character` or `aliases` differ from the label, if they do
 
     @field_validator("energy_ev")
     @classmethod
