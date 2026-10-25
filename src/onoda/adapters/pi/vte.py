@@ -24,8 +24,9 @@ can reach the bundle.
 2. Identity. A `supported` claim is identified only when its cited job printed
    irreps (A71): without them the irrep is the agent's own label, which the
    output cannot confirm. It is then identified with a reference row when
-   `normalize_character` of its character picks exactly one row of its
-   (spin, irrep), even when that is the only such row. Rows two claims land on are
+   `identity_character` of its character picks exactly one row of its
+   (spin, irrep), even when that is the only such row; a row is picked by its
+   own character or one of its recorded `aliases`. Rows two claims land on are
    identified by neither. Nothing is ever paired by energy or energy order,
    so two states of one irrep with no usable character stay `unidentified`
    however well their order matches (the paper's rule).
@@ -68,16 +69,16 @@ from onoda.science.vte import (
     LoadedVteCase,
     VteReferenceRow,
     VteReferences,
+    identity_character,
     load_vte_references,
-    normalize_character,
     normalize_irrep,
 )
 from onoda.store import Store
 
 VTE_EVALUATOR = "vte-claims"
-VTE_EVALUATOR_VERSION = (
-    "3"  # 2: identity needs printed irreps (A71); 3: character always, tolerance
-)
+# 2: identity needs printed irreps (A71); 3: character always, tolerance;
+# 4: identity_character (Rydberg p axis dropped) and per-row reference aliases.
+VTE_EVALUATOR_VERSION = "4"
 CLAIM_VERDICTS = ("supported", "contradicted", "unsupported")
 IDENTITY_VERDICTS = ("identified", "unidentified")
 REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
@@ -222,7 +223,7 @@ def _pt2_method(references: VteReferences) -> str:
     return references.method.split("/", 1)[0]
 
 
-# Context: doc://onoda/vte-grading-contract@0002#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
+# Context: doc://onoda/vte-grading-contract@0003#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
 def _grade_value(
     cs: ClaimedVte,
     jobs: Mapping[str, VteJob],
@@ -272,6 +273,11 @@ def _grade_value(
     return "contradicted", {**detail, "reason": "value" if pt2 else "no_state"}
 
 
+def _accepted(row: VteReferenceRow) -> frozenset[str]:
+    """The characters that identify `row`: its own and its aliases, compared as identity text."""
+    return frozenset(identity_character(c) for c in (row.character, *row.aliases))
+
+
 # Context: doc://onoda/match-by-identity@0001#no-energy-order-matching — references are picked by spin, irrep and character, never by energy order
 def _candidates(
     cs: ClaimedVte, rows: tuple[VteReferenceRow, ...]
@@ -283,8 +289,8 @@ def _candidates(
         return [], "no_reference"
     # A lone row of its spin and irrep still needs the character: a label alone
     # credited states several eV from the target (qv5, 2026-10-05).
-    character = normalize_character(cs.character)
-    picked = [r for r in same if character and r.character == character]
+    character = identity_character(cs.character)
+    picked = [r for r in same if character and character in _accepted(r)]
     return (picked, None) if len(picked) == 1 else ([], "character")
 
 
@@ -324,6 +330,11 @@ def evaluate_vte_claims(
     ref_keys = [_ref_key(r) for r in rows]
     if len(set(ref_keys)) != len(ref_keys):
         raise IntegrityError(f"references for {m.case_id!r} repeat a (spin, irrep, character)")
+    accepted = [(r.spin, r.irrep, c) for r in rows for c in _accepted(r)]
+    if len(set(accepted)) != len(accepted):
+        raise IntegrityError(
+            f"references for {m.case_id!r}: two rows of a spin and irrep accept the same character"
+        )
     method = _pt2_method(references)
 
     assignments: dict[str, str] = {}

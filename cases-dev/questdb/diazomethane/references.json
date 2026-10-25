@@ -31,10 +31,11 @@
       "label": "1A1(p,\uf070*)",
       "spin": 1,
       "irrep": "A1",
-      "character": "p,pi*",
+      "character": "pi,pi*",
       "energy_ev": "6.281",
       "active_space": "(4,4,2,0)",
-      "state_average": "(3,0,0,0)"
+      "state_average": "(3,0,0,0)",
+      "notes": "character corrected from the label's bare p: MAIN/Diazomethane.json types it ppi"
     },
     {
       "label": "3A2(\uf070,\uf070*)",
@@ -49,10 +50,11 @@
       "label": "3A1(p,\uf070*)",
       "spin": 3,
       "irrep": "A1",
-      "character": "p,pi*",
+      "character": "pi,pi*",
       "energy_ev": "4.116",
       "active_space": "(4,3,2,0)",
-      "state_average": "(2,0,0,0)"
+      "state_average": "(2,0,0,0)",
+      "notes": "character corrected from the label's bare p: MAIN/Diazomethane.json types it ppi"
     },
     {
       "label": "3B1(\uf070,3s)",

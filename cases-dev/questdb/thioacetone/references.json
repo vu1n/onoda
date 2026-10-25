@@ -25,7 +25,11 @@
       "character": "n,3s",
       "energy_ev": "5.689",
       "active_space": "(4,2,1,0)",
-      "state_average": "(1,0,2,0)"
+      "state_average": "(1,0,2,0)",
+      "aliases": [
+        "n,4s"
+      ],
+      "notes": "aliases n,4s: sulfur's first Rydberg shell is n = 4; QUESTDB writes 3s/3p"
     },
     {
       "label": "1A1(\uf070,\uf070*)",
@@ -43,7 +47,11 @@
       "character": "n,3pz",
       "energy_ev": "6.595",
       "active_space": "(4,2,1,0)",
-      "state_average": "(1,0,2,0)"
+      "state_average": "(1,0,2,0)",
+      "aliases": [
+        "n,4p"
+      ],
+      "notes": "aliases n,4p: sulfur's first Rydberg shell is n = 4; QUESTDB writes 3s/3p"
     },
     {
       "label": "1A1(n,3py)",
@@ -52,7 +60,11 @@
       "character": "n,3py",
       "energy_ev": "6.565",
       "active_space": "(2,2,2,0)",
-      "state_average": "(3,0,0,0)"
+      "state_average": "(3,0,0,0)",
+      "aliases": [
+        "n,4p"
+      ],
+      "notes": "aliases n,4p: sulfur's first Rydberg shell is n = 4; QUESTDB writes 3s/3p"
     },
     {
       "label": "3A2(n,\uf070*)",

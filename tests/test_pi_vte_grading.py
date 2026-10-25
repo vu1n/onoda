@@ -20,6 +20,7 @@ from onoda.adapters.pi.vte import (
     VTE_EVALUATOR,
     VTE_EVALUATOR_VERSION,
     VteJob,
+    _candidates,
     evaluate_vte_claims,
     ratio_text,
     stability,
@@ -30,7 +31,14 @@ from onoda.canonical import sha256_digest
 from onoda.clock import LogicalClock
 from onoda.errors import CapabilityError, IntegrityError, OnodaError
 from onoda.science.orca_parser import PARSER_ID
-from onoda.science.vte import load_vte_case, load_vte_references, vte_case_manifests
+from onoda.science.vte import (
+    VteReferenceRow,
+    identity_character,
+    load_vte_case,
+    load_vte_references,
+    parse_state_label,
+    vte_case_manifests,
+)
 from onoda.store import Store
 
 REPO = Path(__file__).resolve().parent.parent
@@ -474,3 +482,73 @@ def test_stability_is_unresolved_for_a_run_graded_before_accuracy_existed():
     assert s["accurate_per_run"] == {"questdb-ketene": [5, None], "questdb-thioacetone": [3, 3]}
     assert s["accurate_spread"] == {"questdb-ketene": "unresolved", "questdb-thioacetone": 0}
     assert s["max_accurate_spread"] == "unresolved"  # never a spread computed from a stand-in 0
+
+
+# ------------------------------------------------------------- identity text, errata, aliases (v4)
+
+
+@pytest.mark.parametrize(
+    ("text", "want"),
+    [
+        ("n,3pz", "n,3p"),
+        ("N, 3py", "n,3p"),
+        ("pi,3px", "pi,3p"),
+        ("n,3s", "n,3s"),
+        ("pi,pi*", "pi,pi*"),
+    ],
+)
+def test_identity_character_drops_the_rydberg_p_axis(text, want):
+    assert identity_character(text) == want
+
+
+def _row(irrep: str, character: str, *aliases: str) -> VteReferenceRow:
+    return VteReferenceRow(
+        label=f"1{irrep}({character})",
+        spin=1,
+        irrep=irrep,
+        character=character,
+        energy_ev="6.0",
+        aliases=aliases,
+    )
+
+
+def test_axis_and_alias_pick_the_row_and_nothing_else():
+    rows = (_row("B2", "n,3s", "n,4s"), _row("B2", "n,3pz", "n,4p"))
+    for character, want in [
+        ("n,3p", "n,3pz"),
+        ("n,4p", "n,3pz"),
+        ("n,4s", "n,3s"),
+        ("n,3pz", "n,3pz"),
+    ]:
+        picked, reason = _candidates(_state(1, "B2", "6.0", "j0001", character), rows)
+        assert reason is None and [r.character for r in picked] == [want]
+    assert _candidates(_state(1, "B2", "6.0", "j0001", "n,3d"), rows) == ([], "character")
+
+
+def test_no_bare_p_characters_remain_and_errata_carry_notes():
+    for case_id in CASES:
+        for row in load_vte_references(load_vte_case(CASES[case_id])).rows:
+            assert not row.character.startswith("p,"), (case_id, row.label)
+            if row.character != parse_state_label(row.label)[2] or row.aliases:
+                assert row.notes, (case_id, row.label)
+    thio = {r.character: r.aliases for r in load_vte_references(_case("thioacetone")).rows}
+    assert thio["n,3s"] == ("n,4s",) and thio["n,3pz"] == thio["n,3py"] == ("n,4p",)
+
+
+def test_aliases_that_make_one_character_name_two_rows_are_refused(evaluator_store, monkeypatch):
+    case = _case("acetone")
+    refs = load_vte_references(case)
+    # n,3pz's identity text is n,3p; an alias n,3p on the other 1B2 row makes it ambiguous.
+    rows = tuple(
+        r.model_copy(update={"aliases": ("n,3p",)}) if r.character == "n,3s" else r
+        for r in refs.rows
+    )
+    with pytest.raises(IntegrityError, match="accept the same character"):
+        evaluate_vte_claims(
+            evaluator_store,
+            run_id="r1",
+            case=case,
+            references=refs.model_copy(update={"rows": rows}),
+            claim=None,
+            jobs={},
+        )

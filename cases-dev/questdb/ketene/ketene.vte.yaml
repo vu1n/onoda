@@ -25,7 +25,7 @@ targets:
   count: 1
 references:
   path: references.json
-  sha256: sha256:d1d05e3373bacc1ab8822d684c9c12534c05cbb868857c425e7e0a63810ef8a5
+  sha256: sha256:2b324f9031dc58055dd64a55c8442793fc6f89740b08652b0ab27ff411d8c739
 provenance:
   origin: QUESTDB (QUEST database of highly-accurate excitation energies)
   repository: https://github.com/pfloos/QUESTDB

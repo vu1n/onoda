@@ -60,8 +60,33 @@ MOLECULES: dict[str, tuple[str, str]] = {
 }
 
 
-def reference_rows(table: dict) -> tuple[VteReferenceRow, ...]:
-    """The SC-NEVPT2 rows of one `*_mrpt.json` table, fluorescence rows dropped."""
+# Corrections to a label's parsed character, keyed by (molecule, label as printed).
+# In these four rows the pi glyph lost its Symbol font and reads as a Latin `p`
+# (`normalize_character` deliberately leaves a bare `p` alone). QUESTDB's own
+# main tables (data/json/MAIN/<Molecule>.json) type the same states `ppi` and
+# `p3p`, where `p` is its spelling of pi throughout.
+ERRATA: dict[tuple[str, str], tuple[str, str]] = {
+    ("ketene", "1A2(p,3p)"): ("pi,3p", "MAIN/Ketene.json types it p3p (pi,3p)"),
+    ("ketene", "3A1(p,\uf070*)"): ("pi,pi*", "MAIN/Ketene.json types it ppi (pi,pi*)"),
+    ("diazomethane", "1A1(p,\uf070*)"): ("pi,pi*", "MAIN/Diazomethane.json types it ppi"),
+    ("diazomethane", "3A1(p,\uf070*)"): ("pi,pi*", "MAIN/Diazomethane.json types it ppi"),
+}
+# Other names for the same state, keyed by (molecule, normalized character). QUESTDB
+# names thioacetone's sulfur Rydberg states 3s/3p by analogy with acetone; sulfur's
+# first Rydberg shell is n = 4, so 4s/4p name the same orbitals.
+_SULFUR = "sulfur's first Rydberg shell is n = 4; QUESTDB writes 3s/3p"
+ALIASES: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
+    ("thioacetone", "n,3s"): (("n,4s",), _SULFUR),
+    ("thioacetone", "n,3pz"): (("n,4p",), _SULFUR),
+    ("thioacetone", "n,3py"): (("n,4p",), _SULFUR),
+}
+
+
+def reference_rows(table: dict, molecule: str = "") -> tuple[VteReferenceRow, ...]:
+    """The SC-NEVPT2 rows of one `*_mrpt.json` table, fluorescence rows dropped.
+
+    `ERRATA` and `ALIASES` for `molecule` are applied, each with its note.
+    """
     headers = table["headers"]
     space_col, average_col = headers[1], headers[2]
     rows = []
@@ -70,6 +95,14 @@ def reference_rows(table: dict) -> tuple[VteReferenceRow, ...]:
         if parsed is None:
             continue
         spin, irrep, character = parsed
+        notes = []
+        fix = ERRATA.get((molecule, row["State"]))
+        if fix is not None:
+            character = fix[0]
+            notes.append(f"character corrected from the label's bare p: {fix[1]}")
+        aliases, why = ALIASES.get((molecule, character), ((), ""))
+        if why:
+            notes.append(f"aliases {', '.join(aliases)}: {why}")
         rows.append(
             VteReferenceRow(
                 label=row["State"],
@@ -79,6 +112,8 @@ def reference_rows(table: dict) -> tuple[VteReferenceRow, ...]:
                 energy_ev=row[NEVPT2_COLUMN],
                 active_space=row[space_col],
                 state_average=row[average_col],
+                aliases=aliases,
+                notes="; ".join(notes),
             )
         )
     return tuple(rows)
@@ -92,9 +127,13 @@ def targets_of(rows: tuple[VteReferenceRow, ...]) -> tuple[VteTarget, ...]:
 
 
 def _write_json(path: Path, model: VteReferences) -> bytes:
-    data = (
-        json.dumps(model.model_dump(by_alias=True), indent=2, ensure_ascii=True) + "\n"
-    ).encode()
+    dumped = model.model_dump(by_alias=True, mode="json")
+    # Rows without errata or aliases keep the bytes they had before those fields existed.
+    for row in dumped["rows"]:
+        for key in ("aliases", "notes"):
+            if not row[key]:
+                del row[key]
+    data = (json.dumps(dumped, indent=2, ensure_ascii=True) + "\n").encode()
     path.write_bytes(data)
     return data
 
@@ -111,7 +150,7 @@ def build_case(questdb: Path, commit: str, molecule: str, out: Path) -> Path:
 
     json_path = f"data/cas/json/{molecule}_mrpt.json"
     table = json.loads((questdb / json_path).read_text())
-    rows = reference_rows(table)
+    rows = reference_rows(table, molecule)
     refs = VteReferences(
         case_id=case_id,
         method="SC-NEVPT2/aug-cc-pVTZ",
