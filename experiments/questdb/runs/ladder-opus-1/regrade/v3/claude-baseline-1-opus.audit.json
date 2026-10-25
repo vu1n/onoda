@@ -1,0 +1,55 @@
+{
+  "baseline_accurate": 32,
+  "examples": [],
+  "false_accepts": 0,
+  "measured_only": [
+    "label_swap"
+  ],
+  "states": 56,
+  "variants": {
+    "casscf_not_converged": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "casscf_value": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "duplicate": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "energy_nudged": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "job_not_executed": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "job_not_in_run": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "label_swap": {
+      "accepted": 18,
+      "graded": 52
+    },
+    "no_character": {
+      "accepted": 0,
+      "graded": 56
+    },
+    "other_irrep": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "other_job": {
+      "accepted": 0,
+      "graded": 595
+    },
+    "other_spin": {
+      "accepted": 0,
+      "graded": 56
+    }
+  }
+}

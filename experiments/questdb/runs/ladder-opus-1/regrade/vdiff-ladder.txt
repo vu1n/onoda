@@ -1,0 +1,133 @@
+ladder-opus-1 S0-acetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1A2(n,3px): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 4 -> 7
+ladder-opus-1 S0-cyclopropenone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 9 -> 11
+  accurate: 6 -> 8
+ladder-opus-1 S0-cyclopropenone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 9 -> 11
+  accurate: 6 -> 8
+ladder-opus-1 S0-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S0-diazomethane-r2:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S0-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S0-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S0-methylenecyclopropene-r1:
+  ref.1A2(pi,3py): unidentified -> identified/within
+  coverage: 4 -> 5
+  accurate: 4 -> 5
+ladder-opus-1 S0-methylenecyclopropene-r2:
+  ref.1A2(pi,3py): unidentified -> identified/within
+  coverage: 4 -> 5
+  accurate: 4 -> 5
+ladder-opus-1 S0-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+ladder-opus-1 S0-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+ladder-opus-1 S1-acetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1A2(n,3px): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 4 -> 7
+ladder-opus-1 S1-acetone-r2:
+  ref.1A2(n,3px): unidentified -> identified/within
+  coverage: 6 -> 7
+  accurate: 5 -> 6
+ladder-opus-1 S1-cyclopropenone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 9 -> 11
+  accurate: 6 -> 8
+ladder-opus-1 S1-cyclopropenone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 9 -> 11
+  accurate: 6 -> 8
+ladder-opus-1 S1-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S1-diazomethane-r2:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+ladder-opus-1 S1-methylenecyclopropene-r1:
+  ref.1A2(pi,3py): unidentified -> identified/within
+  coverage: 4 -> 5
+  accurate: 4 -> 5
+ladder-opus-1 S1-methylenecyclopropene-r2:
+  ref.1A2(pi,3py): unidentified -> identified/within
+  coverage: 4 -> 5
+  accurate: 3 -> 4
+ladder-opus-1 S1-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+ladder-opus-1 S1-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+{'runs': 32, 'ref newly identified': 47}

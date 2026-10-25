@@ -1,0 +1,59 @@
+{
+  "arms": {
+    "S1": {
+      "accurate": 27,
+      "coverage": 32,
+      "coverage_total": 46,
+      "executed_per_accurate": "3.296296",
+      "false_success_claims": 0,
+      "identified_targets": 16,
+      "jobs": 89,
+      "jobs_executed": 89,
+      "jobs_failed": 14,
+      "jobs_failed_share": "0.157303",
+      "jobs_per_accurate": "3.296296",
+      "jobs_rejected": 2,
+      "mae_ev": "0.254438",
+      "runs": [
+        "S1-acetaldehyde-r1",
+        "S1-acetaldehyde-r2",
+        "S1-diazomethane-r1",
+        "S1-diazomethane-r2",
+        "S1-ketene-r1",
+        "S1-ketene-r2",
+        "S1-thioacetone-r1",
+        "S1-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-acetaldehyde": [
+            2,
+            2
+          ],
+          "questdb-diazomethane": [
+            5,
+            2
+          ],
+          "questdb-ketene": [
+            5,
+            5
+          ],
+          "questdb-thioacetone": [
+            3,
+            3
+          ]
+        },
+        "accurate_spread": {
+          "questdb-acetaldehyde": 0,
+          "questdb-diazomethane": 3,
+          "questdb-ketene": 0,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 3
+      }
+    }
+  },
+  "note": "counts and errors only; no arm is declared better",
+  "synthetic": false
+}

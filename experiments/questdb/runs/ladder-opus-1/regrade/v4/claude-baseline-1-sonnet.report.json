@@ -1,0 +1,53 @@
+{
+  "arms": {
+    "S1": {
+      "accurate": 35,
+      "coverage": 44,
+      "coverage_total": 56,
+      "executed_per_accurate": "2.885714",
+      "false_success_claims": 0,
+      "identified_targets": 12,
+      "jobs": 101,
+      "jobs_executed": 101,
+      "jobs_failed": 16,
+      "jobs_failed_share": "0.158416",
+      "jobs_per_accurate": "2.885714",
+      "jobs_rejected": 7,
+      "mae_ev": "0.224705",
+      "runs": [
+        "S1-ketene-r1",
+        "S1-ketene-r2",
+        "S1-ketene-r3",
+        "S1-ketene-r4",
+        "S1-thioacetone-r1",
+        "S1-thioacetone-r2",
+        "S1-thioacetone-r3",
+        "S1-thioacetone-r4"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-ketene": [
+            5,
+            5,
+            2,
+            3
+          ],
+          "questdb-thioacetone": [
+            6,
+            6,
+            6,
+            2
+          ]
+        },
+        "accurate_spread": {
+          "questdb-ketene": 3,
+          "questdb-thioacetone": 4
+        },
+        "max_accurate_spread": 4
+      }
+    }
+  },
+  "note": "counts and errors only; no arm is declared better",
+  "synthetic": false
+}
