@@ -15,7 +15,7 @@ carries: [A58, A63, A64, A71, A73]  # rows of the former docs/ASSUMPTIONS.md reg
 <!-- brief:anchor claim-from-one-cited-job -->
 ## Grade each claimed state from the one job it cites, and identify it only by printed irrep
 
-A reported excitation energy is `supported` only when the cited job, executed or cache-hit in this run, prints that value for a state of the claimed spin (and irrep, when printed) in its transition table. Energies subtracted across two jobs are never accepted. A supported claim identifies a reference row only if that job printed irreps (ran with symmetry) and its normalized character picks exactly one row of the claimed (spin, irrep), even when that is the only such row. The grader is evaluator version 3. Both arms are told this contract in the task instruction.
+A reported excitation energy is `supported` only when the cited job, executed or cache-hit in this run, prints that value for a state of the claimed spin (and irrep, when printed) in its transition table. Energies subtracted across two jobs are never accepted. A supported claim identifies a reference row only if that job printed irreps (ran with symmetry) and its identity character (`normalize_character` with a Rydberg p orbital's axis dropped) picks exactly one row of the claimed (spin, irrep), by the row's own character or one of its recorded aliases, even when that is the only such row. The grader is evaluator version 4. Both arms are told this contract in the task instruction.
 
 **Why.** Without one cited job the grader cannot check the number came from a converged calculation of that state; without a printed irrep the identification rests on the agent's own label.
 
@@ -24,6 +24,9 @@ A reported excitation energy is `supported` only when the cited job, executed or
 - A job without printed irreps makes the claim `unidentified` with reason `irrep_not_printed` (A71).
 - Rows that two claims land on are identified by neither; nothing is paired by energy order.
 - `_candidates` requires the character to pick the row, even for the only row of its spin and irrep. A bare or different label is `unidentified` with reason `character`.
+- `identity_character` drops a Rydberg p orbital's axis (`n,3pz` and `n,3p` compare equal); reference keys and reports keep the full `normalize_character` text.
+- A reference row may carry `aliases` (other characters for the same state) and then carries `notes` saying why; a row's character may be corrected from its printed label only by an erratum in `scripts/questdb_cases.py`, recorded in `notes`. Grading refuses references where two rows of one spin and irrep accept the same character.
+- First uses (ratified 2026-10-25): the four QUESTDB rows whose pi glyph reads as a bare `p` (ketene 1A2, 3A1; diazomethane 1A1, 3A1), corrected from QUESTDB's MAIN tables; thioacetone's sulfur Rydberg rows accept `n,4s` / `n,4p`.
 - Each identified row also carries an accuracy verdict against the draft decision vte-energy-tolerance. `vte report` adds `accurate` and `runs_without_claim` per arm.
 - `VTE_INSTRUCTION` tells both arms that a state is matched by spin, irrep and character together.
 - `VTE_INSTRUCTION` states the contract identically for both arms (A73).

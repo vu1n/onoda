@@ -223,7 +223,7 @@ def _pt2_method(references: VteReferences) -> str:
     return references.method.split("/", 1)[0]
 
 
-# Context: doc://onoda/vte-grading-contract@0002#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
+# Context: doc://onoda/vte-grading-contract@0003#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
 def _grade_value(
     cs: ClaimedVte,
     jobs: Mapping[str, VteJob],

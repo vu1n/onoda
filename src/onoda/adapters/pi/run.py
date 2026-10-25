@@ -86,7 +86,7 @@ DEFAULT_INSTRUCTION = (
     "output lists, copying each value and unit exactly as printed."
 )
 
-# Context: doc://onoda/vte-grading-contract@0002#claim-from-one-cited-job — both arms are told the grading contract in the same words
+# Context: doc://onoda/vte-grading-contract@0003#claim-from-one-cited-job — both arms are told the grading contract in the same words
 VTE_INSTRUCTION = (
     "Read the molecule and its target excited states with structure, write SA-CASSCF/SC-NEVPT2 "
     "ORCA inputs and run them with orca_submit, then call report_vtes once with each target "

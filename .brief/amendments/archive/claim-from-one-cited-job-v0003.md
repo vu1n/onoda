@@ -22,3 +22,8 @@ Matching stays by spin, irrep and character, never by energy (match-by-identity)
 
 ## Impact / risk
 v3 and v4 evaluations of one run differ and are not compared with each other (`evaluation.compare` already refuses mixed versions); saved runs are regraded under v4 with new evaluations, the v3 ones kept. The axis fold also lets `n,3p` identify acetone, cyclopropenone and methylenecyclopropene 3p rows that only matched `n,3px/y/z` before. The reference files of ketene, diazomethane and thioacetone change, so their manifest pins change.
+
+
+---
+ratified_rev: 0003
+ratified_by: vu1n ("ratify" in project thread, 2026-10-25)
