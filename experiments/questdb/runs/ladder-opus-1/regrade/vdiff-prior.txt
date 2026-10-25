@@ -1,0 +1,365 @@
+claude-baseline-1-opus S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+claude-baseline-1-opus S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+claude-baseline-1-opus S1-ketene-r3:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+claude-baseline-1-opus S1-ketene-r4:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+claude-baseline-1-opus S1-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+claude-baseline-1-opus S1-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+claude-baseline-1-opus S1-thioacetone-r3:
+  ref.1A1(n,3py): unidentified -> identified/outside
+  ref.1B2(n,3pz): unidentified -> identified/outside
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 4
+claude-baseline-1-opus S1-thioacetone-r4:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+claude-baseline-1-sonnet S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 3 -> 5
+  accurate: 3 -> 5
+claude-baseline-1-sonnet S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 3 -> 5
+  accurate: 3 -> 5
+claude-baseline-1-sonnet S1-ketene-r3:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> unidentified
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 2 -> 3
+  accurate: 1 -> 2
+claude-baseline-1-sonnet S1-ketene-r4:
+  ref.1A2(p,3p): missing -> -
+  ref.1A2(pi,3p): - -> missing
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 2 -> 3
+  accurate: 2 -> 3
+claude-baseline-1-sonnet S1-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 5 -> 7
+  accurate: 4 -> 6
+claude-baseline-1-sonnet S1-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 5 -> 7
+  accurate: 4 -> 6
+claude-baseline-1-sonnet S1-thioacetone-r3:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 5 -> 7
+  accurate: 4 -> 6
+claude-baseline-1-sonnet S1-thioacetone-r4:
+  ref.1A1(n,3py): unidentified -> identified/outside
+  ref.1B2(n,3pz): unidentified -> identified/outside
+  coverage: 5 -> 7
+fault-pilot-1 S0-fault-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S0-fault-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S0-fault-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S0-fault-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S0-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S0-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S0-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S0-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S1-fault-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S1-fault-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> unidentified
+  coverage: 5 -> 6
+  accurate: 5 -> 6
+fault-pilot-1 S1-fault-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S1-fault-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+fault-pilot-1 S1-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+fault-pilot-1 S1-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+opus-hillclimb-1-candidate-1 S1-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-candidate-1 S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-candidate-1 S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-seed-1 S1-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-seed-1 S1-diazomethane-r2:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/outside
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 2 -> 3
+opus-hillclimb-1-seed-1 S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> unidentified
+  coverage: 5 -> 6
+  accurate: 5 -> 6
+opus-hillclimb-1-seed-1 S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-seed-1 S1-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+opus-hillclimb-1-seed-1 S1-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+opus-hillclimb-1-seed-2 S1-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-seed-2 S1-diazomethane-r2:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-seed-2 S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> unidentified
+  coverage: 5 -> 6
+  accurate: 5 -> 6
+opus-hillclimb-1-seed-2 S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 5 -> 7
+  accurate: 5 -> 7
+opus-hillclimb-1-seed-2 S1-thioacetone-r1:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+opus-hillclimb-1-seed-2 S1-thioacetone-r2:
+  ref.1A1(n,3py): unidentified -> identified/within
+  ref.1B2(n,3pz): unidentified -> identified/within
+  ref.1B2(n,3s): unidentified -> identified/within
+  coverage: 4 -> 7
+  accurate: 3 -> 6
+suite-1 S0-acetone-r1:
+  ref.1A2(n,3px): unidentified -> identified/outside
+  coverage: 4 -> 5
+suite-1 S0-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/outside
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/outside
+  coverage: 4 -> 6
+suite-1 S0-diazomethane-r2:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 0 -> 2
+  accurate: 0 -> 2
+suite-1 S0-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> unidentified
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/outside
+  coverage: 2 -> 3
+suite-1 S0-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> unidentified
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 4 -> 5
+  accurate: 0 -> 1
+suite-1 S1-diazomethane-r1:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> identified/within
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> unidentified
+  coverage: 0 -> 1
+  accurate: 0 -> 1
+suite-1 S1-diazomethane-r2:
+  ref.1A1(p,pi*): unidentified -> -
+  ref.1A1(pi,pi*): - -> unidentified
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/outside
+  coverage: 2 -> 3
+suite-1 S1-ketene-r1:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> unidentified
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 4 -> 5
+  accurate: 0 -> 1
+suite-1 S1-ketene-r2:
+  ref.1A2(p,3p): unidentified -> -
+  ref.1A2(pi,3p): - -> unidentified
+  ref.3A1(p,pi*): unidentified -> -
+  ref.3A1(pi,pi*): - -> identified/within
+  coverage: 2 -> 3
+  accurate: 2 -> 3
+suite-1 S1-thioacetone-r2:
+  ref.1B2(n,3pz): unidentified -> identified/within
+  coverage: 2 -> 3
+  accurate: 2 -> 3
+{'ref newly identified': 117, 'runs': 85, 'v4 conflict': 12}

@@ -1,0 +1,174 @@
+{
+  "arms": {
+    "S0": {
+      "accurate": 26,
+      "coverage": 28,
+      "coverage_total": 28,
+      "executed_per_accurate": "1.576923",
+      "false_success_claims": 0,
+      "identified_targets": 14,
+      "jobs": 41,
+      "jobs_executed": 41,
+      "jobs_failed": 2,
+      "jobs_failed_share": "0.048780",
+      "jobs_per_accurate": "1.576923",
+      "jobs_rejected": 0,
+      "mae_ev": "0.146893",
+      "runs": [
+        "S0-ketene-r1",
+        "S0-ketene-r2",
+        "S0-thioacetone-r1",
+        "S0-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-ketene": [
+            7,
+            7
+          ],
+          "questdb-thioacetone": [
+            6,
+            6
+          ]
+        },
+        "accurate_spread": {
+          "questdb-ketene": 0,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 0
+      }
+    },
+    "S0+kill-nevpt2@b9319831e192": {
+      "accurate": 26,
+      "coverage": 28,
+      "coverage_total": 28,
+      "executed_per_accurate": "1.615385",
+      "false_success_claims": 0,
+      "fault": {
+        "jobs_after_fault": 13,
+        "not_fired": [],
+        "note": "fault-injected: real agent and ORCA, one served output transformed by plan sha256:b9319831e19277a4b86902d216556677cde644053c98b917ff0ac16bbe463e10",
+        "requests_after_fault": 47
+      },
+      "identified_targets": 14,
+      "jobs": 42,
+      "jobs_executed": 42,
+      "jobs_failed": 10,
+      "jobs_failed_share": "0.238095",
+      "jobs_per_accurate": "1.615385",
+      "jobs_rejected": 0,
+      "mae_ev": "0.148821",
+      "runs": [
+        "S0-fault-ketene-r1",
+        "S0-fault-ketene-r2",
+        "S0-fault-thioacetone-r1",
+        "S0-fault-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-ketene": [
+            7,
+            7
+          ],
+          "questdb-thioacetone": [
+            6,
+            6
+          ]
+        },
+        "accurate_spread": {
+          "questdb-ketene": 0,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 0
+      }
+    },
+    "S1": {
+      "accurate": 26,
+      "coverage": 28,
+      "coverage_total": 28,
+      "executed_per_accurate": "1.307692",
+      "false_success_claims": 0,
+      "identified_targets": 14,
+      "jobs": 34,
+      "jobs_executed": 34,
+      "jobs_failed": 5,
+      "jobs_failed_share": "0.147059",
+      "jobs_per_accurate": "1.307692",
+      "jobs_rejected": 0,
+      "mae_ev": "0.143964",
+      "runs": [
+        "S1-ketene-r1",
+        "S1-ketene-r2",
+        "S1-thioacetone-r1",
+        "S1-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-ketene": [
+            7,
+            7
+          ],
+          "questdb-thioacetone": [
+            6,
+            6
+          ]
+        },
+        "accurate_spread": {
+          "questdb-ketene": 0,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 0
+      }
+    },
+    "S1+kill-nevpt2@b9319831e192": {
+      "accurate": 25,
+      "coverage": 27,
+      "coverage_total": 28,
+      "executed_per_accurate": "2.200000",
+      "false_success_claims": 0,
+      "fault": {
+        "jobs_after_fault": 30,
+        "not_fired": [],
+        "note": "fault-injected: real agent and ORCA, one served output transformed by plan sha256:b9319831e19277a4b86902d216556677cde644053c98b917ff0ac16bbe463e10",
+        "requests_after_fault": 105
+      },
+      "identified_targets": 14,
+      "jobs": 55,
+      "jobs_executed": 55,
+      "jobs_failed": 8,
+      "jobs_failed_share": "0.145455",
+      "jobs_per_accurate": "2.200000",
+      "jobs_rejected": 0,
+      "mae_ev": "0.115815",
+      "runs": [
+        "S1-fault-ketene-r1",
+        "S1-fault-ketene-r2",
+        "S1-fault-thioacetone-r1",
+        "S1-fault-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-ketene": [
+            7,
+            6
+          ],
+          "questdb-thioacetone": [
+            6,
+            6
+          ]
+        },
+        "accurate_spread": {
+          "questdb-ketene": 1,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 1
+      }
+    }
+  },
+  "note": "counts and errors only; no arm is declared better",
+  "synthetic": false
+}

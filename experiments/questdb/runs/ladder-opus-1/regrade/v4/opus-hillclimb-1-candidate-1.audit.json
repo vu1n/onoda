@@ -1,0 +1,98 @@
+{
+  "baseline_accurate": 25,
+  "examples": [
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "1 A2 pi,pi* 3.266 j0012",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "1 B1 pi,3s 5.691 j0012",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "1 A1 pi,pi* 6.329 j0012",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "3 A2 pi,pi* 2.981 j0013",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "3 A1 pi,pi* 4.174 j0013",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "3 B1 pi,3s 5.498 j0013",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "3 A1 pi,3p 7.140 j0013",
+      "run_id": "S1-diazomethane-r1",
+      "variant": "other_job"
+    }
+  ],
+  "false_accepts": 7,
+  "measured_only": [
+    "label_swap"
+  ],
+  "states": 25,
+  "variants": {
+    "casscf_not_converged": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "casscf_value": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "duplicate": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "energy_nudged": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "job_not_executed": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "job_not_in_run": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "label_swap": {
+      "accepted": 0,
+      "graded": 10
+    },
+    "no_character": {
+      "accepted": 0,
+      "graded": 25
+    },
+    "other_irrep": {
+      "accepted": 0,
+      "graded": 42
+    },
+    "other_job": {
+      "accepted": 7,
+      "graded": 211
+    },
+    "other_spin": {
+      "accepted": 0,
+      "graded": 25
+    }
+  }
+}

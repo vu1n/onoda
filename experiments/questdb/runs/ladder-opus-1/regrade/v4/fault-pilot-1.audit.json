@@ -1,0 +1,68 @@
+{
+  "baseline_accurate": 103,
+  "examples": [
+    {
+      "case_id": "questdb-thioacetone",
+      "claimed": "3 A2 n,pi* 2.377 j0009",
+      "run_id": "S1-fault-thioacetone-r2",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-thioacetone",
+      "claimed": "3 A1 pi,pi* 3.601 j0009",
+      "run_id": "S1-fault-thioacetone-r2",
+      "variant": "other_job"
+    }
+  ],
+  "false_accepts": 2,
+  "measured_only": [
+    "label_swap"
+  ],
+  "states": 112,
+  "variants": {
+    "casscf_not_converged": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "casscf_value": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "duplicate": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "energy_nudged": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "job_not_executed": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "job_not_in_run": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "label_swap": {
+      "accepted": 26,
+      "graded": 89
+    },
+    "no_character": {
+      "accepted": 0,
+      "graded": 112
+    },
+    "other_irrep": {
+      "accepted": 0,
+      "graded": 224
+    },
+    "other_job": {
+      "accepted": 2,
+      "graded": 1092
+    },
+    "other_spin": {
+      "accepted": 0,
+      "graded": 112
+    }
+  }
+}

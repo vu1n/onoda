@@ -1,0 +1,226 @@
+{
+  "arms": {
+    "S0": {
+      "accurate": 94,
+      "coverage": 104,
+      "coverage_total": 106,
+      "executed_per_accurate": "1.734043",
+      "false_success_claims": 0,
+      "identified_targets": 52,
+      "jobs": 163,
+      "jobs_executed": 163,
+      "jobs_failed": 16,
+      "jobs_failed_share": "0.098160",
+      "jobs_per_accurate": "1.734043",
+      "jobs_rejected": 1,
+      "mae_ev": "0.160096",
+      "runs": [
+        "S0-acetaldehyde-r1",
+        "S0-acetaldehyde-r2",
+        "S0-acetone-r1",
+        "S0-acetone-r2",
+        "S0-cyclopropenone-r1",
+        "S0-cyclopropenone-r2",
+        "S0-diazomethane-r1",
+        "S0-diazomethane-r2",
+        "S0-formamide-r1",
+        "S0-formamide-r2",
+        "S0-ketene-r1",
+        "S0-ketene-r2",
+        "S0-methylenecyclopropene-r1",
+        "S0-methylenecyclopropene-r2",
+        "S0-thioacetone-r1",
+        "S0-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-acetaldehyde": [
+            2,
+            2
+          ],
+          "questdb-acetone": [
+            7,
+            7
+          ],
+          "questdb-cyclopropenone": [
+            8,
+            8
+          ],
+          "questdb-diazomethane": [
+            7,
+            7
+          ],
+          "questdb-formamide": [
+            5,
+            5
+          ],
+          "questdb-ketene": [
+            7,
+            7
+          ],
+          "questdb-methylenecyclopropene": [
+            5,
+            5
+          ],
+          "questdb-thioacetone": [
+            6,
+            6
+          ]
+        },
+        "accurate_spread": {
+          "questdb-acetaldehyde": 0,
+          "questdb-acetone": 0,
+          "questdb-cyclopropenone": 0,
+          "questdb-diazomethane": 0,
+          "questdb-formamide": 0,
+          "questdb-ketene": 0,
+          "questdb-methylenecyclopropene": 0,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 0
+      }
+    },
+    "S1": {
+      "accurate": 90,
+      "coverage": 104,
+      "coverage_total": 106,
+      "executed_per_accurate": "2.133333",
+      "false_success_claims": 0,
+      "identified_targets": 52,
+      "jobs": 192,
+      "jobs_executed": 192,
+      "jobs_failed": 20,
+      "jobs_failed_share": "0.104167",
+      "jobs_per_accurate": "2.133333",
+      "jobs_rejected": 1,
+      "mae_ev": "0.167673",
+      "runs": [
+        "S1-acetaldehyde-r1",
+        "S1-acetaldehyde-r2",
+        "S1-acetone-r1",
+        "S1-acetone-r2",
+        "S1-cyclopropenone-r1",
+        "S1-cyclopropenone-r2",
+        "S1-diazomethane-r1",
+        "S1-diazomethane-r2",
+        "S1-formamide-r1",
+        "S1-formamide-r2",
+        "S1-ketene-r1",
+        "S1-ketene-r2",
+        "S1-methylenecyclopropene-r1",
+        "S1-methylenecyclopropene-r2",
+        "S1-thioacetone-r1",
+        "S1-thioacetone-r2"
+      ],
+      "runs_without_claim": 0,
+      "stability": {
+        "accurate_per_run": {
+          "questdb-acetaldehyde": [
+            2,
+            2
+          ],
+          "questdb-acetone": [
+            7,
+            6
+          ],
+          "questdb-cyclopropenone": [
+            8,
+            8
+          ],
+          "questdb-diazomethane": [
+            7,
+            7
+          ],
+          "questdb-formamide": [
+            4,
+            4
+          ],
+          "questdb-ketene": [
+            7,
+            7
+          ],
+          "questdb-methylenecyclopropene": [
+            5,
+            4
+          ],
+          "questdb-thioacetone": [
+            6,
+            6
+          ]
+        },
+        "accurate_spread": {
+          "questdb-acetaldehyde": 0,
+          "questdb-acetone": 1,
+          "questdb-cyclopropenone": 0,
+          "questdb-diazomethane": 0,
+          "questdb-formamide": 0,
+          "questdb-ketene": 0,
+          "questdb-methylenecyclopropene": 1,
+          "questdb-thioacetone": 0
+        },
+        "max_accurate_spread": 1
+      }
+    }
+  },
+  "common_target_mae_ev": {
+    "S0": "0.160096",
+    "S1": "0.167673"
+  },
+  "common_targets": [
+    "questdb-acetaldehyde:ref.1A''(n,pi*)",
+    "questdb-acetaldehyde:ref.3A''(n,pi*)",
+    "questdb-acetone:ref.1A1(n,3py)",
+    "questdb-acetone:ref.1A2(n,3px)",
+    "questdb-acetone:ref.1A2(n,pi*)",
+    "questdb-acetone:ref.1B2(n,3pz)",
+    "questdb-acetone:ref.1B2(n,3s)",
+    "questdb-acetone:ref.3A1(pi,pi*)",
+    "questdb-acetone:ref.3A2(n,pi*)",
+    "questdb-cyclopropenone:ref.1A1(n,3py)",
+    "questdb-cyclopropenone:ref.1A1(pi,pi*)",
+    "questdb-cyclopropenone:ref.1A2(n,pi*)",
+    "questdb-cyclopropenone:ref.1B1(n,pi*)",
+    "questdb-cyclopropenone:ref.1B2(n,3pz)",
+    "questdb-cyclopropenone:ref.1B2(n,3s)",
+    "questdb-cyclopropenone:ref.1B2(pi,pi*)",
+    "questdb-cyclopropenone:ref.3A1(pi,pi*)",
+    "questdb-cyclopropenone:ref.3A2(n,pi*)",
+    "questdb-cyclopropenone:ref.3B1(n,pi*)",
+    "questdb-cyclopropenone:ref.3B2(pi,pi*)",
+    "questdb-diazomethane:ref.1A1(pi,pi*)",
+    "questdb-diazomethane:ref.1A2(pi,pi*)",
+    "questdb-diazomethane:ref.1B1(pi,3s)",
+    "questdb-diazomethane:ref.3A1(pi,3p)",
+    "questdb-diazomethane:ref.3A1(pi,pi*)",
+    "questdb-diazomethane:ref.3A2(pi,pi*)",
+    "questdb-diazomethane:ref.3B1(pi,3s)",
+    "questdb-formamide:ref.1A''(n,pi*)",
+    "questdb-formamide:ref.1A'(n,3p)",
+    "questdb-formamide:ref.1A'(n,3s)",
+    "questdb-formamide:ref.1A'(pi,pi*)",
+    "questdb-formamide:ref.3A''(n,pi*)",
+    "questdb-formamide:ref.3A'(pi,pi*)",
+    "questdb-ketene:ref.1A2(pi,3p)",
+    "questdb-ketene:ref.1A2(pi,pi*)",
+    "questdb-ketene:ref.1B1(pi,3s)",
+    "questdb-ketene:ref.3A1(pi,pi*)",
+    "questdb-ketene:ref.3A2(pi,3p)",
+    "questdb-ketene:ref.3A2(pi,pi*)",
+    "questdb-ketene:ref.3B1(pi,3s)",
+    "questdb-methylenecyclopropene:ref.1A2(pi,3py)",
+    "questdb-methylenecyclopropene:ref.1B1(pi,3s)",
+    "questdb-methylenecyclopropene:ref.1B2(pi,pi*)",
+    "questdb-methylenecyclopropene:ref.3A1(pi,pi*)",
+    "questdb-methylenecyclopropene:ref.3B2(pi,pi*)",
+    "questdb-thioacetone:ref.1A1(n,3py)",
+    "questdb-thioacetone:ref.1A1(pi,pi*)",
+    "questdb-thioacetone:ref.1A2(n,pi*)",
+    "questdb-thioacetone:ref.1B2(n,3pz)",
+    "questdb-thioacetone:ref.1B2(n,3s)",
+    "questdb-thioacetone:ref.3A1(pi,pi*)",
+    "questdb-thioacetone:ref.3A2(n,pi*)"
+  ],
+  "note": "counts and errors only; no arm is declared better",
+  "synthetic": false
+}

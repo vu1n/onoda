@@ -1,0 +1,68 @@
+{
+  "baseline_accurate": 137,
+  "examples": [
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "1 A2 pi,pi* 3.244 j0009",
+      "run_id": "S1-diazomethane-r2",
+      "variant": "other_job"
+    },
+    {
+      "case_id": "questdb-diazomethane",
+      "claimed": "1 B1 pi,3s 5.750 j0009",
+      "run_id": "S1-diazomethane-r2",
+      "variant": "other_job"
+    }
+  ],
+  "false_accepts": 2,
+  "measured_only": [
+    "label_swap"
+  ],
+  "states": 212,
+  "variants": {
+    "casscf_not_converged": {
+      "accepted": 0,
+      "graded": 212
+    },
+    "casscf_value": {
+      "accepted": 0,
+      "graded": 201
+    },
+    "duplicate": {
+      "accepted": 0,
+      "graded": 212
+    },
+    "energy_nudged": {
+      "accepted": 0,
+      "graded": 212
+    },
+    "job_not_executed": {
+      "accepted": 0,
+      "graded": 212
+    },
+    "job_not_in_run": {
+      "accepted": 0,
+      "graded": 212
+    },
+    "label_swap": {
+      "accepted": 64,
+      "graded": 163
+    },
+    "no_character": {
+      "accepted": 0,
+      "graded": 212
+    },
+    "other_irrep": {
+      "accepted": 0,
+      "graded": 452
+    },
+    "other_job": {
+      "accepted": 2,
+      "graded": 2198
+    },
+    "other_spin": {
+      "accepted": 0,
+      "graded": 212
+    }
+  }
+}
