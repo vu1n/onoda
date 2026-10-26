@@ -87,8 +87,9 @@ REFERENCE_VERDICTS = ("identified", "unidentified", "missing")
 _SYNTHETIC_JOB_LABELS = frozenset({"stand-in", "not-orca", "synthetic"})
 # Parser fields whose Problems make a job's transition energies untrustworthy.
 _BLOCKING_FIELDS = frozenset({"mr_states", "casscf_converged"})
-# Context: doc://onoda/vte-energy-tolerance@draft#identified-within-tolerance — an identified row counts as accurate only within this many eV of its reference
+# an identified row counts as accurate only within this many eV of its reference
 VTE_TOLERANCE_EV = Decimal("0.3")
+# Persisted provenance id; see docs/decisions/vte-energy-tolerance.md.
 VTE_TOLERANCE_SOURCE = "doc://onoda/vte-energy-tolerance#identified-within-tolerance"
 # Mean places: the inputs print 3; the mean of n of them is rounded, not truncated.
 _MEAN_PLACES = Decimal("0.000001")
@@ -119,7 +120,7 @@ def ratio_text(numerator: int, denominator: int) -> str:
     return format((Decimal(numerator) / denominator).quantize(_MEAN_PLACES, ROUND_HALF_EVEN), "f")
 
 
-# Context: doc://onoda/vte-report-process-metrics@0001#process-metrics — descriptive only; a run without evaluator-v3 accuracy makes its case's spread unresolved
+# descriptive only; a run without evaluator-v3 accuracy makes its case's spread unresolved
 def stability(accurate_by_case: Mapping[str, list[int | None]]) -> dict[str, Any]:
     """Cross-run spread of the accurate count per case: each run's count and max minus min.
 
@@ -223,7 +224,7 @@ def _pt2_method(references: VteReferences) -> str:
     return references.method.split("/", 1)[0]
 
 
-# Context: doc://onoda/vte-grading-contract@0003#claim-from-one-cited-job — a value counts only if the one cited job printed it; no cross-job differences
+# a value counts only if the one cited job printed it; no cross-job differences
 def _grade_value(
     cs: ClaimedVte,
     jobs: Mapping[str, VteJob],
@@ -278,7 +279,7 @@ def _accepted(row: VteReferenceRow) -> frozenset[str]:
     return frozenset(identity_character(c) for c in (row.character, *row.aliases))
 
 
-# Context: doc://onoda/match-by-identity@0001#no-energy-order-matching — references are picked by spin, irrep and character, never by energy order
+# references are picked by spin, irrep and character, never by energy order
 def _candidates(
     cs: ClaimedVte, rows: tuple[VteReferenceRow, ...]
 ) -> tuple[list[VteReferenceRow], str | None]:
@@ -548,7 +549,7 @@ def evaluate_vte_run(
     )
 
 
-# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — only vte-claims evaluations are graded; shadow answers never are
+# only vte-claims evaluations are graded; shadow answers never are
 def _latest_vte_evaluation(evaluator_store: Store, run_id: str) -> Evaluation:
     prefix = f"{run_id}.{VTE_EVALUATOR}-v"
     ids = sorted(i for i in evaluator_store.list_record_ids("evaluation") if i.startswith(prefix))
@@ -568,7 +569,7 @@ def arm_key(config: Mapping[str, Any]) -> str:
     plan = config.get("fault_plan")
     if plan is None:
         return config["variant"]
-    # Context: doc://onoda/broker-fault-injection@0001#injected-faults — faulted arms are keyed by plan id and sha; not-fired runs are reported apart
+    # faulted arms are keyed by plan id and sha; not-fired runs are reported apart
     key = f"{config['variant']}+{plan['id']}@{plan['sha256'].removeprefix('sha256:')[:12]}"
     fired = config.get("fault_injection", {}).get("outcome") == "fired"
     return key if fired else key + ":not-fired"

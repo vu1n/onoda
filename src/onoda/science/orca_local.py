@@ -82,7 +82,7 @@ class OrcaSettings(BaseModel):
     max_wall_seconds: int | None = None
     stand_in: bool = False
 
-    # Context: doc://onoda/live-off-by-default@0002#live-settings-explicit — ORCA execution is off unless every setting is explicit; fail closed
+    # ORCA execution is off unless every setting is explicit; fail closed
     def resolve(self) -> ResolvedOrcaSettings:
         if not self.enabled:
             raise CapabilityError("live ORCA execution is disabled")

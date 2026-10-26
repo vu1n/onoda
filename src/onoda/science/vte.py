@@ -108,7 +108,7 @@ def parse_state_label(label: str) -> tuple[int, str, str] | None:
     return int(m["spin"]), m["irrep"], normalize_character(m["char"])
 
 
-# Context: doc://onoda/vte-task-inputs@0001#agent-gets-structure-and-targets — the agent gets target counts per spin and irrep, never energies or characters
+# the agent gets target counts per spin and irrep, never energies or characters
 class VteTarget(_Frozen):
     """`count` states of this spin and irrep; what the agent is asked to compute."""
 

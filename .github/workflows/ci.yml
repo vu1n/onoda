@@ -1,11 +1,11 @@
 name: CI
 
-# Root and docs prose plus brief governance docs can't change a test result. Tests do read
+# Root and docs prose can't change a test result. Tests do read
 # experiments/**/*.md, cases/README.md and docs/handoff/examples/, so those still run CI.
 on:
   push:
     branches: [main]
-    paths-ignore: &prose ["*.md", "docs/**/*.md", ".brief/**"]
+    paths-ignore: &prose ["*.md", "docs/**/*.md"]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
     paths-ignore: *prose

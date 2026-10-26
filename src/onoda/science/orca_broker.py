@@ -609,7 +609,7 @@ class _Refused(Exception):
         self.reason = reason
 
 
-# Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — real ORCA never starts without a job sandbox that passed its trial run
+# real ORCA never starts without a job sandbox that passed its trial run
 def _check_confinement(
     scheduler: OrcaLocalScheduler,
     job_sandbox: JobSandbox | None,
@@ -657,7 +657,7 @@ class OrcaBroker:
         if (scheduler is None) == (replay is None):
             raise OnodaError("a broker runs either a scheduler or a replay, exactly one")
         if fault_plan is not None and (scheduler is None or prefix is not None):
-            # Context: doc://onoda/broker-fault-injection@0001#injected-faults — v1 refuses a fork or restart of a fault-injected run
+            # v1 refuses a fork or restart of a fault-injected run
             raise OnodaError("a fault plan needs a fresh live run: no replay and no fork prefix")
         if prefix is not None and scheduler is None:
             raise OnodaError("a replay prefix needs a scheduler to continue with")
@@ -758,7 +758,7 @@ class OrcaBroker:
         try:
             if self._broken:
                 raise _Refused("broker_failed")
-            # Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — one max_executions number caps jobs; refused submissions do not count
+            # one max_executions number caps jobs; refused submissions do not count
             if self._next_job >= self.max_executions:
                 raise _Refused("max_executions")
             attached = self._resolve(request.attach)
@@ -907,7 +907,8 @@ class OrcaBroker:
         attached: dict[str, tuple[str, Path | None]],
     ) -> BrokerReply:
         assert self._scheduler is not None
-        # Context: doc://onoda/broker-fault-injection@0001#injected-faults — the trigger job skips the cache both ways, so a fault applies only to a job this run executed
+        # the trigger job skips the cache both ways, so a fault applies only to a job this run
+        # executed
         trigger = (
             self._fault_armed
             and requests_nevpt2(request.input)
@@ -1062,7 +1063,7 @@ class OrcaBroker:
         The real output is written under `real_dir` (outside the Pi work dir)
         before the reply is journaled, so the record can always pin it.
         """
-        # Context: doc://onoda/broker-fault-injection@0001#injected-faults — fire only over a parser success; a skip consumes the trigger and serves the real job
+        # fire only over a parser success; a skip consumes the trigger and serves the real job
         if status != "completed":
             skip = f"real job {status}" + (f" ({reason})" if reason else "")
         else:

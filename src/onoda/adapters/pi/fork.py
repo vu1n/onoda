@@ -107,7 +107,7 @@ def _decisions(store: Store, run_id: str) -> list[tuple[int, InvocationReceipt]]
     return out
 
 
-# Context: doc://onoda/record-integrity@0003#immutable-single-writer-records — fork only at a journaled quiescent checkpoint; the child re-runs the prefix, it inherits nothing
+# fork only at a journaled quiescent checkpoint; the child re-runs the prefix, it inherits nothing
 def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
     """Check that `parent_run_id` can be forked at `checkpoint`; find the fork point."""
     if not store.has_record("run", parent_run_id):
@@ -118,7 +118,7 @@ def fork_point(store: Store, parent_run_id: str, checkpoint: str) -> ForkPoint:
         raise ForkError(f"run {parent_run_id} is not a Pi run; see `onoda fork`")
     if "parent_run" in cfg or VARIANTS[cfg["variant"]].rlm:
         raise ForkError(f"run {parent_run_id} is an RLM run; RLM runs cannot be forked yet")
-    # Context: doc://onoda/broker-fault-injection@0001#injected-faults — v1 refuses a fork or restart of a fault-injected run
+    # v1 refuses a fork or restart of a fault-injected run
     if "fault_plan" in cfg:
         raise ForkError(f"run {parent_run_id} carries a fault plan; it cannot be forked yet")
     if parent_run_id in imported_runs(store):

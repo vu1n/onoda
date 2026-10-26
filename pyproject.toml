@@ -38,8 +38,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-# `# Context: doc://...` decision refs (CLAUDE.md, brief) run past the line limit.
-task-tags = ["TODO", "FIXME", "XXX", "Context"]
-
-[tool.ruff.lint.pycodestyle]
-ignore-overlong-task-comments = true

@@ -116,7 +116,7 @@ def gain(name: str, baseline: str | None, candidate: str | None) -> Decimal | No
     return -delta if DIRECTIONS[name] == "lower" else delta
 
 
-# Context: doc://onoda/promotion-gates@0001#zero-capability-tolerance — a metric with no declared tolerance is unresolved, never pass
+# a metric with no declared tolerance is unresolved, never pass
 def _check(
     name: str,
     b: str | None,

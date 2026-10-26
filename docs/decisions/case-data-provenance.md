@@ -1,0 +1,51 @@
+# Case bytes are pinned by sha256, recorded as acquired, and third-party dev data stays under cases-dev/
+
+**Status at migration:** active. This migration does not change that status.
+
+
+<a id="pinned-acquired-cases"></a>
+## Pin every case byte, label acquired outputs as acquired, and keep dev-only data in cases-dev/
+
+Every case manifest pins its input, output and reference bytes by sha256, verified at load; vendored bytes are never edited. Outputs we did not run are recorded as acquired (`executed_here: false`), never as executions. cclib's BSD-3 regression logs are the six `cases/` cases; cclib-data logs and QUESTDB data (CC BY-SA 4.0, credited) are dev-only and live under `cases-dev/`, never `cases/`. Every case stays `pending-human-review` until a human reviews it.
+
+**Why.** Pins and labels are what let a reader tell a solver run from a downloaded log and a reviewed case from an unreviewed one; dev data with other licences must not leak into the release set.
+
+### Invariant
+- `_read_pinned` refuses bytes whose sha256 differs from the manifest.
+- `_acquire` writes a `read` receipt with `executed_here: False`.
+- No cclib-data or QUESTDB file is under `cases/`; dev manifests carry `acquired`/`dev-only` labels.
+- QUESTDB rows: the eight closed-shell molecules of A62 at pfloos/QUESTDB 460482b, fluorescence rows dropped, 53 transitions.
+
+### Carried forward from the assumptions register
+
+Verbatim from `docs/ASSUMPTIONS.md` as of 83df418 (2026-10-04). Where a row and the invariants above disagree, the invariants are current.
+
+Drift found when this was verified against code (2026-10-04):
+
+- CLAUDE.md, `adapters/pi/run.py` and the README say dev cases are "never part of a split", but QUESTDB manifests carry `split: development` and cclib-data manifests `split: test`.
+- Raw QUESTDB JSON/xyz files are also vendored at `experiments/questdb-phase0/questdb-raw/` (used by tests), outside `cases-dev/`.
+- Byte immutability is enforced by sha256 at load only; nothing stops an edit committed together with a new pin.
+
+#### A1: Exact historical task membership (which molecules/transitions the paper actually used)
+
+Register status: unresolved. Owner milestone: M2.
+
+Build a transparent, independently derived manifest from QUESTDB (S2); never claim it matches the paper's exact selection.
+
+#### A25: Where do authentic ORCA outputs come from without an ORCA licence here?
+
+Register status: assumed. Owner milestone: M2.
+
+Vendored from cclib's public regression data (`cases/orca/cclib/`, BSD-3-Clause, commit pinned in each `*.case.yaml`, bytes pinned by sha256). Redistribution permission is taken from cclib's public BSD-3 distribution; the ORCA EULA's position on redistributing outputs has not been checked. These runs are recorded as acquired (`executed_here: false`), never as executions. Replace or confirm before any public release.
+
+#### A26: Who reviews the fixed-input cases?
+
+Register status: unresolved. Owner milestone: M2.
+
+Every case is `pending-human-review`; each evaluation carries `case.review` so an unreviewed case cannot pass as reviewed. The declared request (roots per multiplicity) was transcribed from the inputs by the harness author.
+
+#### A62: Which QUESTDB molecules and rows?
+
+Register status: decided (default, QUESTDB slice). Owner milestone: QUESTDB slice.
+
+Closed-shell molecules with at most four heavy atoms whose `data/cas/json` table carries SC-NEVPT2 values: acetaldehyde, formamide, ketene, diazomethane, acetone, thioacetone, methylenecyclopropene, cyclopropenone (pfloos/QUESTDB @ 460482b, CC BY-SA 4.0; under `cases-dev/`, credited). Fluorescence rows (`[F]`, excited-state geometry) are dropped: 53 transitions. Smaller molecules carry NEVPT2 values only for double excitations, and QUESTDB's best estimates (exFCI/CC) would mix method error with agent error.

@@ -114,7 +114,7 @@ class MockPolicyProvider:
         )
 
 
-# Context: doc://onoda/replay-fails-closed@0001#replay-fails-closed — exact digest match or ReplayMismatch; no nearest match, no live fallback
+# exact digest match or ReplayMismatch; no nearest match, no live fallback
 class RecordedDecisionProvider:
     """Serves recorded decisions offline by exact request digest; never falls back live."""
 

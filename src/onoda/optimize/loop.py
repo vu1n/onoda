@@ -218,7 +218,8 @@ class _Proposer:
             return refuse("invalid", tuple(str(e["msg"]) for e in exc.errors()), None)
         if child == candidate:
             return refuse("rejected", ("proposal is identical to its parent",), parent)
-        # Context: doc://onoda/optimizer-scope@0002#seed-by-promotion-only — a proposal that adds acceptance case ids or printed values is recorded invalid and never run
+        # a proposal that adds acceptance case ids or printed values is recorded invalid and never
+        # run
         leaks = leaked_text(candidate, child, self.adapter.cases)
         if leaks:
             return refuse("invalid", tuple(f"case-specific text: {x}" for x in leaks), None)

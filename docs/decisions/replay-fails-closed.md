@@ -1,0 +1,36 @@
+# Offline replay fails closed on any request change; scripted runs are labelled synthetic
+
+**Status at migration:** active. This migration does not change that status.
+
+
+<a id="replay-fails-closed"></a>
+## Replay serves only exact recorded requests and fails closed otherwise
+
+An offline replay matches a request to its recording by exact digest after a fixed, listed normalization. Any other difference raises `ReplayMismatch` (Python) or spools `replay.mismatch` and errors (Pi). There is no nearest match and no live fallback. Runs driven by the scripted provider are mode `pi-scripted` and labelled synthetic.
+
+**Why.** A replay that quietly fell back to a near match or a live call would let a changed harness pass as a reproduction, which is exactly what the record is meant to rule out.
+
+### Invariant
+- `ReplayDecisionProvider.decide` and the scripted Pi provider refuse any request whose normalized digest differs from the recording.
+- The only normalization is the list in A34 below (as re-grounded); widening it is a decision change.
+- Scripted runs never describe model or chemistry results.
+
+### Carried forward from the assumptions register
+
+Verbatim from `docs/ASSUMPTIONS.md` as of 83df418 (2026-10-04). Where a row and the invariants above disagree, the invariants are current.
+
+Drift found when this was verified against code (2026-10-04):
+
+- A34 lists only `pi-bash-<hex>.log` temp paths; `PI_TEMP_LOG_RE` in `pi/extensions/lib/spool.ts` also normalizes `pi-output-` and `pi-powershell-` temp logs, and `runtime.path_aliases` adds the RLM work dir as `$RLM_WORK` when RLM is on. The TB container registers only `$PI_RUNTIME`, `$SPOOL` and `$SESSIONS`.
+
+#### A32: How are Pi runs exercised without model credentials?
+
+Register status: decided. Owner milestone: M3.
+
+A scripted provider registered through Pi's public `registerProvider`/`streamSimple` API serves pre-written turns to the real pinned Pi process. Runs in this mode are `pi-scripted`, labelled synthetic, and never described as model or chemistry results.
+
+#### A34: What may differ between a recorded Pi request and its replay?
+
+Register status: decided. Owner milestone: M3.
+
+Only `timestamp` fields, a tool result's `details` (Pi-internal metadata no provider is sent; SoL-Pi's reducer puts a hash of its path-bearing receipt there), absolute paths registered as aliases (workspace, runtime and its resolved `node_modules`, bundle, spool, sessions dir), the Pi session id, and Pi's random bash temp-log paths (`<tmpdir>/pi-bash-<16 hex>.log`). Anything else changing the normalized context is a `replay.mismatch` and the run fails closed.

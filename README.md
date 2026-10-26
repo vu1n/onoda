@@ -82,8 +82,9 @@ recorded Pi runs, frozen markdown memory tiers for both QUESTDB arms (A75),
 shadow-only System One decision models (A67, A70) and a kypp memory shadow, and
 a Terminal-Bench slice ([`experiments/tb4-slice/`](experiments/tb4-slice/)).
 Before any claim about chemistry: human review of the cases, more and stronger
-models on the QUESTDB suite, and a real advisory ladder. Decisions, including the open ones, are governed docs in
-[`.brief/docs/`](.brief/docs/); [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) maps the
+models on the QUESTDB suite, and a real advisory ladder. Decisions, including the open
+ones, are preserved as ordinary Markdown in
+[`docs/decisions/`](docs/decisions/); [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) maps the
 old A-row ids to them.
 
 ## Quick start
@@ -346,6 +347,9 @@ memory tiers and earlier runs and scores its recall against the tiers.
 | `decision_tune` | GEPA over a decision model's question wording against labelled examples (A70) |
 | `science.runner` | Records a case as a run (acquired or executed), parses it, and evaluates it in a separate store |
 
+Start with the [feature map](docs/features/README.md) for user journeys, entry points,
+functional tests and commands to drive each area.
+
 ## Capability matrix
 
 What was actually demonstrated, and on what. "Fixture" means the synthetic
@@ -428,7 +432,7 @@ belong to later milestones.
   variants. A real (live) provider's reducer and compaction-summary calls are
   not spooled (see `docs/ADAPTER_SEAM.md` §2).
 - Scientific tolerances, task membership, and the expert convergence check are
-  unresolved; see [`.brief/docs/`](.brief/docs/). Upstream
+  unresolved; see [`docs/decisions/`](docs/decisions/). Upstream
   revisions are pinned in [`provenance/sources.json`](provenance/sources.json).
 - `RunView` is a snapshot taken at construction and must be rebuilt after new
   events.

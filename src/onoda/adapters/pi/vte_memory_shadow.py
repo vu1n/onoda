@@ -271,7 +271,7 @@ def seed(
     return lessons
 
 
-# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — shadow answers go to the evaluator store only; the agent never sees them
+# shadow answers go to the evaluator store only; the agent never sees them
 def memory_shadow(
     store: Store,
     evaluator_store: Store,

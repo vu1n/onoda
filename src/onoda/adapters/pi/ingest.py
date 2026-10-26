@@ -642,7 +642,7 @@ def _broker_jobs(journal: Iterable[BrokerJournalRecord]) -> dict[str, BrokerJour
     return jobs
 
 
-# Context: doc://onoda/orca-broker-boundary@0002#broker-owns-orca — the broker journal is authoritative; a spool that disagrees is refused
+# the broker journal is authoritative; a spool that disagrees is refused
 def _check_broker(
     executions: list[TaskExecute], jobs: dict[str, BrokerJournalRecord]
 ) -> dict[str, BrokerJournalRecord]:
@@ -1261,7 +1261,8 @@ class _Writer:
         if injected is not None:
             fault["injected"] = injected.model_dump(mode="json", exclude_none=True)
         if injected is not None and injected.outcome == "fired":
-            # Context: doc://onoda/broker-fault-injection@0001#injected-faults — the served output is labelled fault-injected, never synthetic; the real output is pinned beside it
+            # the served output is labelled fault-injected, never synthetic; the real output is
+            # pinned beside it
             job_labels.append(FAULT_LABEL)
             real = entry.real_output_sha256
             if real is None or not self.store.has_object(real):

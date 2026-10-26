@@ -93,7 +93,7 @@ def seed_candidate(questions: Mapping[str, Any]) -> dict[str, str]:
     return {f"{q}{SUFFIX}": spec["instructions"] for q, spec in sorted(questions.items())}
 
 
-# Context: doc://onoda/decision-prompt-tuning@draft#tune-wording-only — only question instructions are tunable
+# only question instructions are tunable
 def apply_candidate(questions: Mapping[str, Any], candidate: Mapping[str, str]) -> dict[str, Any]:
     """The template with the candidate's instructions; any other key is refused."""
     out = copy.deepcopy(dict(questions))

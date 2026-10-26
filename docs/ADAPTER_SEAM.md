@@ -1,8 +1,8 @@
 # Adapter seam: Pi-first, harness-neutral
 
 Status: superseded as a decision record by
-[`.brief/docs/pi-first-pinned-stack.md`](../.brief/docs/pi-first-pinned-stack.md),
-which governs the Pi-first route and the pins and lists what below has gone stale
+[`decisions/pi-first-pinned-stack.md`](decisions/pi-first-pinned-stack.md),
+which documents the Pi-first route and the pins and lists what below has gone stale
 (the "no real provider" lines, §2's sandbox line, §6). Kept as design notes;
 snapshot as of M3. Originally: M0 design sketch, verified in M3 against the installed pins. Pi is
 pinned at `@earendil-works/pi-coding-agent@0.85.1` (provenance/sources.json,
