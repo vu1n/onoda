@@ -69,12 +69,12 @@ from onoda.science.contract import (
 # @2 reads the `<S**2> = value` suffix ORCA 6.1.1 prints on STEOM `IROOT` lines
 # (A56), which @1 reported as an error. @3 adds `casscf_converged` and
 # `mr_states` from the same bytes. Records written by @1/@2 keep their id.
-# Context: doc://onoda/orca-parser-authoritative@0001#parser-is-authoritative — graded values come only from this parser; bump the id when what it records changes
+# graded values come only from this parser; bump the id when what it records changes
 PARSER_ID = "orca-parser@3"
 
 _NUMBER = re.compile(r"-?\d+\.\d+")
 _VERSION = re.compile(r"^\s*Program Version (\d+\.\d+\.\d+)\b")
-# Context: doc://onoda/orca-parser-authoritative@0001#parser-is-authoritative — a job finished only if the parser saw normal termination; ORCA's exit code is not trusted
+# a job finished only if the parser saw normal termination; ORCA's exit code is not trusted
 _NORMAL_END = "****ORCA TERMINATED NORMALLY****"
 # ORCA's fatal-error wording ("ORCA finished by error termination in SCF",
 # "... aborting the run"). Only these exact phrases count as an error end.

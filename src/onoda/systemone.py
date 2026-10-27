@@ -84,7 +84,7 @@ def _answers(response: bytes) -> tuple[dict[str, dict[str, Any]], str | None]:
     return answers, None if cost is None else format(Decimal(str(cost)), "f")
 
 
-# Context: doc://onoda/live-off-by-default@0002#live-settings-explicit — live decision calls are off unless enabled explicitly
+# live decision calls are off unless enabled explicitly
 class LiveSystemOne:
     """Calls Jev or Clef over HTTPS. Construct only with live decisions enabled."""
 

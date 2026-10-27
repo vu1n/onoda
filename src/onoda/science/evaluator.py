@@ -235,7 +235,7 @@ def _state_identification(obs: OrcaObservation, case: CaseManifest) -> Checked:
     return "pass", metrics
 
 
-# Context: doc://onoda/match-by-identity@0001#no-energy-order-matching — no tolerance means unresolved, never pass; never pair states by energy
+# no tolerance means unresolved, never pass; never pair states by energy
 def _compare_quantity(
     key: str, cand: Quantity | None, ref: Quantity | None, policy: ComparisonPolicy
 ) -> tuple[str | None, dict[str, str]]:

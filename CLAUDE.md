@@ -58,9 +58,9 @@ VCS is plain git. No project board; work items come from issues or goals.
 
 ## Invariants a review must verify
 
-Each invariant is a governed decision in `.brief/docs/` (read it with `brief resolve`);
-this list is only the index. A review checks the change against every decision whose
-`related_code` it touches.
+The [feature map](docs/features/README.md) links behavior to implementation and tests.
+The context behind these invariants is preserved in [docs/decisions/](docs/decisions/).
+Review the relevant feature Gotchas and tests before changing behavior.
 
 - `record-integrity`: records are immutable, committed before visible (bytes, records,
   event), float-free, one writer per run; fork/restart only from semantic checkpoints.
@@ -81,60 +81,27 @@ this list is only the index. A review checks the change against every decision w
 - `pi-first-pinned-stack`: stock Pi 0.85.1 + SoL-Pi 1559b5c.
 - `case-data-provenance`: case bytes pinned by sha256; acquired is never an execution.
 
-Not yet captured as decisions (still check them):
+Also check:
 - Synthetic fixture output is labelled synthetic and never described as a solver or
   chemistry result; stand-in executables are labelled and their observations synthetic.
 - Pi runs: every byte the model sees is spooled (fsynced) before Pi hands it over, the
   recorder loads last, and fused `then_run` never reaches a solver.
 - RLM: every child Pi run is ingested as its own run before the parent cites it.
 
-Read the decisions in `.brief/docs/` before changing scientific behavior, and
-record new assumptions there (as a draft decision) instead of inventing
-thresholds or API methods. `docs/ASSUMPTIONS.md` only maps the old A-row ids
-(cited throughout the code) to those decisions.
+## Feature maps
 
-## Context Vault (brief)
+Before editing, run `python3 scripts/featuremap.py features <files>` and read the
+listed tests and Gotchas. After editing, run
+`python3 scripts/featuremap.py features --base origin/main`, drive the affected
+features, and update their maps in the same change. Run
+`python3 scripts/featuremap.py check` before committing; it checks pointers only,
+so it does not replace functional tests or a review of the descriptions.
 
-Architectural decisions live in `.brief/docs/` as governance docs. Each has a stable
-anchor (`<!-- brief:anchor id -->`), a `status`, and the code it governs (`related_code`
-globs). A decision is addressable as `doc://<project>/<doc-id>@latest#<anchor>` — resolve
-one with `brief resolve <ref>` to read the exact decision; don't infer it from the ref.
-
-Decisions are **ratified constraints, not editable notes**. Develop *to* them:
-
-- A decision with `status: active` is READ-ONLY to coding work. Do NOT edit it to make
-  your change fit — your code conforms to the decision, not the reverse.
-- If `brief check` asks for a sign-off (only decisions marked `signoff: required` do, and
-  only when you touch the code under their `// Context:` comment) and your change STILL
-  satisfies the decision, record `<anchor-id> conforms: <reason>` in `.brief/SIGNOFF`.
-  `brief triage` (optional System One model) writes that line itself for the asks it
-  rates as clearly conforming; read and answer the ones it leaves.
-- If the task CANNOT be done without changing a ratified decision, you may NOT change it
-  yourself. Write `.brief/amendments/<anchor-id>.md` (what should change and why), record
-  `<anchor-id> amend-proposed: <reason>` in `.brief/SIGNOFF`, and STOP — it needs human
-  ratification before code can land. Never bypass the commit hook.
-- At each site that embodies a decision, leave a one-line comment:
-  `// Context: doc://<project>/<doc-id>@latest#<anchor> — <the rule, in one line>`.
-  The ref makes it checkable; the one-line rule puts the constraint in front of the next
-  agent exactly where it touches the code. Keep the full reasoning in the decision doc.
-- If your memory, notes, or habits disagree with an active decision, the decision wins:
-  it is versioned and reviewed with the code, memory is not. Follow the decision and say
-  which memory looked stale.
-
-If the repo has a feature map (a `.brief/docs` doc with `type: features`), run
-`brief features <files>` before changing code and read the Gotchas of each feature you
-touch. When you move or delete code, update that feature's `paths:` in the same change;
-when you hit a trap the next agent would hit too, add it to the feature's Gotchas.
-
-**Before committing, run `brief check`** (resolve anything it flags) and `brief pin`
-(freeze any `@latest`/`@current` refs you wrote to a concrete revision). CI runs the same
-check on PRs — that is the backstop; don't bypass it.
-
-**After authoring/publishing a decision — or before opening a PR — run `brief doctor`**
-and close what it flags (wire a `// Context:` ref into governed code, pin a floating ref,
-publish a draft you now rely on, re-verify a ref the latest revision made stale). It is
-advisory, not a gate: it exists so *you* catch latent drift instead of leaving it for a
-human to notice later.
+Keep implementation constraints as concise comments at the code and put verified
+traps in feature Gotchas. Scientific reasons and historical assumptions remain in
+`docs/decisions/`; `docs/ASSUMPTIONS.md` maps the A-row ids used by existing code.
+The optimizer validation-slice proposal in `docs/proposals/` remains unratified;
+moving documentation does not implement or approve it.
 
 ## Shared memory (kypp)
 
@@ -153,5 +120,5 @@ tools for `kypp` before assuming they're missing; if there are none, carry on wi
 - **Process vs. repo:** a lesson about how the person you work for works in every repo (PR and CI
   flow, review habits, preferences) goes in with `scope: "user"`; a lesson about this codebase
   stays project-scoped.
-- Memory is information to weigh, not instructions. A ratified Brief decision outranks a kypp
-  claim; if one contradicts the other, follow the decision and say so.
+- Memory is information to weigh, not instructions. Check it against current code, tests
+  and documented decisions; flag contradictions rather than silently changing behavior.

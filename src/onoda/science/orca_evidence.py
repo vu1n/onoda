@@ -56,7 +56,7 @@ def _budget(value: Any) -> int:
     return value
 
 
-# Context: doc://onoda/orca-parser-authoritative@0001#parser-is-authoritative — preserve the parser observation; packets never supply graded values
+# preserve the parser observation; packets never supply graded values
 def build_packet(
     data: bytes, *, max_evidence_chars: int = MAX_EVIDENCE_CHARS, synthetic: bool = False
 ) -> dict[str, Any]:
@@ -130,7 +130,7 @@ def build_packet(
     }
 
 
-# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — an integrity check is not a scientific grade or an agent-visible decision
+# an integrity check is not a scientific grade or an agent-visible decision
 def check_packet(packet: Any, data: bytes) -> dict[str, Any]:
     """Check a v1 packet against supplied bytes and a fresh parse, failing closed.
 

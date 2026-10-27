@@ -202,7 +202,7 @@ def _nevpt2_transitions(lines: list[str]) -> tuple[Transition, ...]:
     return tuple(found)
 
 
-# Context: doc://onoda/decision-models-shadow-only@0001#never-grade — advice from printed numbers for both arms; never graded
+# advice from printed numbers for both arms; never graded
 def job_checks(
     job_id: str, facts: JobFacts, earlier: Sequence[tuple[str, JobFacts]]
 ) -> tuple[str, ...]:

@@ -158,7 +158,7 @@ class Tolerances(_Frozen):
         return v
 
 
-# Context: doc://onoda/promotion-gates@0001#zero-capability-tolerance — false-success tolerance is always zero
+# false-success tolerance is always zero
 def tolerance_for(metric: str, tolerances: Tolerances | None) -> Decimal | None:
     """The declared tolerance for `metric`, or None if undeclared (or no file was given).
 

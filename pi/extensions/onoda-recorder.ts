@@ -146,7 +146,7 @@ function gatewayDecision(policy: GatewayPolicy, toolName: string, input: Record<
 	if (!policy.allowed_tools.includes(toolName)) return `tool ${toolName} is not allowed by the gateway policy`;
 	const outside = pathDecision(policy, toolName, input);
 	if (outside) return outside;
-	// Context: doc://onoda/agent-sandbox@0002#sandbox-or-refuse — this then_run token filter is a check, not a boundary; the sandbox is the boundary
+	// this then_run token filter is a check, not a boundary; the sandbox is the boundary
 	const thenRun = input.then_run;
 	if (thenRun !== undefined && thenRun !== null) {
 		// Anything but {command: string} cannot be checked, so it never runs.

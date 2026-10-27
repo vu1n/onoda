@@ -51,7 +51,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 need() { [ -n "${!1:-}" ] || { echo "run.sh: $1 must be set explicitly (no default)" >&2; exit 2; }; }
 for v in PROVIDER MODEL CREDENTIAL_ENV MAX_REQUESTS MAX_COST_USD; do need "$v"; done
-# Context: doc://onoda/live-off-by-default@0002#live-settings-explicit — no live run without ENABLE_LIVE_EXECUTION=1 and every provider setting
+# no live run without ENABLE_LIVE_EXECUTION=1 and every provider setting
 if [ "${ENABLE_LIVE_EXECUTION:-}" != 1 ]; then
   echo "run.sh: ORCA execution is off; set ENABLE_LIVE_EXECUTION=1 to run ORCA on this host" >&2
   exit 2
@@ -104,7 +104,7 @@ if [ -n "${FAULT_PLAN:-}" ]; then
 fi
 store_args() {  # run id -> the run's agent store, evaluator store and ORCA cache
   if [ "$PARALLEL" = 1 ] && [ -n "${FAULT_PLAN:-}" ]; then
-    # Context: doc://onoda/broker-fault-injection@0001#injected-faults — pilot runs start from a fresh empty cache, no preseed
+    # pilot runs start from a fresh empty cache, no preseed
     echo "$OUT/store $OUT/evaluator $OUT/orca-caches/$1"
   elif [ "$PARALLEL" = 1 ]; then
     echo "$OUT/store $OUT/evaluator $OUT/orca-cache"
