@@ -3,7 +3,7 @@
 **Status: proposed, unratified, not implemented by this migration.**
 The current acceptance-only behavior remains in force.
 
-**Decision:** [Optimizer scope, revision 0002](../decisions/optimizer-scope/versions/v0002.md#seed-by-promotion-only)
+**Decision:** [Optimizer scope](../decisions/optimizer-scope.md#seed-by-promotion-only) (proposed against revision 0002)
 **Proposed by:** Claude, from the eval-design and hill-climbing review (project thread, 2026-10-08)   **Date:** 2026-10-08
 
 ## What should change

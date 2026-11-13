@@ -63,7 +63,7 @@ The stdlib-only helper is vendored from
 The `Feature map` workflow runs its pointer check on PRs, including drafts and docs-only
 changes. Existing product CI retains its draft/local-verified and prose-skip policy.
 
-[Decision context](../decisions/README.md) preserves all 22 prior current documents,
-their status labels, historical versions and A-row references. The
+[Decision context](../decisions/README.md) holds the 22 decision notes, their status labels
+and A-row references; earlier revisions are in Git history. The
 [optimizer validation-slice proposal](../proposals/optimizer-validation-slice.md) remains
 unratified. No runtime serialized provenance identifiers are changed by this migration.

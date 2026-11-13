@@ -11,16 +11,18 @@ remains **unratified**. Search trials still use acceptance cases only.
 
 ## Legacy identifiers
 
-Stored run records retain their `doc://` identifiers. For
-`doc://onoda/<id>@<revision>#<anchor>`, read `<id>/versions/v<revision>.md`
-below (numeric revisions are four digits); without a revision or for `draft`, read
-`<id>.md`. Anchors are preserved as HTML ids. In particular, the persisted
-`doc://onoda/vte-energy-tolerance#identified-within-tolerance` value still identifies
+Stored run records retain their `doc://` identifiers as data. For
+`doc://onoda/<id>[@<revision>]#<anchor>`, read `<id>.md` here; anchors are kept as
+HTML ids. In particular, the persisted
+`doc://onoda/vte-energy-tolerance#identified-within-tolerance` value identifies
 [vte-energy-tolerance.md](vte-energy-tolerance.md#identified-within-tolerance).
-No CLI or resolver is needed, and serialized records are unchanged.
+Earlier numbered revisions, amendment records and sign-offs are in Git history
+(under `docs/decisions/*/versions/` and `docs/decisions/history/` before their
+removal); serialized records are unchanged.
 
-The [assumptions register](../ASSUMPTIONS.md) retains A-row lookups. Earlier
-versions and [historical approvals](history/README.md) retain their original context.
+Change a note in the same pull request as the code that needs it, through ordinary
+review. There is no sign-off, pinning, amendment or ratification step. The
+[assumptions register](../ASSUMPTIONS.md) retains A-row lookups.
 
 ## Documents
 
