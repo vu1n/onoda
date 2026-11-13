@@ -1,0 +1,30 @@
+[
+  {
+    "old": [
+      114,
+      117,
+      120
+    ],
+    "strict_schema_valid": false,
+    "normalized_candidate": [
+      "115",
+      "118",
+      "121"
+    ],
+    "seconds": 2.083294374000616
+  },
+  {
+    "old": [
+      0,
+      1,
+      2
+    ],
+    "strict_schema_valid": false,
+    "normalized_candidate": [
+      "5",
+      "8",
+      "1"
+    ],
+    "seconds": 1.4521096179996675
+  }
+]

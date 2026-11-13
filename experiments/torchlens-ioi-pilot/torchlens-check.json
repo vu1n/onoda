@@ -1,0 +1,11 @@
+{
+  "torchlens_version": "3.0.3",
+  "trace_seconds": 2.387812119000955,
+  "no_op_max_abs_error": 0.0,
+  "residual_patch_max_abs_error": 0.0,
+  "head_patch": {
+    "status": "completed",
+    "max_logit_change": 0.2109222412109375,
+    "note": "v patch, not the output patch used in baseline search"
+  }
+}
