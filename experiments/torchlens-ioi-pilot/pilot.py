@@ -150,52 +150,59 @@ def evaluate(heads, split, kind, necessity=False):
     }
 
 
-fixed = [(9, 6), (9, 9), (10, 0)]
-candidates = [{"arm": "fixed_known_ioi", "heads": fixed, "search_evals": 0}]
-search = []
-for seed in [11, 22, 33]:
-    rng = random.Random(seed)
-    best = None
-    for trial in range(16):
-        heads = sorted(
-            rng.sample([(layer_index, h) for layer_index in range(12) for h in range(12)], 3)
+def main():
+    fixed = [(9, 6), (9, 9), (10, 0)]
+    candidates = [{"arm": "fixed_known_ioi", "heads": fixed, "search_evals": 0}]
+    search = []
+    for seed in [11, 22, 33]:
+        rng = random.Random(seed)
+        best = None
+        for trial in range(16):
+            heads = sorted(
+                rng.sample([(layer_index, h) for layer_index in range(12) for h in range(12)], 3)
+            )
+            res = evaluate(heads, "train", "swap")
+            v = {"seed": seed, "trial": trial, "heads": heads, **res}
+            search.append(v)
+            if best is None or res["fraction"] > best["fraction"]:
+                best = v
+        candidates.append(
+            {"arm": "random", "seed": seed, "heads": best["heads"], "search_evals": 16}
         )
-        res = evaluate(heads, "train", "swap")
-        v = {"seed": seed, "trial": trial, "heads": heads, **res}
-        search.append(v)
-        if best is None or res["fraction"] > best["fraction"]:
-            best = v
-    candidates.append({"arm": "random", "seed": seed, "heads": best["heads"], "search_evals": 16})
-    print("SEARCH", seed, best, flush=True)
-results = []
-for c in candidates:
-    for split in templates:
-        for kind in ["swap", "abc"]:
-            for necessity in [False, True]:
-                results.append(
-                    {
-                        **c,
-                        "split": split,
-                        "corruption": kind,
-                        "measure": "necessity" if necessity else "sufficiency",
-                        **evaluate(c["heads"], split, kind, necessity),
-                    }
-                )
-report = {
-    "model": "openai-community/gpt2",
-    "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
-    "torch": torch.__version__,
-    "cpu_threads": 2,
-    "controls": controls,
-    "data": rows,
-    "search": search,
-    "results": results,
-    "counts": counts,
-    "wall_seconds": time.perf_counter() - T,
-    "gepa": (
-        "Separate arm; see gepa-completed-seed11.json and RESULTS.md. "
-        "No GEPA inference follows from this baseline file."
-    ),
-}
-json.dump(report, open("results.json", "w"), indent=2)
-print("DONE", report["wall_seconds"], counts, flush=True)
+        print("SEARCH", seed, best, flush=True)
+    results = []
+    for c in candidates:
+        for split in templates:
+            for kind in ["swap", "abc"]:
+                for necessity in [False, True]:
+                    results.append(
+                        {
+                            **c,
+                            "split": split,
+                            "corruption": kind,
+                            "measure": "necessity" if necessity else "sufficiency",
+                            **evaluate(c["heads"], split, kind, necessity),
+                        }
+                    )
+    report = {
+        "model": "openai-community/gpt2",
+        "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "torch": torch.__version__,
+        "cpu_threads": 2,
+        "controls": controls,
+        "data": rows,
+        "search": search,
+        "results": results,
+        "counts": counts,
+        "wall_seconds": time.perf_counter() - T,
+        "gepa": (
+            "Separate arm; see gepa-completed-seed11.json and RESULTS.md. "
+            "No GEPA inference follows from this baseline file."
+        ),
+    }
+    json.dump(report, open("results.json", "w"), indent=2)
+    print("DONE", report["wall_seconds"], counts, flush=True)
+
+
+if __name__ == "__main__":
+    main()

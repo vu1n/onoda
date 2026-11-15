@@ -1,39 +1,46 @@
 # Separate, explicitly local reflective GEPA arm; no network/API calls.
+# ruff: noqa: E402 -- offline/preflight guards precede model-loading imports.
 import json
 import os
 import time
+from pathlib import Path
 
 os.environ["HF_HUB_OFFLINE"] = "1"
+SEEDS = [int(v) for v in os.environ.get("GEPA_SEEDS", "11").split(",")]
+if Path("gepa-guarded-results.json").exists() or any(
+    Path(f"gepa-guarded-seed-{seed}").exists() for seed in SEEDS
+):
+    raise FileExistsError("Use a fresh working directory; guarded runs do not resume")
+T = time.perf_counter()
 import gepa
 import pilot as p
 import torch
 from gepa.core.adapter import EvaluationBatch
+from search_control import BatchCache, ProposalGuard, parse
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-T = time.perf_counter()
+pilot_setup_seconds = time.perf_counter() - T
 tok = AutoTokenizer.from_pretrained("reflector", local_files_only=True)
 lm = AutoModelForCausalLM.from_pretrained("reflector", local_files_only=True).eval()
+reflector_setup_seconds = time.perf_counter() - T - pilot_setup_seconds
 proposals = []
 evals = []
-
-
-def parse(text):
-    text = text.strip().removeprefix("```json").removesuffix("```").strip()
-    a = json.loads(text)
-    # Lossless normalization of decimal digit strings is allowed, logged, not a proposal rewrite.
-    a = [int(v) if isinstance(v, str) and v.isdigit() else v for v in a]
-    assert len(a) == 3 and len(set(a)) == 3 and all(type(v) is int and 0 <= v < 144 for v in a)
-    return a
+cache_runs = []
 
 
 class Adapter:
     propose_new_texts = None
 
+    def __init__(self):
+        self.cache = BatchCache(self._evaluate)
+
     def evaluate(self, batch, candidate, capture_traces=False):
+        return self.cache(batch, candidate, capture_traces)
+
+    def _evaluate(self, batch, candidate, capture_traces=False):
         ids = parse(candidate["heads"])
         heads = [divmod(v, 12) for v in ids]
-        outputs = []
-        scores = []
+        by_position = {}
         for split in sorted(set(s for s, i in batch)):
             inds = [i for s, i in batch if s == split]
             a = p.D[split]["clean"]
@@ -41,12 +48,14 @@ class Adapter:
             x = {k: v[inds] for k, v in b[0].items()}
             src = {k: v[inds] for k, v in a[4].items()}
             g, _ = p.run(x, b[1][inds], [b[2][i] for i in inds], patch=heads, source=src)
-            for i, gg in zip(inds, g, strict=True):
+            positions = [pos for pos, (s, _) in enumerate(batch) if s == split]
+            for pos, i, gg in zip(positions, inds, g, strict=True):
                 den = float((a[3] - b[3]).mean())
                 score = float((gg - b[3][i]) / den)
                 out = {"split": split, "index": i, "score": score, "heads": ids}
-                outputs.append(out)
-                scores.append(score)
+                by_position[pos] = out
+        outputs = [by_position[pos] for pos in range(len(batch))]
+        scores = [out["score"] for out in outputs]
         evals.append({"candidate": ids, "batch": batch, "scores": scores})
         return EvaluationBatch(outputs, scores, outputs if capture_traces else None)
 
@@ -65,8 +74,7 @@ class Adapter:
         }
 
 
-def propose(candidate, reflective_dataset, components_to_update):
-    old = parse(candidate["heads"])
+def generate(candidate, reflective_dataset, components_to_update):
     prompt = (
         "You propose attention circuit experiments. Each head ID is an integer 0 to 143 "
         "(layer * 12 + head). Candidate has exactly three distinct IDs. Goal maximize recovered "
@@ -79,7 +87,6 @@ def propose(candidate, reflective_dataset, components_to_update):
         return_tensors="pt",
         return_dict=False,
     )
-    start = time.perf_counter()
     with torch.no_grad():
         out = lm.generate(
             inp,
@@ -90,39 +97,37 @@ def propose(candidate, reflective_dataset, components_to_update):
             pad_token_id=tok.eos_token_id,
         )
     text = tok.decode(out[0, inp.shape[1] :], skip_special_tokens=True)
-    try:
-        ids = parse(text)
-        valid = True
-    except Exception:
-        ids = old
-        valid = False
-    proposals.append({"normalized": ids, "valid": valid, "seconds": time.perf_counter() - start})
-    return {"heads": json.dumps(ids)}
+    return text
 
 
 # Smoke normalization is necessary but does not establish useful reflection.
 smoke = json.load(open("reflector-smoke-summary.json"))
 assert all([int(v) for v in x["normalized_candidate"]] != x["old"] for x in smoke)
 results = []
-for seed in [int(v) for v in os.environ.get("GEPA_SEEDS", "11").split(",")]:
+for seed in SEEDS:
     torch.manual_seed(seed)
     before = len(evals)
-    propbefore = len(proposals)
+    adapter = Adapter()
+    guard = ProposalGuard(generate, int(os.environ.get("GEPA_MAX_PROPOSALS", "30")))
     result = gepa.optimize(
         seed_candidate={"heads": "[114,117,120]"},
         trainset=[("train", i) for i in range(8)],
         valset=[("val", i) for i in range(8)],
-        adapter=Adapter(),
-        custom_candidate_proposer=propose,
+        adapter=adapter,
+        custom_candidate_proposer=guard,
+        stop_callbacks=guard.stopped,
         max_metric_calls=128,
         reflection_minibatch_size=2,
         skip_perfect_score=False,
         seed=seed,
-        run_dir=f"gepa-attempt2-seed-{seed}",
+        run_dir=f"gepa-guarded-seed-{seed}",
         display_progress_bar=False,
     )
+    proposals.extend(guard.records)
     ids = parse(result.best_candidate["heads"])
-    n = sum(len(v["batch"]) for v in evals[before:])
+    n = sum(v["examples"] for v in adapter.cache.records)
+    physical_n = sum(len(v["batch"]) for v in evals[before:])
+    cache_runs.append({"seed": seed, "requests": adapter.cache.records})
     heads = [divmod(v, 12) for v in ids]
     for kind in ["swap", "abc"]:
         for necessity in [False, True]:
@@ -131,7 +136,8 @@ for seed in [int(v) for v in os.environ.get("GEPA_SEEDS", "11").split(",")]:
                     "seed": seed,
                     "heads": heads,
                     "metric_examples": n,
-                    "proposal_count": len(proposals) - propbefore,
+                    "physical_metric_examples": physical_n,
+                    "proposal_count": len(guard.records),
                     "corruption": kind,
                     "measure": "necessity" if necessity else "sufficiency",
                     **p.evaluate(heads, "test", kind, necessity),
@@ -143,8 +149,12 @@ for seed in [int(v) for v in os.environ.get("GEPA_SEEDS", "11").split(",")]:
             "proposals": proposals,
             "evals": evals,
             "wall_seconds": time.perf_counter() - T,
+            "cache": cache_runs,
+            "pilot_setup_seconds": pilot_setup_seconds,
+            "reflector_setup_seconds": reflector_setup_seconds,
+            "budget_note": "GEPA logical examples unchanged; evals records physical misses",
         },
-        open("gepa-results.json", "w"),
+        open("gepa-guarded-results.json", "w"),
         indent=2,
     )
     print("GEPA DONE", seed, ids, n, flush=True)
